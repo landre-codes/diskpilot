@@ -85,6 +85,10 @@ class FadeStack(QStackedWidget):
 
 
 class MainWindow(QWidget):
+    #: Faixa de redimensionamento nativa (px) a partir da borda da janela.
+    #: Fica dentro da margem transparente de 6 px + 2 px de folga.
+    RESIZE_BORDER = 8
+
     def __init__(
         self,
         config: AppConfig,
@@ -120,7 +124,8 @@ class MainWindow(QWidget):
         self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setAcceptDrops(True)
-        self.setMinimumSize(1120, 700)
+        # Piso absoluto; _restore_geometry ajusta ao tamanho real da tela.
+        self.setMinimumSize(880, 540)
         self.setMouseTracking(True)
         self._build_ui()
         self._connect()
@@ -410,7 +415,7 @@ class MainWindow(QWidget):
         edges = Qt.Edges()
         if self.isMaximized() or self.isFullScreen():
             return edges
-        margin = 10
+        margin = self.RESIZE_BORDER
         if pos.x() <= margin:
             edges |= Qt.LeftEdge
         elif pos.x() >= self.width() - margin:
@@ -502,7 +507,7 @@ class MainWindow(QWidget):
                         x = ctypes.c_short(msg.lParam & 0xFFFF).value
                         y = ctypes.c_short((msg.lParam >> 16) & 0xFFFF).value
                         local = self.mapFromGlobal(QPoint(x, y))
-                        border = 10
+                        border = self.RESIZE_BORDER
                         left = local.x() < border
                         right = local.x() >= self.width() - border
                         top = local.y() < border
@@ -532,36 +537,67 @@ class MainWindow(QWidget):
 
     # ------------------------------------------------------------ geometria
     def _restore_geometry(self) -> None:
-        avail = (
-            QGuiApplication.primaryScreen().availableGeometry()
-            if QGuiApplication.primaryScreen()
-            else QRect(0, 0, 1366, 768)
-        )
-        default_w = min(1600, max(1120, int(avail.width() * 0.75)))
-        default_h = min(980, max(700, int(avail.height() * 0.82)))
-        rect = QRect(
-            avail.center().x() - default_w // 2,
-            avail.center().y() - default_h // 2,
-            default_w,
-            default_h,
-        )
+        primary = QGuiApplication.primaryScreen()
+        avail = primary.availableGeometry() if primary else QRect(0, 0, 1366, 768)
+        rect = self._default_geometry(avail)
+
         saved = self.config.get("geometry", None)
+        saved_rect: QRect | None = None
         if isinstance(saved, (list, tuple)) and len(saved) == 4:
             try:
                 candidate = QRect(
                     int(saved[0]), int(saved[1]), int(saved[2]), int(saved[3])
                 )
                 if candidate.width() >= 600 and candidate.height() >= 500:
+                    saved_rect = candidate
                     rect = candidate
             except (TypeError, ValueError):
                 pass
-        rect.setWidth(max(1120, min(rect.width(), max(1120, avail.width()))))
-        rect.setHeight(max(700, min(rect.height(), max(700, avail.height()))))
-        screen = QGuiApplication.screenAt(rect.center())
-        if screen is None:
-            avail2 = QGuiApplication.primaryScreen().availableGeometry()
-            rect.moveCenter(avail2.center())
-        self.setGeometry(rect)
+
+        # A geometria salva pode vir de outro monitor ou de uma tela maior.
+        target = QGuiApplication.screenAt(rect.center()) or primary
+        if target is not None:
+            avail = target.availableGeometry()
+        min_w, min_h = self._screen_limits(avail)
+        self.setMinimumSize(min_w, min_h)
+
+        if saved_rect is not None:
+            rect.setWidth(min(saved_rect.width(), max(min_w, avail.width() - 32)))
+            rect.setHeight(min(saved_rect.height(), max(min_h, avail.height() - 32)))
+
+        self.setGeometry(self._fit_rect(rect, avail, min_w, min_h))
+
+    @classmethod
+    def _default_geometry(cls, avail: QRect) -> QRect:
+        """Tamanho inicial confortável, limitado à área útil da tela."""
+        min_w, min_h = cls._screen_limits(avail)
+        max_w = max(min_w, avail.width() - 32)
+        max_h = max(min_h, avail.height() - 32)
+        width = min(1600, max(1120, int(avail.width() * 0.75)), max_w)
+        height = min(980, max(700, int(avail.height() * 0.82)), max_h)
+        rect = QRect(0, 0, width, height)
+        rect.moveCenter(avail.center())
+        return rect
+
+    @staticmethod
+    def _screen_limits(avail: QRect) -> tuple[int, int]:
+        """Menor tamanho utilizável, limitado ao que a tela oferece."""
+        min_w = min(1120, max(880, avail.width() - 32))
+        min_h = min(700, max(540, avail.height() - 32))
+        return min(min_w, avail.width()), min(min_h, avail.height())
+
+    @staticmethod
+    def _fit_rect(rect: QRect, avail: QRect, min_w: int, min_h: int) -> QRect:
+        """Encaixa ``rect`` dentro de ``avail``.
+
+        Garante que a barra de título (e os botões de janela) fiquem dentro da
+        área visível, mesmo quando a geometria salva veio de uma tela maior.
+        """
+        w = min(max(rect.width(), min_w), avail.width())
+        h = min(max(rect.height(), min_h), avail.height())
+        x = min(max(rect.x(), avail.left()), avail.right() - w + 1)
+        y = min(max(rect.y(), avail.top()), avail.bottom() - h + 1)
+        return QRect(x, y, w, h)
 
     def _save_geometry(self) -> None:
         geo = (

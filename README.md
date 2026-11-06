@@ -300,6 +300,7 @@ class ClientesPage(BasePage):
 - As estimativas de limpeza não são destrutivas e podem se sobrepor; os cálculos já evitam contar arquivos de cache duas vezes e mostram "seguro" separado de "revisar".
 - O logo e o avatar são copiados com `shutil`, não vinculados ao arquivo original.
 - `qt-material` fornece a base do tema; o QSS em `theme.py` sobrescreve o que é necessário (especialmente `text-transform`, hovers e cores semânticas) para manter a identidade do app.
+- A geometria inicial e a restaurada são limitadas à área útil da tela: em notebooks pequenos (ou com escala de 125%/150%) a janela não nasce maior que o monitor, então a barra de título e os botões de janela continuam clicáveis. O tamanho mínimo também se adapta ao monitor.
 
 ---
 

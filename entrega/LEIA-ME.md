@@ -1,10 +1,10 @@
-# DiskPilot 1.3.0 — pacote de transporte em texto
+# DiskPilot 1.3.1 — pacote de transporte em texto
 
 Esta pasta existe para levar o projeto para um ambiente onde **só é possível
 copiar texto** (sem clone, sem ZIP, sem download de release).
 
 O conteúdo não é o código-fonte legível: é o projeto inteiro compactado
-(`tar.xz`, 58.964 bytes) e codificado em **Base85**, dividido em 4 partes de
+(`tar.xz`, 61.476 bytes) e codificado em **Base85**, dividido em 4 partes de
 texto ASCII. O script `restaurar_diskpilot.py` remonta o arquivo, confere o
 SHA-256 e extrai a pasta `DiskPilot/`.
 
@@ -12,15 +12,15 @@ SHA-256 e extrai a pasta `DiskPilot/`.
 
 | Arquivo | Bytes | SHA-256 (sem espaços/quebras) |
 |---|---|---|
-| `parte1.txt` | 18.735 | `e86f83f0420ca736b12c3a0ed026963d03b220c852b574cfb516e60ba9cef8da` |
-| `parte2.txt` | 18.735 | `fe8960f27d108bd9980fedc9a2d8dddafed206a9ae310ae25c46896d1f1672d1` |
-| `parte3.txt` | 18.735 | `1f5db1a323cfa75f7b53e87b54fc740e0af470088e2c12b9b96b284fc08d6364` |
-| `parte4.txt` | 18.732 | `c7d4abd5789d54808ee305c827f106ea809859192b59c6adfca838034a9357ea` |
+| `parte1.txt` | 19.534 | `1e70f8739ac16fa7d419b7af731ced6e6f2e5c3b76c36639890d050b49fe743f` |
+| `parte2.txt` | 19.534 | `9386cf63973ed5cd0651dbc61022bb4e236cc94fd86f5ff6524c6c18cc45be3a` |
+| `parte3.txt` | 19.534 | `e41859ce071859e9d8ef0bbe6d650ce1726382f5cd8cace2230cbd09c2b14fe4` |
+| `parte4.txt` | 19.531 | `ee8b36c946761ea6d33717ef3b4622b3b53f514b37c4292a2b5e5bd652edd6b4` |
 
 SHA-256 do `tar.xz` reconstruído (verificado pelo script):
 
 ```text
-bc3ceae55e2be5fe44a442269e3a535dfa6c823221c586ca01227f9939549968
+5162ef63f3100dc8f29e67ed0bfa97b3e254b4823ad8d1d0c195a9dfa2ecad31
 ```
 
 ## Como usar
@@ -45,7 +45,7 @@ bc3ceae55e2be5fe44a442269e3a535dfa6c823221c586ca01227f9939549968
 5. Confirme no `diskpilot.log`:
 
    ```text
-   iniciando DiskPilot 1.3.0
+   iniciando DiskPilot 1.3.1
    ```
 
 ## Diagnóstico
@@ -56,27 +56,25 @@ Se a integridade falhar, descubra qual parte está truncada:
 py -c "from pathlib import Path; [print(p.name, len(''.join(p.read_text(encoding='ascii').split()))) for p in sorted(Path('.').glob('parte*.txt'))]"
 ```
 
-Esperado: `parte1.txt 18427`, `parte2.txt 18427`, `parte3.txt 18427`,
-`parte4.txt 18424`.
+Esperado: `parte1.txt 19212`, `parte2.txt 19212`, `parte3.txt 19212`,
+`parte4.txt 19209`.
 
 ## Observações
 
 - Nenhum arquivo ou pasta é apagado pelo DiskPilot; ele é somente leitura.
-- O código é distribuído sob licença **MIT** (`LICENSE`); as dependências
-  mantêm suas licenças — inventário em `THIRD-PARTY.md`.
 - O pacote não inclui `.venv`, `dist`, caches ou logs.
 - As dependências `qt-material` e `qtawesome` são instaladas por `pip`;
   `PySide6` já precisa existir no ambiente.
-- Este pacote é gerado a partir do commit `v1.3.0` deste repositório.
+- O código é distribuído sob licença **MIT** (`LICENSE`); as dependências
+  mantêm suas licenças — inventário em `THIRD-PARTY.md`.
+- Este pacote é gerado a partir do commit `v1.3.1` deste repositório.
 
 ## URL dos arquivos crus
 
-Com o repositório publicado, o padrão é:
-
 ```text
-https://raw.githubusercontent.com/<usuario>/<repo>/main/entrega/parte1.txt
-https://raw.githubusercontent.com/<usuario>/<repo>/main/entrega/parte2.txt
-https://raw.githubusercontent.com/<usuario>/<repo>/main/entrega/parte3.txt
-https://raw.githubusercontent.com/<usuario>/<repo>/main/entrega/parte4.txt
-https://raw.githubusercontent.com/<usuario>/<repo>/main/entrega/restaurar_diskpilot.py
+https://raw.githubusercontent.com/landre-codes/diskpilot/main/entrega/parte1.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/main/entrega/parte2.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/main/entrega/parte3.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/main/entrega/parte4.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/main/entrega/restaurar_diskpilot.py
 ```
