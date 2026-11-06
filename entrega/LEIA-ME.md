@@ -62,6 +62,8 @@ Esperado: `parte1.txt 18427`, `parte2.txt 18427`, `parte3.txt 18427`,
 ## Observações
 
 - Nenhum arquivo ou pasta é apagado pelo DiskPilot; ele é somente leitura.
+- O código é distribuído sob licença **MIT** (`LICENSE`); as dependências
+  mantêm suas licenças — inventário em `THIRD-PARTY.md`.
 - O pacote não inclui `.venv`, `dist`, caches ou logs.
 - As dependências `qt-material` e `qtawesome` são instaladas por `pip`;
   `PySide6` já precisa existir no ambiente.

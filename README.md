@@ -310,3 +310,23 @@ class ClientesPage(BasePage):
 - O redimensionamento nativo por `WM_NCHITTEST` é específico do Windows; o fallback manual cobre outras plataformas.
 - Para volumes muito grandes (milhões de itens), considere persistir a árvore em SQLite ou manter uma indexação incremental.
 - O shell pode receber novas páginas sem alterações na janela principal.
+
+---
+
+## Licença
+
+O código original do DiskPilot é distribuído sob a **licença MIT** — veja
+[`LICENSE`](LICENSE).
+
+As dependências mantêm suas próprias licenças e **não** são relicenciadas por
+este projeto. As principais:
+
+| Componente | Licença |
+|---|---|
+| PySide6 / Qt (via PySide6-Essentials, shiboken6) | LGPL-3.0-only (ou GPL / comercial) |
+| qt-material | BSD-2-Clause |
+| qtawesome | MIT |
+| Material Design Icons (fonte usada nos ícones) | Apache-2.0 |
+
+O inventário completo, com as obrigações da LGPLv3 em caso de redistribuição
+binária do aplicativo, está em [`THIRD-PARTY.md`](THIRD-PARTY.md).
