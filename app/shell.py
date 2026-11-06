@@ -116,6 +116,14 @@ class MainWindow(QWidget):
         self._shell_state: tuple[bool, bool] = (False, False)
         self._applying_state = False
         self._update_reasons: set[str] = set()
+        # Maximização é gerenciada por nós: em janelas sem moldura o
+        # normalGeometry() do Qt pode voltar maior que a tela após restaurar.
+        self._maximized = False
+        self._adopting_native = False
+        self._start_fullscreen = False
+        self._normal_geometry = QRect()
+        self._pending_geometry: QRect | None = None
+        self._geometry_fixes = 0
 
         self.setWindowTitle(APP_NAME)
         icon_path = Path(__file__).resolve().parent / "assets" / "app_icon.svg"
@@ -131,6 +139,7 @@ class MainWindow(QWidget):
         self._connect()
         self._setup_shortcuts()
         self._restore_geometry()
+        self._prepare_initial_state()
         self._apply_window_state()
         self._theme_changed(self.theme.key)
         if self.page_specs:
@@ -301,8 +310,8 @@ class MainWindow(QWidget):
             return
         self._applying_state = True
         try:
-            maximized = self.isMaximized() or self.isFullScreen()
-            self._shell_state = (self.isMaximized(), self.isFullScreen())
+            maximized = self._maximized or self.isFullScreen()
+            self._shell_state = (self._maximized, self.isFullScreen())
             margins = 0 if maximized else 6
             self.layout().setContentsMargins(margins, margins, margins, margins)
             self.shell.setProperty("windowMaximized", maximized)
@@ -315,34 +324,143 @@ class MainWindow(QWidget):
             self._applying_state = False
             self._resume_updates("state")
 
+    def _schedule_state_update(self) -> None:
+        self._suspend_updates("state")
+        QTimer.singleShot(0, self._apply_window_state)
+        QTimer.singleShot(1500, lambda: self._resume_updates("state"))
+
     def changeEvent(self, event: QEvent) -> None:  # noqa: N802
         if event.type() == QEvent.WindowStateChange and hasattr(self, "shell"):
-            state = (self.isMaximized(), self.isFullScreen())
-            if state != self._shell_state:
-                self._shell_state = state
-                self._suspend_updates("state")
-                QTimer.singleShot(0, self._apply_window_state)
-                QTimer.singleShot(1500, lambda: self._resume_updates("state"))
+            if self.isMaximized() and not self._maximized and not self._adopting_native:
+                # O Windows maximizou por fora (Win+↑, menu da barra de tarefas).
+                # Convertemos para a nossa maximização, que conhece a tela.
+                self._adopt_native_maximize()
+            elif (
+                not self.isMaximized()
+                and not self.isFullScreen()
+                and self._maximized
+                and not self._adopting_native
+            ):
+                # Saiu do maximizado por fora (Win+↓).
+                self._maximized = False
+                self._schedule_state_update()
+            elif self.isFullScreen() != self._shell_state[1]:
+                self._schedule_state_update()
         super().changeEvent(event)
+
+    def _adopt_native_maximize(self) -> None:
+        self._adopting_native = True
+        try:
+            self._maximized = True
+            self._suspend_updates("state")
+            # setGeometry tira a janela do estado nativo e assume o controle.
+            self._apply_window_state()
+            self._set_geometry_exact(self._max_area())
+        finally:
+            self._adopting_native = False
+            self._resume_updates("state")
+
+    def _max_area(self) -> QRect:
+        screen = self.screen() or QGuiApplication.primaryScreen()
+        if screen is None:
+            return QRect(0, 0, 1366, 768)
+        if self.isFullScreen():
+            return screen.geometry()
+        return screen.availableGeometry()
 
     def toggle_maximize(self) -> None:
         if self.isFullScreen():
             self.showNormal()
+            QTimer.singleShot(0, self._reapply_maximized)
             return
-        if self.isMaximized():
-            self.showNormal()
+        if self._maximized:
+            self._restore_normal()
         else:
-            self.showMaximized()
+            self._maximize()
+
+    def _maximize(self) -> None:
+        if self._maximized:
+            return
+        self._normal_geometry = QRect(self.geometry())
+        self._maximized = True
+        self._apply_window_state()
+        self._set_geometry_exact(self._max_area())
+
+    def _restore_normal(self) -> None:
+        if not self._maximized:
+            return
+        self._maximized = False
+        self._apply_window_state()
+        screen = (
+            QGuiApplication.screenAt(self._normal_geometry.center())
+            or self.screen()
+            or QGuiApplication.primaryScreen()
+        )
+        if screen is not None:
+            avail = screen.availableGeometry()
+        else:
+            avail = QRect(0, 0, 1366, 768)
+        min_w, min_h = self._screen_limits(avail)
+        self.setMinimumSize(min_w, min_h)
+        rect = (
+            QRect(self._normal_geometry)
+            if self._normal_geometry.isValid()
+            else self._default_geometry(avail)
+        )
+        self._set_geometry_exact(self._fit_rect(rect, avail, min_w, min_h))
+
+    def _set_geometry_exact(self, rect: QRect) -> None:
+        """Aplica a geometria e neutraliza o salto do layout.
+
+        Depois de um ``LayoutRequest`` o Qt pode redimensionar a janela para o
+        tamanho preferido do layout no ciclo seguinte — o que estoura a tela em
+        notebooks. A geometria é reaplicada em ``resizeEvent`` enquanto a
+        correção estiver armada, sem piscar.
+        """
+        layout = self.layout()
+        if layout is not None:
+            layout.activate()
+        self._pending_geometry = QRect(rect)
+        self._geometry_fixes = 0
+        self._suspend_updates("geometry")
+        self.setGeometry(rect)
+        QTimer.singleShot(0, self._settle_geometry)
+
+    def _settle_geometry(self) -> None:
+        self._resume_updates("geometry")
+        QTimer.singleShot(300, self._clear_pending_geometry)
+
+    def _clear_pending_geometry(self) -> None:
+        self._pending_geometry = None
+
+    def _reapply_maximized(self) -> None:
+        if self._maximized and not self.isFullScreen():
+            self._apply_window_state()
+            self._set_geometry_exact(self._max_area())
 
     def toggle_fullscreen(self) -> None:
         if self.isFullScreen():
             self.showNormal()
+            if self._maximized:
+                QTimer.singleShot(0, self._reapply_maximized)
         else:
             self.showFullScreen()
+
+    def _prepare_initial_state(self) -> None:
+        """Aplica o estado salvo antes do primeiro show, sem piscar."""
+        state = str(self.config.get("window_state", "normal"))
+        if state == "maximized":
+            self._normal_geometry = QRect(self.geometry())
+            self._maximized = True
+            self._set_geometry_exact(self._max_area())
+        elif state == "fullscreen":
+            self._start_fullscreen = True
 
     def keyPressEvent(self, event) -> None:  # noqa: N802
         if event.key() == Qt.Key_Escape and self.isFullScreen():
             self.showNormal()
+            if self._maximized:
+                QTimer.singleShot(0, self._reapply_maximized)
             return
         super().keyPressEvent(event)
 
@@ -350,17 +468,15 @@ class MainWindow(QWidget):
         super().showEvent(event)
         if self._first_show:
             self._first_show = False
-            state = str(self.config.get("window_state", "normal"))
-            if state == "maximized":
-                QTimer.singleShot(0, self.showMaximized)
-            elif state == "fullscreen":
-                QTimer.singleShot(0, self.showFullScreen)
+            if self._start_fullscreen:
+                self._start_fullscreen = False
+                self.showFullScreen()
 
     # ---------------------------------------------------------------- drag
     def _start_drag(self, global_pos: QPoint) -> None:
         if self.isFullScreen():
             return
-        if self.isMaximized():
+        if self._maximized or self.isMaximized():
             self._pending_restore_pos = global_pos
             return
         self._pending_restore_pos = None
@@ -368,9 +484,14 @@ class MainWindow(QWidget):
         self._manual_drag = True
 
     def _restore_for_drag(self, global_pos: QPoint) -> None:
+        normal = (
+            QRect(self._normal_geometry)
+            if self._normal_geometry.isValid()
+            else QRect(self.geometry())
+        )
         ratio = (global_pos.x() - self.geometry().x()) / max(1, self.width())
-        width = max(self.minimumWidth(), self.normalGeometry().width())
-        height = max(self.minimumHeight(), self.normalGeometry().height())
+        width = max(self.minimumWidth(), normal.width())
+        height = max(self.minimumHeight(), normal.height())
         x = int(global_pos.x() - width * ratio)
         y = int(global_pos.y() - 30)
         screen = QGuiApplication.screenAt(global_pos) or QGuiApplication.primaryScreen()
@@ -378,8 +499,9 @@ class MainWindow(QWidget):
             avail = screen.availableGeometry()
             x = max(avail.left(), min(x, avail.right() - width + 1))
             y = max(avail.top(), min(y, avail.bottom() - height + 1))
-        self.showNormal()
-        self.setGeometry(x, y, width, height)
+        self._maximized = False
+        self._apply_window_state()
+        self._set_geometry_exact(QRect(x, y, width, height))
         self._drag_offset = global_pos - self.frameGeometry().topLeft()
 
     def _drag_move(self, global_pos: QPoint) -> None:
@@ -413,7 +535,7 @@ class MainWindow(QWidget):
 
     def _edges_at(self, pos: QPoint) -> Qt.Edges:
         edges = Qt.Edges()
-        if self.isMaximized() or self.isFullScreen():
+        if self._maximized or self.isMaximized() or self.isFullScreen():
             return edges
         margin = self.RESIZE_BORDER
         if pos.x() <= margin:
@@ -479,11 +601,39 @@ class MainWindow(QWidget):
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
+        target = self._pending_geometry
+        if target is not None and self.geometry() != target and self._geometry_fixes < 4:
+            # O layout tentou impor o tamanho preferido; volta ao alvo.
+            self._geometry_fixes += 1
+            self.setGeometry(target)
+            return
+        self._remember_normal_geometry()
         if hasattr(self, "_toast") and self._toast.isVisible():
             self._toast.move(
                 max(20, self.width() - self._toast.width() - 24),
                 max(20, self.height() - self._toast.height() - 24),
             )
+
+    def moveEvent(self, event) -> None:  # noqa: N802
+        super().moveEvent(event)
+        self._remember_normal_geometry()
+
+    def _remember_normal_geometry(self) -> None:
+        """Guarda a geometria "normal" para restaurar sem depender do Qt.
+
+        Em janelas sem moldura o ``normalGeometry()`` do Qt pode crescer a cada
+        ciclo maximizar/restaurar e devolver um retângulo maior que a tela.
+        """
+        if (
+            self._applying_state
+            or self._maximized
+            or self.isMaximized()
+            or self.isFullScreen()
+            or self.isMinimized()
+            or not self.isVisible()
+        ):
+            return
+        self._normal_geometry = QRect(self.geometry())
 
     # ------------------------------------------------- hit test nativo (Win)
     def nativeEvent(self, eventType, message):  # noqa: N802
@@ -501,6 +651,7 @@ class MainWindow(QWidget):
                     msg = wintypes.MSG.from_address(int(message))
                     if (
                         msg.message == 0x0084  # WM_NCHITTEST
+                        and not self._maximized
                         and not self.isMaximized()
                         and not self.isFullScreen()
                     ):
@@ -565,7 +716,7 @@ class MainWindow(QWidget):
             rect.setWidth(min(saved_rect.width(), max(min_w, avail.width() - 32)))
             rect.setHeight(min(saved_rect.height(), max(min_h, avail.height() - 32)))
 
-        self.setGeometry(self._fit_rect(rect, avail, min_w, min_h))
+        self._set_geometry_exact(self._fit_rect(rect, avail, min_w, min_h))
 
     @classmethod
     def _default_geometry(cls, avail: QRect) -> QRect:
@@ -600,17 +751,17 @@ class MainWindow(QWidget):
         return QRect(x, y, w, h)
 
     def _save_geometry(self) -> None:
-        geo = (
-            self.normalGeometry()
-            if self.isMaximized() or self.isFullScreen()
-            else self.geometry()
-        )
+        maximized = self._maximized or self.isMaximized()
+        if (maximized or self.isFullScreen()) and self._normal_geometry.isValid():
+            geo = QRect(self._normal_geometry)
+        else:
+            geo = QRect(self.geometry())
         self.config.set(
             "geometry", [geo.x(), geo.y(), geo.width(), geo.height()], save=False
         )
         if self.isFullScreen():
             state = "fullscreen"
-        elif self.isMaximized():
+        elif maximized:
             state = "maximized"
         else:
             state = "normal"

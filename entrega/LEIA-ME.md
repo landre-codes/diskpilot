@@ -1,10 +1,10 @@
-# DiskPilot 1.3.1 — pacote de transporte em texto
+# DiskPilot 1.3.2 — pacote de transporte em texto
 
 Esta pasta existe para levar o projeto para um ambiente onde **só é possível
 copiar texto** (sem clone, sem ZIP, sem download de release).
 
 O conteúdo não é o código-fonte legível: é o projeto inteiro compactado
-(`tar.xz`, 61.476 bytes) e codificado em **Base85**, dividido em 4 partes de
+(`tar.xz`, 62.480 bytes) e codificado em **Base85**, dividido em 4 partes de
 texto ASCII. O script `restaurar_diskpilot.py` remonta o arquivo, confere o
 SHA-256 e extrai a pasta `DiskPilot/`.
 
@@ -12,15 +12,15 @@ SHA-256 e extrai a pasta `DiskPilot/`.
 
 | Arquivo | Bytes | SHA-256 (sem espaços/quebras) |
 |---|---|---|
-| `parte1.txt` | 19.534 | `1e70f8739ac16fa7d419b7af731ced6e6f2e5c3b76c36639890d050b49fe743f` |
-| `parte2.txt` | 19.534 | `9386cf63973ed5cd0651dbc61022bb4e236cc94fd86f5ff6524c6c18cc45be3a` |
-| `parte3.txt` | 19.534 | `e41859ce071859e9d8ef0bbe6d650ce1726382f5cd8cace2230cbd09c2b14fe4` |
-| `parte4.txt` | 19.531 | `ee8b36c946761ea6d33717ef3b4622b3b53f514b37c4292a2b5e5bd652edd6b4` |
+| `parte1.txt` | 19.851 | `0cc8c16b010a058420425f5a0dded8779772352f8400e43eb8fc7adba3acfa9b` |
+| `parte2.txt` | 19.851 | `cf13716d0863179a4feac72c00344d717a51e9f629b966b32282341a1c69f248` |
+| `parte3.txt` | 19.851 | `42c918c33d6093b0ae92c6740264d2ce248c3572e18f69ef827a5d14776416cf` |
+| `parte4.txt` | 19.851 | `c2648f57d3b3438c167a9ee2ac1595dae6730a68e2fb91b0c824551a4fdcc6df` |
 
 SHA-256 do `tar.xz` reconstruído (verificado pelo script):
 
 ```text
-5162ef63f3100dc8f29e67ed0bfa97b3e254b4823ad8d1d0c195a9dfa2ecad31
+e5904e993f5fbc62df15d1cefe0805278214269e01b19ea1d539438dde92643e
 ```
 
 ## Como usar
@@ -45,7 +45,7 @@ SHA-256 do `tar.xz` reconstruído (verificado pelo script):
 5. Confirme no `diskpilot.log`:
 
    ```text
-   iniciando DiskPilot 1.3.1
+   iniciando DiskPilot 1.3.2
    ```
 
 ## Diagnóstico
@@ -56,8 +56,7 @@ Se a integridade falhar, descubra qual parte está truncada:
 py -c "from pathlib import Path; [print(p.name, len(''.join(p.read_text(encoding='ascii').split()))) for p in sorted(Path('.').glob('parte*.txt'))]"
 ```
 
-Esperado: `parte1.txt 19212`, `parte2.txt 19212`, `parte3.txt 19212`,
-`parte4.txt 19209`.
+Esperado: `19525` nas quatro partes.
 
 ## Observações
 
@@ -67,7 +66,9 @@ Esperado: `parte1.txt 19212`, `parte2.txt 19212`, `parte3.txt 19212`,
   `PySide6` já precisa existir no ambiente.
 - O código é distribuído sob licença **MIT** (`LICENSE`); as dependências
   mantêm suas licenças — inventário em `THIRD-PARTY.md`.
-- Este pacote é gerado a partir do commit `v1.3.1` deste repositório.
+- Esta versão corrige a geometria em telas pequenas e o ciclo
+  maximizar/restaurar (a janela não volta maior que a tela).
+- Este pacote é gerado a partir do commit `v1.3.2` deste repositório.
 
 ## URL dos arquivos crus
 

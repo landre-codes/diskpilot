@@ -7,7 +7,7 @@ import tarfile
 PARTES = [Path(f"parte{i}.txt") for i in range(1, 5)]
 raw = "".join(p.read_text(encoding="ascii") for p in PARTES)
 payload = base64.b85decode("".join(raw.split()))
-esperado = "5162ef63f3100dc8f29e67ed0bfa97b3e254b4823ad8d1d0c195a9dfa2ecad31"
+esperado = "e5904e993f5fbc62df15d1cefe0805278214269e01b19ea1d539438dde92643e"
 if hashlib.sha256(payload).hexdigest() != esperado:
     raise SystemExit("Falha de integridade: recopie os blocos de texto.")
 destino = Path("DiskPilot")
