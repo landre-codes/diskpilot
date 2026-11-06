@@ -94,6 +94,7 @@ class LogoButton(QWidget):
         theme = get_theme()
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
+        p.setRenderHint(QPainter.SmoothPixmapTransform)
         w, h = self.width(), self.height()
         p.fillRect(self.rect(), QColor(theme.color("sidebar")))
         if self._hover:
@@ -110,7 +111,7 @@ class LogoButton(QWidget):
             )
             x = (w - scaled.width()) / 2
             y = (h - scaled.height()) / 2
-            p.drawPixmap(int(x), int(y), scaled)
+            p.drawPixmap(int(round(x)), int(round(y)), scaled)
             p.end()
             return
 
@@ -172,9 +173,10 @@ class UserCard(QWidget):
         get_theme().changed.connect(self.update)
 
     def refresh(self) -> None:
+        dpr = max(2.0, self.devicePixelRatioF())
         path = self.config.avatar_path
         if path:
-            self._avatar = circular_pixmap(path, 38)
+            self._avatar = circular_pixmap(path, 38, dpr)
         else:
             theme = get_theme()
             self._avatar = avatar_pixmap(
@@ -183,6 +185,7 @@ class UserCard(QWidget):
                 theme.color("primary"),
                 theme.color("info"),
                 theme.color("on_primary"),
+                dpr,
             )
         self.setToolTip(
             f"{self.config.user_name}\nConta local\nClique para editar o perfil"
@@ -212,6 +215,7 @@ class UserCard(QWidget):
         theme = get_theme()
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
+        p.setRenderHint(QPainter.SmoothPixmapTransform)
         w, h = self.width(), self.height()
         p.fillRect(self.rect(), QColor(theme.color("sidebar")))
         if self._hover:
@@ -222,7 +226,7 @@ class UserCard(QWidget):
         avatar_size = 38
         x = 9 + ((w - avatar_size) / 2 - 9) * (1 - ratio)
         y = (h - avatar_size) / 2
-        p.drawPixmap(int(x), int(y), self._avatar)
+        p.drawPixmap(int(round(x)), int(round(y)), self._avatar)
         p.setPen(Qt.NoPen)
         p.setBrush(Qt.NoBrush)
 

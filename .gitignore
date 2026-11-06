@@ -7,3 +7,4 @@ venv/
 build/
 dist/
 *.log
+diagnostico-diskpilot.txt

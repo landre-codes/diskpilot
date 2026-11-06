@@ -90,6 +90,19 @@ iniciar.cmd
 
 > Se a IDE estiver usando um ambiente virtual próprio, instale as dependências no interpretador selecionado: `python -m pip install -r requirements.txt`.
 
+### Diagnóstico de tela e janela
+
+Se a janela abrir com tamanho estranho, algum botão não responder ou a interface
+parecer cortada, rode:
+
+```powershell
+py diagnostico.py
+```
+
+Ele mostra Python, PySide6, versão do Qt, tela, `devicePixelRatio`, escala e a
+geometria em cada etapa de maximizar/restaurar, e grava
+`diagnostico-diskpilot.txt` ao lado do script.
+
 ---
 
 ## Exportar para um ambiente corporativo sem Git

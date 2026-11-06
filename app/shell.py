@@ -127,7 +127,11 @@ class MainWindow(QWidget):
         self._normal_geometry = QRect()
         self._pending_geometry: QRect | None = None
         self._geometry_fixes = 0
+        self._geometry_ticks = 0
         self._moving_guard = False
+        self._geometry_timer = QTimer(self)
+        self._geometry_timer.setInterval(120)
+        self._geometry_timer.timeout.connect(self._watch_geometry)
 
         self.setWindowTitle(APP_NAME)
         icon_path = Path(__file__).resolve().parent / "assets" / "app_icon.svg"
@@ -441,28 +445,41 @@ class MainWindow(QWidget):
         self.log.info("restaurar: %s", self.geometry().getRect())
 
     def _set_geometry_exact(self, rect: QRect) -> None:
-        """Aplica a geometria e neutraliza o salto do layout.
+        """Aplica a geometria e vigia saltos do layout por alguns instantes.
 
-        Depois de um ``LayoutRequest`` o Qt pode redimensionar a janela para o
-        tamanho preferido do layout no ciclo seguinte — o que estoura a tela em
-        notebooks. A geometria é reaplicada em ``resizeEvent`` enquanto a
-        correção estiver armada, sem piscar.
+        Em máquinas lentas o ``LayoutRequest`` pode chegar bem depois do
+        ``setGeometry``; por isso a geometria é reaplicada por um curto período.
         """
         layout = self.layout()
         if layout is not None:
             layout.activate()
         self._pending_geometry = QRect(rect)
         self._geometry_fixes = 0
-        self._suspend_updates("geometry")
+        self._geometry_ticks = 0
         self.setGeometry(rect)
-        QTimer.singleShot(0, self._settle_geometry)
+        self._geometry_timer.start()
 
-    def _settle_geometry(self) -> None:
-        self._resume_updates("geometry")
-        QTimer.singleShot(300, self._clear_pending_geometry)
-
-    def _clear_pending_geometry(self) -> None:
+    def _stop_geometry_watch(self) -> None:
+        self._geometry_timer.stop()
         self._pending_geometry = None
+
+    def _watch_geometry(self) -> None:
+        target = self._pending_geometry
+        if target is None or self._geometry_ticks > 12:
+            self._geometry_timer.stop()
+            self._pending_geometry = None
+            return
+        self._geometry_ticks += 1
+        current = QRect(self.geometry())
+        if current == target:
+            return
+        if self._geometry_fixes >= 6:
+            self._geometry_timer.stop()
+            self._pending_geometry = None
+            return
+        self._geometry_fixes += 1
+        self.log.info("geometria corrigida: %s -> %s", current.getRect(), target.getRect())
+        self.setGeometry(target)
 
     def _reapply_maximized(self) -> None:
         if self._maximized and not self.isFullScreen():
@@ -550,6 +567,7 @@ class MainWindow(QWidget):
     def _start_drag(self, global_pos: QPoint) -> None:
         if self.isFullScreen():
             return
+        self._stop_geometry_watch()
         if self._maximized or self.isMaximized():
             self._pending_restore_pos = global_pos
             return
@@ -641,6 +659,7 @@ class MainWindow(QWidget):
         if event.button() == Qt.LeftButton:
             edges = self._edges_at(event.position().toPoint())
             if edges:
+                self._stop_geometry_watch()
                 self._resize_edges = edges
                 self._resize_start_geo = self.geometry()
                 self._resize_start_global = event.globalPosition().toPoint()

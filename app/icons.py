@@ -90,9 +90,10 @@ def avatar_pixmap(
     color_a: str = "#19c8d8",
     color_b: str = "#4f9cf9",
     text_color: str = "#042126",
+    dpr: float = 2.0,
 ) -> QPixmap:
     """Avatar geométrico com as iniciais do usuário."""
-    dpr = 2.0
+    dpr = max(1.0, dpr)
     pm = QPixmap(int(size * dpr), int(size * dpr))
     pm.setDevicePixelRatio(dpr)
     pm.fill(Qt.transparent)
@@ -114,12 +115,12 @@ def avatar_pixmap(
     return pm
 
 
-def circular_pixmap(path: str, size: int) -> QPixmap:
+def circular_pixmap(path: str, size: int, dpr: float = 2.0) -> QPixmap:
     """Carrega uma imagem, recorta no centro e aplica máscara circular."""
     pm = QPixmap(path)
     if pm.isNull():
         return QPixmap()
-    dpr = 2.0
+    dpr = max(1.0, dpr)
     side = int(size * dpr)
     pm = pm.scaled(side, side, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
     result = QPixmap(side, side)
@@ -127,6 +128,7 @@ def circular_pixmap(path: str, size: int) -> QPixmap:
     result.fill(Qt.transparent)
     p = QPainter(result)
     p.setRenderHint(QPainter.Antialiasing)
+    p.setRenderHint(QPainter.SmoothPixmapTransform)
     mask = QPainterPath()
     mask.addEllipse(QRectF(0, 0, side, side))
     p.setClipPath(mask)
@@ -151,6 +153,7 @@ def rounded_pixmap(path: str, size: int, radius: int = 10) -> QPixmap:
     )
     p = QPainter(target)
     p.setRenderHint(QPainter.Antialiasing)
+    p.setRenderHint(QPainter.SmoothPixmapTransform)
     path_ = QPainterPath()
     path_.addRoundedRect(
         QRectF(0, 0, int(size * dpr), int(size * dpr)), radius * dpr, radius * dpr
