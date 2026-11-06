@@ -1,0 +1,561 @@
+"""Diálogos do shell: seletor múltiplo de pastas e edição de perfil."""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+from typing import Any
+
+from PySide6.QtCore import QDir, QModelIndex, QPoint, QStandardPaths, Qt
+from PySide6.QtGui import QColor, QGuiApplication, QPixmap
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QDialog,
+    QFileDialog,
+    QFileSystemModel,
+    QFrame,
+    QGraphicsDropShadowEffect,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QTreeView,
+    QVBoxLayout,
+    QWidget,
+)
+
+from ..config import AppConfig
+from ..icons import avatar_pixmap, circular_pixmap, icon
+from ..theme import get_theme
+from ..utils import normalize_path
+from .buttons import ActionButton, IconButton
+
+
+class _DialogHeader(QFrame):
+    def __init__(self, title: str, subtitle: str, dialog: QDialog) -> None:
+        super().__init__(dialog)
+        self.setObjectName("DialogHeader")
+        self._dialog = dialog
+        self._drag_offset = QPoint()
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(20, 14, 10, 14)
+        lay.setSpacing(10)
+        texts = QVBoxLayout()
+        texts.setContentsMargins(0, 0, 0, 0)
+        texts.setSpacing(2)
+        t = QLabel(title)
+        t.setObjectName("DialogTitle")
+        t.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        texts.addWidget(t)
+        s = QLabel(subtitle)
+        s.setObjectName("DialogSubtitle")
+        s.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        texts.addWidget(s)
+        lay.addLayout(texts, 1)
+        close = IconButton("close", "Fechar", self, 17, 30, "danger")
+        close.clicked.connect(dialog.reject)
+        lay.addWidget(close)
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802
+        if event.button() == Qt.LeftButton:
+            self._drag_offset = (
+                event.globalPosition().toPoint()
+                - self._dialog.frameGeometry().topLeft()
+            )
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802
+        if event.buttons() & Qt.LeftButton and not self._drag_offset.isNull():
+            self._dialog.move(event.globalPosition().toPoint() - self._drag_offset)
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+        self._drag_offset = QPoint()
+        super().mouseReleaseEvent(event)
+
+
+class SheetDialog(QDialog):
+    """Modal sem moldura do sistema, com card, sombra e arraste."""
+
+    def __init__(
+        self,
+        parent: QWidget | None,
+        title: str,
+        subtitle: str = "",
+        width: int = 860,
+        height: int = 600,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setModal(True)
+        self.setWindowModality(Qt.ApplicationModal)
+        screen = parent.screen() if parent is not None else QGuiApplication.primaryScreen()
+        available = screen.availableGeometry() if screen is not None else None
+        max_w = available.width() - 60 if available is not None else 1200
+        max_h = available.height() - 60 if available is not None else 800
+        self._width = max(420, min(width, max_w))
+        self._height = max(260, min(height, max_h))
+        self.setFixedSize(self._width + 36, self._height + 36)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(18, 18, 18, 18)
+        self.card = QFrame(self)
+        self.card.setObjectName("DialogCard")
+        outer.addWidget(self.card)
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(38)
+        shadow.setOffset(0, 10)
+        shadow.setColor(QColor(0, 0, 0, 130))
+        self.card.setGraphicsEffect(shadow)
+        root = QVBoxLayout(self.card)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+        self.header = _DialogHeader(title, subtitle, self)
+        root.addWidget(self.header)
+        self.body = QVBoxLayout()
+        self.body.setContentsMargins(20, 16, 20, 16)
+        self.body.setSpacing(12)
+        root.addLayout(self.body, 1)
+        self.footer = QHBoxLayout()
+        self.footer.setContentsMargins(20, 12, 20, 14)
+        self.footer.setSpacing(8)
+        foot = QFrame(self)
+        foot.setObjectName("DialogFooter")
+        foot.setLayout(self.footer)
+        root.addWidget(foot)
+        self._footer_frame = foot
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        parent = self.parentWidget()
+        if parent:
+            center = parent.window().frameGeometry().center()
+            self.move(center - self.rect().center())
+        else:
+            screen = self.screen()
+            if screen:
+                self.move(screen.availableGeometry().center() - self.rect().center())
+        screen = self.screen() or QGuiApplication.primaryScreen()
+        if screen is not None:
+            available = screen.availableGeometry()
+            x = max(available.left() + 8, min(self.x(), available.right() - self.width() - 8))
+            y = max(available.top() + 8, min(self.y(), available.bottom() - self.height() - 8))
+            self.move(x, y)
+        self.raise_()
+        self.activateWindow()
+
+
+class FolderPickerDialog(SheetDialog):
+    """Seleção de uma ou várias pastas com navegação e atalhos."""
+
+    def __init__(self, parent: QWidget | None, start_path: str = "") -> None:
+        super().__init__(
+            parent,
+            "Adicionar pastas",
+            "Escolha uma ou mais pastas na lista ou clique em “Adicionar esta pasta”. A análise é somente leitura.",
+            920,
+            610,
+        )
+        self._current_only = False
+        self._current = start_path or QStandardPaths.writableLocation(
+            QStandardPaths.HomeLocation
+        )
+        if not self._current or not Path(self._current).exists():
+            self._current = str(Path.home())
+
+        work = QHBoxLayout()
+        work.setSpacing(14)
+        self.body.addLayout(work, 1)
+
+        # Atalhos ---------------------------------------------------------
+        left = QVBoxLayout()
+        left.setSpacing(6)
+        left_title = QLabel("LOCAIS")
+        left_title.setObjectName("Eyebrow")
+        left.addWidget(left_title)
+        self.places = QListWidget(self)
+        self.places.setObjectName("QuickPlaces")
+        self.places.setFixedWidth(172)
+        left.addWidget(self.places, 1)
+        work.addLayout(left)
+
+        # Navegador -------------------------------------------------------
+        right = QVBoxLayout()
+        right.setSpacing(9)
+        nav = QHBoxLayout()
+        nav.setSpacing(6)
+        self.up_btn = IconButton("arrow-up", "Subir um nível", self, 17, 32, "primary")
+        self.up_btn.clicked.connect(self._go_up)
+        nav.addWidget(self.up_btn)
+        self.path_edit = QLineEdit(self)
+        self.path_edit.setPlaceholderText("Caminho da pasta")
+        self._path_action = self.path_edit.addAction(
+            icon("folder-open-outline", get_theme().color("muted"), 16),
+            QLineEdit.LeadingPosition,
+        )
+        self.path_edit.returnPressed.connect(self._go_typed)
+        nav.addWidget(self.path_edit, 1)
+        go = ActionButton("Ir", "arrow-right", "soft", self, 16)
+        go.clicked.connect(self._go_typed)
+        nav.addWidget(go)
+        right.addLayout(nav)
+
+        self.model = QFileSystemModel(self)
+        self.model.setFilter(
+            QDir.AllDirs | QDir.NoDotAndDotDot | QDir.Drives | QDir.Hidden
+        )
+        self.model.setRootPath(QDir.rootPath())
+        self.tree = QTreeView(self)
+        self.tree.setObjectName("FolderTree")
+        self.tree.setModel(self.model)
+        self.tree.setHeaderHidden(True)
+        self.tree.setRootIsDecorated(False)
+        self.tree.setUniformRowHeights(True)
+        self.tree.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.tree.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.tree.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        for column in (1, 2, 3):
+            self.tree.setColumnHidden(column, True)
+        self.tree.setColumnWidth(0, 560)
+        self.tree.doubleClicked.connect(self._enter_index)
+        right.addWidget(self.tree, 1)
+        hint = QLabel(
+            "Dica: use Ctrl+clique para marcar várias pastas · duplo clique abre uma pasta"
+        )
+        hint.setObjectName("Faint")
+        right.addWidget(hint)
+        work.addLayout(right, 1)
+
+        self.body.addStretch(0)
+        self.add_current_btn = ActionButton(
+            "Adicionar esta pasta", "folder-plus-outline", "soft", self, 16
+        )
+        self.add_current_btn.clicked.connect(self._accept_current)
+        self.footer.addWidget(self.add_current_btn)
+        self.selection_label = QLabel("Nenhuma pasta selecionada")
+        self.selection_label.setObjectName("Muted")
+        self.footer.addWidget(self.selection_label)
+        self.footer.addStretch(1)
+        cancel = ActionButton("Cancelar", "", "ghost", self)
+        cancel.clicked.connect(self.reject)
+        self.footer.addWidget(cancel)
+        self.add_btn = ActionButton("Adicionar", "folder-plus-outline", "primary", self)
+        self.add_btn.clicked.connect(self.accept)
+        self.footer.addWidget(self.add_btn)
+
+        self._populate_places()
+        self.places.itemClicked.connect(self._place_clicked)
+        self._navigate(self._current)
+        self.tree.selectionModel().selectionChanged.connect(self._update_selection_label)
+        get_theme().changed.connect(self._sync_icons)
+        self._sync_icons()
+
+    # ------------------------------------------------------------ localidades
+    def _populate_places(self) -> None:
+        self.places.clear()
+        theme = get_theme()
+        locations = [
+            ("Início", QStandardPaths.writableLocation(QStandardPaths.HomeLocation)),
+            (
+                "Área de trabalho",
+                QStandardPaths.writableLocation(QStandardPaths.DesktopLocation),
+            ),
+            (
+                "Documentos",
+                QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation),
+            ),
+            (
+                "Downloads",
+                QStandardPaths.writableLocation(QStandardPaths.DownloadLocation),
+            ),
+        ]
+        seen: set[str] = set()
+        for label, path in locations:
+            if path and Path(path).exists():
+                key = os.path.normcase(path)
+                if key in seen:
+                    continue
+                seen.add(key)
+                item = QListWidgetItem(icon("folder", theme.color("muted"), 16), label)
+                item.setData(Qt.UserRole, path)
+                self.places.addItem(item)
+        for drive in QDir.drives():
+            path = drive.absolutePath()
+            key = os.path.normcase(path)
+            if key in seen:
+                continue
+            seen.add(key)
+            item = QListWidgetItem(icon("harddisk", theme.color("muted"), 16), path)
+            item.setData(Qt.UserRole, path)
+            self.places.addItem(item)
+
+    def _place_clicked(self, item: QListWidgetItem) -> None:
+        path = item.data(Qt.UserRole)
+        if path:
+            self._navigate(str(path))
+
+    def _sync_icons(self, *_args: Any) -> None:
+        theme = get_theme()
+        self._path_action.setIcon(icon("folder-open-outline", theme.color("muted"), 16))
+        for i in range(self.places.count()):
+            item = self.places.item(i)
+            path = str(item.data(Qt.UserRole) or "")
+            md = "harddisk" if len(path) <= 3 else "folder"
+            item.setIcon(icon(md, theme.color("muted"), 16))
+            if os.path.normcase(path) == os.path.normcase(self._current):
+                self.places.setCurrentItem(item)
+
+    # ------------------------------------------------------------- navegação
+    def _navigate(self, path: str) -> None:
+        path = normalize_path(path)
+        if not Path(path).exists() or not Path(path).is_dir():
+            return
+        self._current = path
+        self.path_edit.setText(path)
+        if hasattr(self, "add_current_btn"):
+            self.add_current_btn.setToolTip(f"Adicionar a pasta exibida: {path}")
+        index = self.model.index(path)
+        if index.isValid():
+            self.tree.setRootIndex(index)
+            self.tree.clearSelection()
+            self._update_selection_label()
+        self.up_btn.setEnabled(Path(path).parent != Path(path))
+
+    def _go_up(self) -> None:
+        parent = str(Path(self._current).parent)
+        if os.path.normcase(parent) != os.path.normcase(self._current):
+            self._navigate(parent)
+
+    def _go_typed(self) -> None:
+        self._navigate(self.path_edit.text().strip().strip('"'))
+
+    def _enter_index(self, index: QModelIndex) -> None:
+        path = self.model.filePath(index)
+        if Path(path).is_dir():
+            self._navigate(path)
+
+    # ------------------------------------------------------------- seleção
+    def _selected_rows(self) -> list[str]:
+        model = self.tree.selectionModel()
+        if model is None:
+            return []
+        paths: list[str] = []
+        for index in model.selectedRows(0):
+            path = self.model.filePath(index)
+            if Path(path).is_dir():
+                paths.append(normalize_path(path))
+        return paths
+
+    def selected_paths(self) -> list[str]:
+        if self._current_only:
+            return [normalize_path(self._current)]
+        paths = self._selected_rows()
+        seen: set[str] = set()
+        unique: list[str] = []
+        for path in paths:
+            key = os.path.normcase(path)
+            if key not in seen:
+                seen.add(key)
+                unique.append(path)
+        return unique
+
+    def _accept_current(self) -> None:
+        self._current_only = True
+        self.accept()
+
+    def _update_selection_label(self, *_args: Any) -> None:
+        count = len(self._selected_rows())
+        if count:
+            self.selection_label.setText(
+                f"{count} pasta{'s' if count != 1 else ''} selecionada{'s' if count != 1 else ''}"
+            )
+        else:
+            self.selection_label.setText("Nenhuma pasta selecionada")
+        self.add_btn.setText(f"Adicionar {count}" if count else "Adicionar")
+        self.add_btn.setEnabled(count > 0)
+
+
+class ConfirmDialog(SheetDialog):
+    """Confirmação estilizada (evita QMessageBox fora da identidade visual)."""
+
+    def __init__(
+        self,
+        parent: QWidget | None,
+        title: str,
+        message: str,
+        confirm_text: str = "Confirmar",
+        danger: bool = True,
+    ) -> None:
+        super().__init__(parent, title, "Esta ação não pode ser desfeita.", 470, 260)
+        from .common import IconLabel
+
+        content = QHBoxLayout()
+        content.setSpacing(14)
+        icon = IconLabel("alert-outline" if danger else "information-outline", 32, "danger" if danger else "info", self)
+        content.addWidget(icon, 0, Qt.AlignTop)
+        text = QLabel(message)
+        text.setWordWrap(True)
+        text.setObjectName("Muted")
+        content.addWidget(text, 1)
+        self.body.addLayout(content)
+        self.body.addStretch(1)
+        cancel = ActionButton("Cancelar", "", "ghost", self)
+        cancel.clicked.connect(self.reject)
+        self.footer.addStretch(1)
+        self.footer.addWidget(cancel)
+        confirm = ActionButton(
+            confirm_text,
+            "check" if not danger else "delete-outline",
+            "danger" if danger else "primary",
+            self,
+        )
+        confirm.clicked.connect(self.accept)
+        self.footer.addWidget(confirm)
+
+
+class ProfileDialog(SheetDialog):
+    """Edição de nome e foto do usuário."""
+
+    def __init__(self, parent: QWidget | None, config: AppConfig) -> None:
+        super().__init__(
+            parent,
+            "Perfil do usuário",
+            "O nome e a foto aparecem no rodapé do menu lateral.",
+            540,
+            370,
+        )
+        self.config = config
+        self._picked_avatar: str | None = None
+        self._remove_avatar = False
+
+        preview_row = QHBoxLayout()
+        preview_row.setSpacing(18)
+        self.avatar = QLabel(self)
+        self.avatar.setFixedSize(88, 88)
+        self.avatar.setAlignment(Qt.AlignCenter)
+        preview_row.addWidget(self.avatar, 0)
+        info = QVBoxLayout()
+        info.setSpacing(6)
+        name_cap = QLabel("NOME")
+        name_cap.setObjectName("Eyebrow")
+        info.addWidget(name_cap)
+        self.name_edit = QLineEdit(config.user_name, self)
+        self.name_edit.setPlaceholderText("Seu nome")
+        info.addWidget(self.name_edit)
+        hint = QLabel("Será exibido como o usuário atual da aplicação.")
+        hint.setObjectName("Faint")
+        hint.setWordWrap(True)
+        info.addWidget(hint)
+        preview_row.addLayout(info, 1)
+        self.body.addLayout(preview_row)
+
+        actions = QHBoxLayout()
+        actions.setSpacing(8)
+        choose = ActionButton("Escolher foto", "image-outline", "soft", self, 17)
+        choose.clicked.connect(self._choose_avatar)
+        actions.addWidget(choose)
+        remove = ActionButton("Remover", "delete-outline", "danger", self, 16)
+        remove.clicked.connect(self._clear_avatar)
+        actions.addWidget(remove)
+        actions.addStretch(1)
+        self.body.addLayout(actions)
+
+        self.error = QLabel("")
+        self.error.setObjectName("BadgeDanger")
+        self.error.setVisible(False)
+        self.body.addWidget(self.error)
+        self.body.addStretch(1)
+
+        note = QLabel(
+            "A foto e o nome são salvos localmente nas configurações do aplicativo. "
+            "A imagem é copiada para a pasta de ativos, então mover o original não quebra o perfil."
+        )
+        note.setObjectName("Faint")
+        note.setWordWrap(True)
+        self.body.addWidget(note)
+
+        cancel = ActionButton("Cancelar", "", "ghost", self)
+        cancel.clicked.connect(self.reject)
+        self.footer.addStretch(1)
+        self.footer.addWidget(cancel)
+        save = ActionButton("Salvar perfil", "check", "primary", self)
+        save.clicked.connect(self._save)
+        self.footer.addWidget(save)
+
+        self.name_edit.textChanged.connect(self._refresh_avatar)
+        get_theme().changed.connect(self._refresh_avatar)
+        self._refresh_avatar()
+
+    def _avatar_source(self) -> str:
+        if self._picked_avatar:
+            return self._picked_avatar
+        if not self._remove_avatar:
+            return self.config.avatar_path
+        return ""
+
+    def _refresh_avatar(self, *_args: Any) -> None:
+        source = self._avatar_source()
+        theme = get_theme()
+        if source:
+            pm = circular_pixmap(source, 82)
+            if pm.isNull():
+                pm = avatar_pixmap(
+                    self.name_edit.text() or self.config.user_name,
+                    82,
+                    theme.color("primary"),
+                    theme.color("info"),
+                    theme.color("on_primary"),
+                )
+        else:
+            pm = avatar_pixmap(
+                self.name_edit.text() or self.config.user_name,
+                82,
+                theme.color("primary"),
+                theme.color("info"),
+                theme.color("on_primary"),
+            )
+        self.avatar.setPixmap(pm)
+
+    def _choose_avatar(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Escolher foto do perfil",
+            str(Path.home()),
+            "Imagens (*.png *.jpg *.jpeg *.webp *.bmp *.svg);;Todos os arquivos (*)",
+        )
+        if path:
+            self._picked_avatar = path
+            self._remove_avatar = False
+            self._refresh_avatar()
+
+    def _clear_avatar(self) -> None:
+        self._picked_avatar = None
+        self._remove_avatar = True
+        self._refresh_avatar()
+
+    def _save(self) -> None:
+        name = self.name_edit.text().strip()
+        if not name:
+            self.error.setText("Informe um nome para o perfil.")
+            self.error.setVisible(True)
+            self.name_edit.setFocus()
+            return
+        self.error.setVisible(False)
+        self.config.set("user.name", name, save=False)
+        if self._picked_avatar:
+            try:
+                stored = self.config.import_asset(self._picked_avatar, "avatar")
+                self.config.set("user.avatar", stored, save=False)
+            except Exception as exc:
+                self.error.setText(f"Não foi possível salvar a foto: {exc}")
+                self.error.setVisible(True)
+                return
+        elif self._remove_avatar:
+            self.config.set("user.avatar", "", save=False)
+        self.config.save()
+        self.accept()

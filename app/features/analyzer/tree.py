@@ -1,0 +1,535 @@
+"""Árvore de arquivos com tamanhos aninhados, busca, filtros e ordenação."""
+
+from __future__ import annotations
+
+import os
+import unicodedata
+from typing import Any
+
+from PySide6.QtCore import QModelIndex, QRectF, QSize, Qt, Signal
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter
+from PySide6.QtWidgets import (
+    QApplication,
+    QHeaderView,
+    QMenu,
+    QStyle,
+    QStyleOptionViewItem,
+    QStyledItemDelegate,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QTreeWidgetItemIterator,
+    QWidget,
+)
+
+from ...icons import file_icon, icon
+from ...services.model import Node, ScanResult
+from ...theme import get_theme
+from ...utils import copy_to_clipboard, format_datetime, format_number, format_size, open_in_explorer
+
+
+NODE_ROLE = Qt.UserRole + 10
+PCT_ROLE = Qt.UserRole + 11
+SIZE_ROLE = Qt.UserRole + 12
+POPULATED_ROLE = Qt.UserRole + 13
+PLACEHOLDER_ROLE = Qt.UserRole + 14
+
+MAX_CHILDREN = 1200
+MAX_RENDERED = 2800
+MAX_FILTER_SCAN = 30000
+MB = 1024 * 1024
+GB = 1024 * MB
+
+
+def _fold(text: str) -> str:
+    normalized = unicodedata.normalize("NFKD", text.casefold())
+    return "".join(ch for ch in normalized if not unicodedata.combining(ch))
+
+
+class SizeBarDelegate(QStyledItemDelegate):
+    """Coluna de tamanho com micro barra proporcional e alinhamento à direita."""
+
+    def __init__(self, parent: QWidget | None = None, unit: str = "auto") -> None:
+        super().__init__(parent)
+        self.unit = unit
+
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex) -> None:
+        theme = get_theme()
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing)
+        rect = option.rect
+        if option.state & QStyle.State_Selected:
+            bg = theme.qcolor("primary", 46)
+        elif option.state & QStyle.State_MouseOver:
+            bg = QColor(theme.color("surface_2"))
+        elif option.features & QStyleOptionViewItem.Alternate:
+            bg = QColor(theme.color("surface_2"))
+            bg.setAlpha(110)
+        else:
+            bg = QColor(theme.color("surface"))
+        painter.fillRect(rect, bg)
+
+        size = index.data(SIZE_ROLE) or 0
+        pct = float(index.data(PCT_ROLE) or 0.0)
+        text = format_size(size, self.unit)
+
+        track = QRectF(rect.left() + 9, rect.bottom() - 5, max(10, rect.width() - 20), 2.5)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(theme.color("border")))
+        painter.drawRoundedRect(track, 1.25, 1.25)
+        if pct > 0:
+            fill = QRectF(track.left(), track.top(), max(2.0, track.width() * min(1.0, pct)), track.height())
+            painter.setBrush(theme.qcolor("primary", 150))
+            painter.drawRoundedRect(fill, 1.25, 1.25)
+
+        color = QColor(theme.color("text" if size else "faint"))
+        painter.setPen(color)
+        f = QFont("Segoe UI")
+        f.setPixelSize(theme.fs(12))
+        f.setWeight(QFont.DemiBold if size else QFont.Normal)
+        painter.setFont(f)
+        painter.drawText(
+            rect.adjusted(6, 0, -9, -4),
+            Qt.AlignVCenter | Qt.AlignRight,
+            text,
+        )
+        painter.restore()
+
+    def sizeHint(self, option: QStyleOptionViewItem, index: QModelIndex) -> QSize:
+        return QSize(130, 32)
+
+
+class FileTree(QTreeWidget):
+    countChanged = Signal(int, int)  # correspondências (-1 = sem filtro), exibidos
+    statusMessage = Signal(str)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("FileTree")
+        self.setColumnCount(6)
+        self.setHeaderLabels(
+            ["Nome", "Tamanho", "% do pai", "Itens", "Modificado", "Tipo"]
+        )
+        self.setAlternatingRowColors(True)
+        self.setUniformRowHeights(True)
+        self.setRootIsDecorated(True)
+        self.setIndentation(18)
+        self.setAnimated(False)
+        self.setExpandsOnDoubleClick(False)
+        self.setSortingEnabled(False)
+        self.setMouseTracking(True)
+        self.setSelectionMode(QTreeWidget.SingleSelection)
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._context_menu)
+        self.itemExpanded.connect(self._on_expanded)
+        self.itemDoubleClicked.connect(self._on_double_clicked)
+        header = self.header()
+        header.setStretchLastSection(False)
+        header.setSectionResizeMode(0, QHeaderView.Stretch)
+        for column, width in ((1, 124), (2, 82), (3, 96), (4, 140), (5, 92)):
+            header.setSectionResizeMode(column, QHeaderView.Fixed)
+            self.setColumnWidth(column, width)
+        header.setMinimumSectionSize(64)
+        header.setHighlightSections(False)
+        for column in (1, 2, 3, 4):
+            self.headerItem().setTextAlignment(column, Qt.AlignRight | Qt.AlignVCenter)
+        self._size_delegate = SizeBarDelegate(self)
+        self.setItemDelegateForColumn(1, self._size_delegate)
+        self._result: ScanResult | None = None
+        self._query = ""
+        self._filter = "all"
+        self._sort = "size_desc"
+        self._unit = "auto"
+        self._building = False
+        self._matches = -1
+        self._shown = 0
+        self._overflow = False
+        get_theme().changed.connect(self._refresh_visuals)
+
+    # -------------------------------------------------------------- configuração
+    def set_result(self, result: ScanResult | None) -> None:
+        self._result = result
+        self.rebuild()
+
+    def set_query(self, query: str) -> None:
+        self._query = _fold(query.strip())
+        self.rebuild()
+
+    def set_filter(self, key: str) -> None:
+        self._filter = key
+        self.rebuild()
+
+    def set_sort(self, key: str) -> None:
+        self._sort = key
+        self.rebuild()
+
+    def set_unit(self, unit: str) -> None:
+        unit = unit if unit in {"KB", "MB", "GB", "TB"} else "auto"
+        self._unit = unit
+        self._size_delegate.unit = unit
+        self.headerItem().setText(
+            1, "Tamanho" if unit == "auto" else f"Tamanho ({unit})"
+        )
+        iterator = QTreeWidgetItemIterator(self)
+        while iterator.value():
+            item = iterator.value()
+            node = item.data(0, NODE_ROLE)
+            if isinstance(node, Node):
+                item.setText(1, format_size(node.size, unit))
+                item.setToolTip(0, self._node_tooltip(node))
+            iterator += 1
+        self.viewport().update()
+
+    @property
+    def matches(self) -> int:
+        return self._matches
+
+    @property
+    def shown(self) -> int:
+        return self._shown
+
+    def expand_all_bounded(self, max_items: int = 2200) -> bool:
+        """Expande em largura com limite para não materializar a árvore inteira."""
+        if self._result is None:
+            return False
+        count = 0
+        truncated = False
+
+        def visit(item: QTreeWidgetItem) -> None:
+            nonlocal count, truncated
+            if count >= max_items:
+                truncated = True
+                return
+            if item.data(0, NODE_ROLE) is None:
+                return
+            count += 1
+            if not item.isExpanded():
+                item.setExpanded(True)
+            for i in range(item.childCount()):
+                visit(item.child(i))
+
+        for i in range(self.topLevelItemCount()):
+            visit(self.topLevelItem(i))
+        return truncated
+
+    def rebuild(self) -> None:
+        expanded = self._expanded_paths()
+        self.setUpdatesEnabled(False)
+        self._building = True
+        self.clear()
+        self._matches = -1
+        self._shown = 0
+        self._overflow = False
+        if self._result is None:
+            self._building = False
+            self.setUpdatesEnabled(True)
+            self.countChanged.emit(0, 0)
+            return
+        filtered = bool(self._query) or self._filter != "all"
+        if filtered:
+            self._build_filtered()
+        else:
+            total = self._result.total_size or 1
+            for root in self._result.roots:
+                item = self._create_item(None, root, total, is_root=True, lazy=True)
+                self.addTopLevelItem(item)
+            self._building = False
+            for i in range(self.topLevelItemCount()):
+                item = self.topLevelItem(i)
+                item.setExpanded(True)
+                self._restore_expanded(item, expanded)
+            self._matches = -1
+            self._shown = self._count_items()
+            self.countChanged.emit(-1, self._shown)
+        self._building = False
+        self.setUpdatesEnabled(True)
+        self.viewport().update()
+        if filtered:
+            self.expandAll()
+            self.scrollToTop()
+
+    def _expanded_paths(self) -> set[str]:
+        paths: set[str] = set()
+        iterator = QTreeWidgetItemIterator(self)
+        while iterator.value():
+            item = iterator.value()
+            node = item.data(0, NODE_ROLE)
+            if node is not None and item.isExpanded():
+                paths.add(os.path.normcase(node.path))
+            iterator += 1
+        return paths
+
+    def _restore_expanded(self, item: QTreeWidgetItem, paths: set[str]) -> None:
+        node = item.data(0, NODE_ROLE)
+        if node is None or os.path.normcase(node.path) not in paths:
+            return
+        item.setExpanded(True)
+        for i in range(item.childCount()):
+            child = item.child(i)
+            if child.data(0, NODE_ROLE) is not None:
+                self._restore_expanded(child, paths)
+
+    def _count_items(self) -> int:
+        count = 0
+        iterator = QTreeWidgetItemIterator(self)
+        while iterator.value():
+            if iterator.value().data(0, NODE_ROLE) is not None:
+                count += 1
+            iterator += 1
+        return count
+
+    # ---------------------------------------------------------------- filtros
+    def _node_matches(self, node: Node) -> bool:
+        if self._query:
+            haystack = _fold(node.name)
+            for token in self._query.split():
+                if token not in haystack:
+                    return False
+        if self._filter == "folders":
+            return node.is_dir
+        if self._filter == "files":
+            return not node.is_dir
+        if self._filter == "large100":
+            return not node.is_dir and node.size >= 100 * MB
+        if self._filter == "large1g":
+            return not node.is_dir and node.size >= GB
+        return True
+
+    def _build_filtered(self) -> None:
+        if self._result is None:
+            return
+        visited = 0
+        matched = 0
+
+        def collect(node: Node) -> tuple[Node, list[Any], bool] | None:
+            nonlocal visited, matched
+            visited += 1
+            if visited > MAX_FILTER_SCAN:
+                self._overflow = True
+                return None
+            children: list[Any] = []
+            for child in self._sorted_children(node):
+                result = collect(child)
+                if result is not None:
+                    children.append(result)
+            self_match = self._node_matches(node)
+            if self_match:
+                matched += 1
+            if self_match or children:
+                return (node, children, self_match)
+            return None
+
+        roots: list[tuple[Node, list[Any], bool]] = []
+        for root in self._result.roots:
+            result = collect(root)
+            if result is not None:
+                roots.append(result)
+
+        rendered = 0
+        truncated_render = False
+
+        def add(parent: QTreeWidgetItem | None, entry: tuple[Node, list[Any], bool], parent_size: int):
+            nonlocal rendered, truncated_render
+            if rendered >= MAX_RENDERED:
+                truncated_render = True
+                return
+            node, children, _self_match = entry
+            item = self._create_item(
+                parent, node, parent_size, is_root=parent is None, lazy=False
+            )
+            if parent is None:
+                self.addTopLevelItem(item)
+            item.setData(0, POPULATED_ROLE, True)
+            rendered += 1
+            for child_entry in children:
+                add(item, child_entry, node.size or 1)
+
+        total = self._result.total_size or 1
+        for entry in roots:
+            add(None, entry, total)
+        if truncated_render:
+            info = QTreeWidgetItem(
+                ["  Resultados limitados a 2.800 itens — refine a busca para ver mais."]
+            )
+            info.setFirstColumnSpanned(True)
+            info.setFlags(Qt.NoItemFlags)
+            info.setForeground(0, QColor(get_theme().color("muted")))
+            self.addTopLevelItem(info)
+        self._matches = matched
+        self._shown = rendered
+        self.countChanged.emit(matched, rendered)
+
+    def _sorted_children(self, node: Node) -> list[Node]:
+        key = self._sort
+        if key == "size_asc":
+            return sorted(node.children, key=lambda n: (n.size, _fold(n.name)))
+        if key == "name_asc":
+            return sorted(node.children, key=lambda n: (not n.is_dir, _fold(n.name)))
+        if key == "name_desc":
+            names = sorted(
+                node.children, key=lambda n: _fold(n.name), reverse=True
+            )
+            return sorted(names, key=lambda n: not n.is_dir)
+        if key == "recent":
+            return sorted(node.children, key=lambda n: n.mtime, reverse=True)
+        return sorted(node.children, key=lambda n: (n.size, _fold(n.name)), reverse=True)
+
+    def _node_tooltip(self, node: Node) -> str:
+        tip = [
+            node.path,
+            f"Tamanho: {format_size(node.size, self._unit)}",
+            f"Arquivos: {format_number(node.files)} · Pastas: {format_number(node.dirs)}",
+            f"Modificado: {format_datetime(node.mtime)}",
+        ]
+        if node.error:
+            tip.append(f"Aviso: {node.error}")
+        return "\n".join(tip)
+
+    # --------------------------------------------------------------- itens
+    def _create_item(
+        self,
+        parent: QTreeWidgetItem | None,
+        node: Node,
+        parent_size: int,
+        is_root: bool = False,
+        lazy: bool = False,
+    ) -> QTreeWidgetItem:
+        pct = 1.0 if is_root else (node.size / parent_size if parent_size else 0.0)
+        item = QTreeWidgetItem(
+            [
+                node.name,
+                format_size(node.size, self._unit),
+                f"{pct * 100:.1f}%".replace(".", ","),
+                self._item_count_text(node),
+                format_datetime(node.mtime),
+                "Raiz" if is_root else ("Pasta" if node.is_dir else self._type_text(node)),
+            ]
+        )
+        item.setData(0, NODE_ROLE, node)
+        item.setData(0, SIZE_ROLE, node.size)
+        item.setData(0, PCT_ROLE, pct)
+        item.setData(1, SIZE_ROLE, node.size)
+        item.setData(1, PCT_ROLE, pct)
+        item.setData(0, POPULATED_ROLE, False)
+        for column in (1, 2, 3, 4):
+            item.setTextAlignment(column, Qt.AlignRight | Qt.AlignVCenter)
+        item.setTextAlignment(5, Qt.AlignLeft | Qt.AlignVCenter)
+        if node.error:
+            item.setForeground(0, QColor(get_theme().color("danger")))
+        item.setToolTip(0, self._node_tooltip(node))
+        if is_root:
+            f = item.font(0)
+            f.setWeight(QFont.DemiBold)
+            item.setFont(0, f)
+        self._apply_icon(item, node, is_root)
+        if parent is not None:
+            parent.addChild(item)
+        if node.is_dir and node.children and lazy:
+            placeholder = QTreeWidgetItem([""])
+            placeholder.setData(0, PLACEHOLDER_ROLE, True)
+            placeholder.setFlags(Qt.NoItemFlags)
+            item.addChild(placeholder)
+        return item
+
+    @staticmethod
+    def _item_count_text(node: Node) -> str:
+        if not node.is_dir:
+            return "—"
+        if node.files == 0:
+            return "vazia" if node.dirs <= 1 else "sem arquivos"
+        return f"{format_number(node.files)} arq."
+
+    @staticmethod
+    def _type_text(node: Node) -> str:
+        if not node.extension:
+            return "Arquivo"
+        return node.extension.upper()[:7]
+
+    def _apply_icon(self, item: QTreeWidgetItem, node: Node, is_root: bool = False) -> None:
+        theme = get_theme()
+        color = theme.color("primary" if node.is_dir else "muted")
+        if node.error:
+            color = theme.color("warn")
+        item.setIcon(0, file_icon(node.name, node.is_dir, color, theme.color("primary")))
+        if is_root:
+            item.setIcon(0, icon("harddisk", theme.color("primary"), 17))
+
+    def _on_expanded(self, item: QTreeWidgetItem) -> None:
+        if self._building:
+            return
+        node = item.data(0, NODE_ROLE)
+        if node is None or not node.is_dir:
+            return
+        if item.data(0, POPULATED_ROLE):
+            return
+        while item.childCount():
+            child = item.takeChild(0)
+            del child
+        self._building = True
+        children = self._sorted_children(node)
+        parent_size = node.size or 1
+        for child in children[:MAX_CHILDREN]:
+            self._create_item(item, child, parent_size, lazy=True)
+        hidden = len(children) - MAX_CHILDREN
+        if hidden > 0:
+            info = QTreeWidgetItem(
+                [f"  … {format_number(hidden)} itens não exibidos — refine a busca."]
+            )
+            info.setFirstColumnSpanned(True)
+            info.setFlags(Qt.NoItemFlags)
+            info.setForeground(0, QColor(get_theme().color("muted")))
+            item.addChild(info)
+        item.setData(0, POPULATED_ROLE, True)
+        self._building = False
+        self._shown = self._count_items()
+        self.countChanged.emit(self._matches, self._shown)
+
+    # -------------------------------------------------------------- interação
+    def _node_at(self, item: QTreeWidgetItem | None) -> Node | None:
+        if item is None:
+            return None
+        node = item.data(0, NODE_ROLE)
+        return node if isinstance(node, Node) else None
+
+    def _on_double_clicked(self, item: QTreeWidgetItem, column: int) -> None:
+        node = self._node_at(item)
+        if node is None:
+            return
+        if node.is_dir:
+            item.setExpanded(not item.isExpanded())
+        else:
+            open_in_explorer(node.path, select=True)
+
+    def _context_menu(self, pos) -> None:
+        item = self.itemAt(pos)
+        node = self._node_at(item)
+        if node is None:
+            return
+        theme = get_theme()
+        menu = QMenu(self)
+        act_open = menu.addAction(icon("open-in-new", theme.color("muted"), 16), "Abrir no Explorer")
+        act_copy = menu.addAction(icon("content-copy", theme.color("muted"), 16), "Copiar caminho")
+        menu.addSeparator()
+        act_parent = menu.addAction(
+            icon("folder-open-outline", theme.color("muted"), 16),
+            "Abrir pasta pai",
+        )
+        chosen = menu.exec(self.viewport().mapToGlobal(pos))
+        if chosen == act_open:
+            open_in_explorer(node.path, select=not node.is_dir)
+        elif chosen == act_copy:
+            copy_to_clipboard(node.path)
+            self.statusMessage.emit("Caminho copiado para a área de transferência.")
+        elif chosen == act_parent:
+            parent = node.path if node.is_dir else os.path.dirname(node.path)
+            open_in_explorer(parent)
+
+    def _refresh_visuals(self, *_args: Any) -> None:
+        iterator = QTreeWidgetItemIterator(self)
+        while iterator.value():
+            item = iterator.value()
+            node = item.data(0, NODE_ROLE)
+            if node is not None:
+                is_root = item.parent() is None
+                self._apply_icon(item, node, is_root)
+            iterator += 1
+        self.viewport().update()

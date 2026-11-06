@@ -1,0 +1,312 @@
+# DiskPilot
+
+Shell gerencial modular em **Python + PySide6** para análise de uso de disco, com uma GUI replicável em outros domínios.
+
+O projeto nasceu como um "Everything gerencial e enxuto": em vez de apenas localizar arquivos, ele mostra **onde o espaço está sendo consumido**, permite **navegar pelos tamanhos aninhados**, aplica **filtros com debounce** e produz **recomendações de limpeza com diferentes níveis de segurança**.
+
+> Princípio importante: o aplicativo **não apaga arquivos automaticamente**. As recomendações apenas indicam caminhos, explicam o risco e oferecem atalhos para inspeção no Explorer.
+
+> **Aviso de responsabilidade:** o DiskPilot é uma ferramenta de leitura e estimativa. Tamanhos são lógicos e podem diferir do espaço físico; varreduras extensas podem ser parciais; duplicatas são comparadas por nome/tamanho, não por conteúdo. A decisão de remover, mover ou compartilhar dados é integralmente do usuário e da equipe.
+
+---
+
+## Recursos
+
+### Shell / aparência
+- Janela sem moldura com barra de título própria, cantos arredondados e redimensionamento nativo nas bordas (Windows).
+- Sem `QGraphicsDropShadowEffect`: a sombra gráfica foi removida para evitar artefatos de repintura em janelas translúcidas.
+- Instância única por usuário: abrir o app novamente reativa a janela existente em vez de criar outra.
+- `Ctrl + roda do mouse` é consumido globalmente para evitar zoom/rolagem acidental em widgets Qt.
+- Interface e componentes nativos do Qt em **pt_BR** (`QLocale` + `QTranslator`).
+- Botões de minimizar, maximizar/restaurar e fechar com proporções fixas e ícones MDI.
+- Duplo clique na barra de título maximiza/restaura; arraste move a janela (inclusive restaurando ao arrastar uma janela maximizada).
+- Temas **dark_cyan** e **light_cyan** via `qt-material`, com QSS próprio para cards, tabelas, menus, foco e estados de hover.
+- Tipografia maior e adaptativa: o tamanho base acompanha a altura útil da tela e é recalculado ao aplicar o tema.
+- Ícones Material Design (MDI) via `qtawesome` em botões, campos de busca, seletores, árvore, diálogos e recomendações.
+- Abas verticais com ícones, indicador ativo, tooltip no modo compacto e transição de página com fade.
+- Menu hambúrguer com animação de largura; o estado (expandido/recolhido) é persistido.
+- Logo da empresa no topo da barra lateral, com clique para alterar, menu de contexto para remover e **persistência local**.
+- Usuário atual no rodapé da barra lateral, com avatar gerado a partir das iniciais (ou foto importada).
+
+### Painel
+- Mini-dashboard com espaço total, quantidade de arquivos/pastas, espaço liberável com segurança e valores em revisão.
+- Gráfico de rosca da distribuição por raiz, com total central, percentuais nos arcos e legenda.
+- Ranking dos maiores diretórios com barras proporcionais e participação percentual.
+- Prévia das recomendações e resumo operacional da última análise.
+- Dados persistidos para reaparecerem após reiniciar o app.
+
+### Análise de diretórios
+- Seleção de **uma ou várias pastas** pelo seletor próprio (Ctrl+clique), por arrastar e soltar ou por múltiplas adições.
+- Chips das raízes selecionadas, com remoção individual.
+- Varredura em segundo plano com `QThreadPool`, progresso, cancelamento e tolerância a erros de permissão. Logs em `diskpilot.log`/`diskpilot-crash.log` na pasta do projeto e na pasta de configuração.
+- Árvore aninhada carregada sob demanda, com:
+  - tamanho de cada pasta (soma recursiva) e de cada arquivo;
+  - percentual em relação ao pai;
+  - quantidade de arquivos, data de modificação e tipo;
+  - barras proporcionais na coluna de tamanho;
+  - limite de itens por pasta para manter a interface responsiva.
+- Busca com **debounce de 260 ms** e limpeza rápida.
+- Filtros: tudo, pastas, arquivos, arquivos > 100 MB e > 1 GB.
+- Conversor de unidade na tabela: automático, KB, MB, GB ou TB.
+- Ordenação: tamanho (maior/menor), nome (A–Z/Z–A) e mais recentes.
+- Expansão limitada para evitar materializar uma árvore enorme de uma vez.
+- Ao pesquisar/filtrar, os ancestrais dos resultados são exibidos automaticamente.
+- Menu de contexto: abrir no Explorer, copiar caminho e abrir pasta pai.
+- Duplo clique expande pastas ou abre arquivos.
+
+### Recomendações
+- Caches regeneráveis (`node_modules`, `__pycache__`, `.next`, `.pytest_cache`, etc.), classificados como **seguros**.
+- Artefatos de build e ambientes virtuais (`build`, `dist`, `target`, `.venv`, ...), classificados para **revisão**.
+- Arquivos grandes sem alteração há mais de um ano.
+- Possíveis duplicatas por nome + tamanho (com aviso de que o conteúdo não foi comparado).
+- Arquivos compactados muito grandes e arquivos temporários/backups.
+- Caminhos reais, botão para abrir o local e cópia de todos os caminhos para compartilhar com a equipe.
+- Nenhuma exclusão automática: o texto de cada card explica o risco e o que verificar antes.
+
+### Configurações
+- Troca de tema em tempo real e persistência.
+- Alteração do logo da empresa e do perfil (nome e foto), com cópia dos ativos para a pasta de configuração.
+- Resumo do armazenamento, última análise e local da configuração.
+- Limpeza explícita dos resultados armazenados, mantendo as pastas escolhidas.
+- Lista de atalhos de teclado.
+
+---
+
+## Como executar
+
+Pré-requisitos: Python 3.10+ (testado com Python 3.14) e Windows, Linux ou macOS com suporte a Qt.
+
+```powershell
+cd "C:\Users\usuario\Desktop\Projetos IA\diskpilot"
+py -3.14 -m pip install -r requirements.txt
+py -3.14 main.py
+```
+
+Na IDE, basta configurar/executar `main.py`. O `run.py` continua disponível como entrada alternativa. Também é possível executar o pacote com `py -3.14 -m app`, ou usar o atalho:
+
+```text
+iniciar.cmd
+```
+
+> Se a IDE estiver usando um ambiente virtual próprio, instale as dependências no interpretador selecionado: `python -m pip install -r requirements.txt`.
+
+---
+
+## Exportar para um ambiente corporativo sem Git
+
+Não é necessário clonar nem usar Git. O projeto é composto por arquivos Python comuns; você pode copiar a pasta ou um ZIP.
+
+Para gerar pacotes de distribuição:
+
+```powershell
+cd "C:\Users\usuario\Desktop\Projetos IA\diskpilot"
+py -3.14 exportar.py
+```
+
+Serão criados em `dist/`:
+
+- `DiskPilot-<versao>-source.zip`: apenas o código-fonte e a documentação;
+- `DiskPilot-<versao>-offline-win64.zip`: código + wheels + `instalar_offline.cmd`, para máquinas sem acesso ao PyPI;
+- `SHA256SUMS.txt`: hashes para conferir a integridade após a cópia.
+
+### No ambiente corporativo
+
+Com internet/espelho interno do PyPI:
+
+```powershell
+python -m pip install -r requirements.txt
+python main.py
+```
+
+Sem internet, usando o pacote offline:
+
+1. Copie o ZIP offline por pendrive, unidade de rede ou portal interno.
+2. Extraia em uma pasta local.
+3. Execute `instalar_offline.cmd`.
+4. Depois, use `iniciar.cmd`.
+
+O pacote offline atual foi gerado para **Windows x64 + Python 3.10 a 3.14**. Ele contém wheels específicas do MarkupSafe para essas versões; as demais dependências são abi3 ou Python puro.
+
+### E o Git?
+
+Git não é necessário. Se quiser manter histórico e o ambiente interno permitir arquivos `.bundle`, uma alternativa é gerar um único arquivo:
+
+```powershell
+git init
+git add .
+git commit -m "DiskPilot"
+git bundle create DiskPilot.bundle --all
+```
+
+Copie `DiskPilot.bundle` e, no ambiente interno:
+
+```powershell
+git clone DiskPilot.bundle diskpilot
+```
+
+Se clones de repositórios forem bloqueados, use o ZIP mesmo — não há dependência de Git no funcionamento do app.
+
+No Windows, o app usa o plugin nativo do Qt e o redimensionamento por `WM_NCHITTEST`; em outras plataformas há fallback de redimensionamento manual.
+
+### Dependências
+- `PySide6-Essentials` (módulos Qt usados pelo app, sem WebEngine)
+- `qt-material`
+- `qtawesome` (tema MDI)
+
+---
+
+## Persistência
+
+As configurações ficam em um JSON no diretório de configuração do usuário (`QStandardPaths.AppConfigLocation`), por exemplo:
+
+```text
+C:\Users\<usuario>\AppData\Local\DiskPilot\DiskPilot\config.json
+```
+
+São persistidos:
+
+- tema atual;
+- geometria/estado da janela;
+- estado do menu lateral;
+- caminho do logo;
+- nome e avatar do usuário;
+- pastas selecionadas;
+- resumo da última análise (tamanhos, contagens, sugestões e data).
+
+Os arquivos de logo/avatar são copiados para `assets/` ao lado do `config.json`. Mover ou apagar a imagem original não quebra o perfil.
+
+---
+
+## Estrutura
+
+```text
+diskpilot/
+├─ main.py                      # entrada recomendada para IDE/terminal
+├─ run.py                       # entrada alternativa (mesma inicialização)
+├─ iniciar.cmd                  # atalho Windows
+├─ requirements.txt
+├─ README.md
+└─ app/
+   ├─ __init__.py               # nome, tagline e versão
+   ├─ __main__.py               # permite `python -m app`
+   ├─ i18n.py                   # locale e traduções pt_BR do Qt
+   ├─ input_guard.py            # filtro global de Ctrl+roda do mouse
+   ├─ single_instance.py        # instância única + ativação da janela
+   ├─ pages.py                  # registro das páginas padrão
+   ├─ shell.py                  # janela sem moldura, navegação, atalhos, drag/drop
+   ├─ config.py                 # persistência JSON e importação de ativos
+   ├─ theme.py                  # paletas, QSS e integração qt-material
+   ├─ icons.py                  # cache de ícones MDI e avatares
+   ├─ utils.py                  # formatação, Explorer, clipboard
+   ├─ widgets/
+   │  ├─ buttons.py             # botões com hover, abas desenhadas, busca, selects
+   │  ├─ charts.py              # donut e barras com QPainter
+   │  ├─ common.py              # cards, headers, chips, empty state, toast
+   │  ├─ dialogs.py             # seletor de pastas, perfil, confirmação
+   │  ├─ sidebar.py             # logo, abas verticais, usuário
+   │  └─ title_bar.py           # controles da janela
+   ├─ services/
+   │  ├─ model.py               # Node, ScanResult, Suggestion
+   │  ├─ scanner.py             # varredura recursiva cancelável
+   │  ├─ suggestions.py         # heurísticas de limpeza
+   │  └─ state.py               # estado compartilhado + QThreadPool
+   └─ features/
+      ├─ base.py                # BasePage e PageSpec
+      ├─ dashboard.py
+      ├─ recommendations.py
+      ├─ settings.py
+      └─ analyzer/
+         ├─ page.py
+         └─ tree.py
+```
+
+---
+
+## Como reutilizar o shell em outro domínio
+
+O shell não conhece o domínio de disco. Ele apenas recebe uma lista de `PageSpec` e instancia as páginas:
+
+```python
+from app.config import AppConfig
+from app.features.base import PageSpec
+from app.shell import MainWindow
+from app.theme import init_theme
+
+# 1. Crie uma página herdando de BasePage
+# 2. Registre-a com PageSpec
+# 3. Passe a lista para MainWindow
+
+specs = [
+    PageSpec("dashboard", "Visão geral", "Resumo", "view-dashboard-outline", DashboardPage),
+    PageSpec("clientes", "Clientes", "Cadastro e histórico", "account-group-outline", ClientesPage),
+    PageSpec("config", "Configurações", "Preferências", "cog-outline", MinhaConfigPage),
+]
+
+theme = init_theme(app, config)
+window = MainWindow(config, theme, specs)
+window.show()
+```
+
+`BasePage` fornece:
+
+- `self.state`: estado compartilhado;
+- `toastRequested`, `navigateRequested`, `identityChanged`;
+- `on_show()` / `on_hide()`;
+- `toast(mensagem, tipo)`.
+
+Para mudar o nome do produto, altere `APP_NAME`/`APP_TAGLINE` em `app/__init__.py`. Para mudar a identidade visual, trabalhe com os tokens de `app/theme.py`; evite cores hardcoded nos widgets.
+
+### Criando um tema
+As paletas ficam em `PALETTES` em `theme.py` (`dark` e `light`). O QSS usa `$tokens`, então novos componentes devem usar as mesmas variáveis para funcionar nos dois temas.
+
+### Criando uma página de feature
+```python
+from app.features.base import BasePage
+from app.widgets.common import PageHeader
+
+class ClientesPage(BasePage):
+    page_id = "clientes"
+    page_title = "Clientes"
+    page_icon = "account-group-outline"
+
+    def __init__(self, state, parent=None):
+        super().__init__(state, parent)
+        layout = QVBoxLayout(self)
+        layout.addWidget(PageHeader("Clientes", "Cadastro e histórico", "CRM"))
+        # ...
+```
+
+---
+
+## Atalhos
+
+| Atalho | Ação |
+|---|---|
+| `Ctrl+O` | Adicionar pastas |
+| `Ctrl+F` | Pesquisar na análise |
+| `Ctrl+R` | Reanalisar |
+| `Ctrl+B` | Recolher/expandir menu lateral |
+| `F11` | Alternar tela cheia |
+| `Ctrl+1…4` | Ir direto para uma aba |
+| `Esc` | Sair da tela cheia |
+
+---
+
+## Notas de implementação
+
+- A varredura usa `os.scandir`, ignora links simbólicos para evitar ciclos e contabiliza erros de acesso sem interromper a análise.
+- Os tamanhos são **lógicos** (`st_size`), que é o valor esperado em um gerenciador de arquivos. Arquivos esparsos, comprimidos ou com hard links podem ocupar menos espaço físico do que o valor exibido.
+- A árvore é preguiçosa: os filhos de uma pasta só são criados quando ela é expandida, com limite de 1.200 itens por pasta e busca global limitada para manter a responsividade.
+- As estimativas de limpeza não são destrutivas e podem se sobrepor; os cálculos já evitam contar arquivos de cache duas vezes e mostram "seguro" separado de "revisar".
+- O logo e o avatar são copiados com `shutil`, não vinculados ao arquivo original.
+- `qt-material` fornece a base do tema; o QSS em `theme.py` sobrescreve o que é necessário (especialmente `text-transform`, hovers e cores semânticas) para manter a identidade do app.
+
+---
+
+## Limitações e próximos passos
+
+- Não há exclusão em massa; isso é intencional por segurança.
+- Duplicatas são detectadas por nome + tamanho; uma evolução natural é comparar hashes em segundo plano.
+- O redimensionamento nativo por `WM_NCHITTEST` é específico do Windows; o fallback manual cobre outras plataformas.
+- Para volumes muito grandes (milhões de itens), considere persistir a árvore em SQLite ou manter uma indexação incremental.
+- O shell pode receber novas páginas sem alterações na janela principal.
