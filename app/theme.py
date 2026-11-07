@@ -7,7 +7,9 @@ barra de título, abas e estados de foco. Nada de cores hardcoded nos widgets.
 
 from __future__ import annotations
 
+import logging
 import re
+import time
 from pathlib import Path
 from string import Template
 from typing import Any
@@ -629,6 +631,7 @@ class ThemeManager(QObject):
 
     # ------------------------------------------------------------- público
     def apply(self, key: str | None = None, persist: bool = True) -> None:
+        inicio = time.perf_counter()
         if key is None:
             key = self.key
         key = "light" if str(key).lower() == "light" else "dark"
@@ -639,6 +642,7 @@ class ThemeManager(QObject):
 
         cache_key = (key, round(self.font_scale, 3))
         qss = self._qss_cache.get(cache_key)
+        was_cached = qss is not None
         if qss is None:
             qss = self._build_qss(key)
             self._qss_cache[cache_key] = qss
@@ -658,6 +662,12 @@ class ThemeManager(QObject):
             except Exception:
                 pass
         self.changed.emit(key)
+        logging.getLogger("diskpilot.theme").info(
+            "tema %s aplicado em %.2fs (cache=%s)",
+            key,
+            time.perf_counter() - inicio,
+            "sim" if was_cached else "nao",
+        )
 
     def _build_qss(self, key: str) -> str:
         """Monta a folha de estilo completa do tema (com cache por tema)."""
