@@ -6,8 +6,16 @@ import os
 import unicodedata
 from typing import Any
 
-from PySide6.QtCore import QModelIndex, QRectF, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter
+from PySide6.QtCore import QModelIndex, QRect, QRectF, QSize, Qt, Signal
+from PySide6.QtGui import (
+    QColor,
+    QFont,
+    QFontMetrics,
+    QKeySequence,
+    QPainter,
+    QPen,
+    QShortcut,
+)
 from PySide6.QtWidgets import (
     QApplication,
     QHeaderView,
@@ -117,9 +125,12 @@ class FileTree(QTreeWidget):
         self.setExpandsOnDoubleClick(False)
         self.setSortingEnabled(False)
         self.setMouseTracking(True)
-        self.setSelectionMode(QTreeWidget.SingleSelection)
+        self.setSelectionMode(QTreeWidget.ExtendedSelection)
         self.setContextMenuPolicy(Qt.CustomContextMenu)
         self.customContextMenuRequested.connect(self._context_menu)
+        copy_shortcut = QShortcut(QKeySequence.Copy, self)
+        copy_shortcut.setContext(Qt.WidgetWithChildrenShortcut)
+        copy_shortcut.activated.connect(self._copy_rows)
         self.itemExpanded.connect(self._on_expanded)
         self.itemDoubleClicked.connect(self._on_double_clicked)
         header = self.header()
@@ -144,6 +155,125 @@ class FileTree(QTreeWidget):
         self._shown = 0
         self._overflow = False
         get_theme().changed.connect(self._refresh_visuals)
+
+    # ------------------------------------------------------------- galhos
+    def _depth_of(self, index: QModelIndex) -> int:
+        depth = 0
+        parent = index.parent()
+        while parent.isValid():
+            depth += 1
+            parent = parent.parent()
+        return depth
+
+    def _expander_x(self, index: QModelIndex) -> int:
+        step = self.indentation()
+        return self._depth_of(index) * step + step // 2
+
+    def drawBranches(self, painter: QPainter, rect: QRect, index: QModelIndex) -> None:  # noqa: N802
+        """Desenha as guias de hierarquia e as setas de expandir/recolher.
+
+        O estilo nativo deixa de desenhar a seta quando o QSS estiliza
+        ``::branch``; por isso o indicador é desenhado aqui, com a cor do tema.
+        """
+        if not index.isValid():
+            return
+        model = self.model()
+        theme = get_theme()
+        step = self.indentation()
+        depth = self._depth_of(index)
+        center_x = depth * step + step // 2
+        center_y = rect.center().y() + 1
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing, True)
+
+        guide_pen = QPen(theme.qcolor("border_strong", 130))
+        guide_pen.setWidth(1)
+        painter.setPen(guide_pen)
+        for level in range(depth):
+            x = level * step + step // 2
+            painter.drawLine(x, rect.top(), x, rect.bottom())
+
+        if model is not None and model.hasChildren(index):
+            expanded = self.isExpanded(index)
+            pen = QPen(theme.qcolor("primary" if expanded else "muted"))
+            pen.setWidthF(1.9)
+            pen.setCapStyle(Qt.RoundCap)
+            pen.setJoinStyle(Qt.RoundJoin)
+            painter.setPen(pen)
+            size = 4
+            if expanded:
+                painter.drawLine(center_x - size, center_y - 2, center_x, center_y + 2)
+                painter.drawLine(center_x, center_y + 2, center_x + size, center_y - 2)
+            else:
+                painter.drawLine(center_x - 2, center_y - size, center_x + 2, center_y)
+                painter.drawLine(center_x + 2, center_y, center_x - 2, center_y + size)
+        painter.restore()
+
+    def _on_expander(self, pos, index: QModelIndex) -> bool:
+        if not index.isValid() or self.model() is None:
+            return False
+        if not self.model().hasChildren(index):
+            return False
+        return abs(pos.x() - self._expander_x(index)) <= 10
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802
+        if event.button() == Qt.LeftButton:
+            pos = event.position().toPoint()
+            index = self.indexAt(pos)
+            if self._on_expander(pos, index):
+                self.setExpanded(index, not self.isExpanded(index))
+                event.accept()
+                return
+        super().mousePressEvent(event)
+
+    # ---------------------------------------------------------------- cópia
+    def _size_text(self, item: QTreeWidgetItem) -> str:
+        value = item.data(1, SIZE_ROLE)
+        try:
+            size = int(value or 0)
+        except (TypeError, ValueError):
+            size = 0
+        return format_size(size, self._unit)
+
+    def _row_text(self, item: QTreeWidgetItem) -> str:
+        node = item.data(0, NODE_ROLE)
+        columns = [
+            item.text(0),
+            self._size_text(item),
+            item.text(2),
+            item.text(3),
+            item.text(4),
+            item.text(5),
+        ]
+        if node is not None:
+            columns.append(node.path)
+        return "\t".join(columns)
+
+    def _copy_rows(self) -> None:
+        items = [
+            item for item in self.selectedItems() if item.data(0, NODE_ROLE) is not None
+        ]
+        if not items:
+            current = self.currentItem()
+            if current is not None and current.data(0, NODE_ROLE) is not None:
+                items = [current]
+        if not items:
+            return
+        copy_to_clipboard("\n".join(self._row_text(item) for item in items))
+        self.statusMessage.emit(
+            f"{len(items)} linha(s) copiada(s): Nome, Tamanho, %, Itens, "
+            "Modificado, Tipo, Caminho."
+        )
+
+    def _copy_size(self, item: QTreeWidgetItem) -> None:
+        copy_to_clipboard(self._size_text(item))
+        self.statusMessage.emit("Tamanho copiado para a área de transferência.")
+
+    def _copy_path(self, item: QTreeWidgetItem) -> None:
+        node = item.data(0, NODE_ROLE)
+        if node is not None:
+            copy_to_clipboard(node.path)
+            self.statusMessage.emit("Caminho copiado para a área de transferência.")
 
     # -------------------------------------------------------------- configuração
     def set_result(self, result: ScanResult | None) -> None:
@@ -507,7 +637,16 @@ class FileTree(QTreeWidget):
         theme = get_theme()
         menu = QMenu(self)
         act_open = menu.addAction(icon("open-in-new", theme.color("muted"), 16), "Abrir no Explorer")
-        act_copy = menu.addAction(icon("content-copy", theme.color("muted"), 16), "Copiar caminho")
+        menu.addSeparator()
+        act_row = menu.addAction(
+            icon("content-copy", theme.color("muted"), 16), "Copiar linha(s)\tCtrl+C"
+        )
+        act_size = menu.addAction(
+            icon("numeric", theme.color("muted"), 16), "Copiar tamanho"
+        )
+        act_copy = menu.addAction(
+            icon("link-variant", theme.color("muted"), 16), "Copiar caminho"
+        )
         menu.addSeparator()
         act_parent = menu.addAction(
             icon("folder-open-outline", theme.color("muted"), 16),
@@ -516,9 +655,12 @@ class FileTree(QTreeWidget):
         chosen = menu.exec(self.viewport().mapToGlobal(pos))
         if chosen == act_open:
             open_in_explorer(node.path, select=not node.is_dir)
+        elif chosen == act_row:
+            self._copy_rows()
+        elif chosen == act_size:
+            self._copy_size(item)
         elif chosen == act_copy:
-            copy_to_clipboard(node.path)
-            self.statusMessage.emit("Caminho copiado para a área de transferência.")
+            self._copy_path(item)
         elif chosen == act_parent:
             parent = node.path if node.is_dir else os.path.dirname(node.path)
             open_in_explorer(parent)

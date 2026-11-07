@@ -317,6 +317,9 @@ class ClientesPage(BasePage):
 - Maximizar e restaurar são controlados pelo próprio app, e não por `showMaximized()`: em janelas sem moldura o `normalGeometry()` do Qt pode crescer a cada ciclo e devolver um retângulo maior que a tela. O estado salvo (geometria e maximizado) é aplicado antes do primeiro `show`, para a janela não piscar em tamanhos intermediários.
 - A janela tem **tamanho máximo igual à área útil da tela** (e a posição é limitada para manter a barra de título alcançável), então nenhum salto de layout consegue empurrar os botões para fora do monitor. O log registra tela, escala e geometria em cada maximizar/restaurar para diagnóstico.
 - A troca de tema usa **cache de QSS por tema** e uma única chamada a `setStyleSheet`. A geração de ícones do `qt_material` (que reescrevia centenas de SVG em `~/.qt_material` a cada troca) é desativada — o app usa apenas qtawesome —, e o QSS do outro tema é pré-montado em segundo plano após a abertura.
+- A árvore desenha as **setas de expandir/recolher** e as guias de hierarquia em `drawBranches`, com a cor do tema, porque o QSS de `::branch` desliga o indicador nativo. O clique na seta alterna o nó.
+- A árvore aceita `Ctrl+C` e menu de contexto para copiar **linha(s)** (Nome, Tamanho, %, Itens, Modificado, Tipo e Caminho, separados por tabulação), **tamanho** ou **caminho**. A seleção múltipla copia todas as linhas escolhidas.
+- Textos de `QLineEdit`, `QComboBox` e `QAbstractSpinBox` usam o token `input_text`: claro no tema escuro e azul-escuro no tema claro, garantindo contraste.
 
 ---
 

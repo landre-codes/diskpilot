@@ -44,6 +44,7 @@ PALETTES: dict[str, dict[str, Any]] = {
         "border": "#1b333d",
         "border_strong": "#2a4d5a",
         "text": "#e9f7f9",
+        "input_text": "#e9f7f9",
         "muted": "#8babb4",
         "faint": "#5f818b",
         "primary": "#21ccdc",
@@ -69,6 +70,7 @@ PALETTES: dict[str, dict[str, Any]] = {
         "border": "#d3e5e9",
         "border_strong": "#b5d4da",
         "text": "#103039",
+        "input_text": "#0b3b45",
         "muted": "#5c7b84",
         "faint": "#88a2a9",
         "primary": "#008e9c",
@@ -247,7 +249,7 @@ QPushButton#ChipClose:hover { background: $danger_soft; }
 /* --------------------------------------------------------- entradas */
 QLineEdit {
     background: $surface;
-    color: $text;
+    color: $input_text;
     border: 1px solid $border;
     border-radius: 9px;
     padding: 0px 10px;
@@ -266,6 +268,7 @@ QLineEdit#Search {
 QLineEdit#Search:focus { background: $surface; }
 QTextEdit, QPlainTextEdit {
     background: $surface;
+    color: $input_text;
     border: 1px solid $border;
     border-radius: 9px;
     padding: 8px;
@@ -274,6 +277,7 @@ QTextEdit, QPlainTextEdit {
 }
 QComboBox {
     background: $surface;
+    color: $input_text;
     border: 1px solid $border;
     border-radius: 9px;
     padding: 0px 28px 0px 12px;
@@ -282,14 +286,23 @@ QComboBox {
 QComboBox:hover { border-color: $border_strong; }
 QComboBox::drop-down { border: none; width: 26px; }
 QComboBox::down-arrow { image: none; width: 0px; height: 0px; }
+QAbstractSpinBox {
+    background: $surface;
+    color: $input_text;
+    border: 1px solid $border;
+    border-radius: 9px;
+    padding: 0px 10px;
+    min-height: 36px;
+}
 QComboBox QAbstractItemView {
     background: $surface;
+    color: $input_text;
     border: 1px solid $border_strong;
     border-radius: 8px;
     padding: 4px;
     outline: none;
     selection-background-color: $selection;
-    selection-color: $text;
+    selection-color: $input_text;
 }
 QMenu {
     background: $surface;
