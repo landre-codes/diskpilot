@@ -45,6 +45,7 @@ PALETTES: dict[str, dict[str, Any]] = {
         "border_strong": "#2a4d5a",
         "text": "#e9f7f9",
         "input_text": "#e9f7f9",
+        "placeholder": "#8babb4",
         "muted": "#8babb4",
         "faint": "#5f818b",
         "primary": "#21ccdc",
@@ -70,7 +71,8 @@ PALETTES: dict[str, dict[str, Any]] = {
         "border": "#d3e5e9",
         "border_strong": "#b5d4da",
         "text": "#103039",
-        "input_text": "#0b3b45",
+        "input_text": "#06232b",
+        "placeholder": "#1f4d57",
         "muted": "#5c7b84",
         "faint": "#88a2a9",
         "primary": "#008e9c",
@@ -250,6 +252,7 @@ QPushButton#ChipClose:hover { background: $danger_soft; }
 QLineEdit {
     background: $surface;
     color: $input_text;
+    placeholder-text-color: $placeholder;
     border: 1px solid $border;
     border-radius: 9px;
     padding: 0px 10px;
@@ -257,8 +260,12 @@ QLineEdit {
     selection-background-color: $primary;
     selection-color: $on_primary;
 }
-QLineEdit:hover { border-color: $border_strong; }
-QLineEdit:focus { border-color: $primary; background: $surface_2; }
+QLineEdit:hover { border-color: $border_strong; color: $input_text; }
+QLineEdit:focus {
+    border-color: $primary;
+    background: $surface_2;
+    color: $input_text;
+}
 QLineEdit:disabled { color: $faint; background: $surface; }
 QLineEdit#Search {
     padding-left: 4px;
@@ -283,7 +290,8 @@ QComboBox {
     padding: 0px 28px 0px 12px;
     min-height: 36px;
 }
-QComboBox:hover { border-color: $border_strong; }
+QComboBox:hover { border-color: $border_strong; color: $input_text; }
+QComboBox:focus { border-color: $primary; color: $input_text; }
 QComboBox::drop-down { border: none; width: 26px; }
 QComboBox::down-arrow { image: none; width: 0px; height: 0px; }
 QAbstractSpinBox {
@@ -294,6 +302,7 @@ QAbstractSpinBox {
     padding: 0px 10px;
     min-height: 36px;
 }
+QAbstractSpinBox:focus { border-color: $primary; color: $input_text; }
 QComboBox QAbstractItemView {
     background: $surface;
     color: $input_text;
