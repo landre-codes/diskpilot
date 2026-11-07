@@ -17,10 +17,12 @@ from PySide6.QtCore import QObject, QRect, Signal
 from PySide6.QtWidgets import QApplication
 
 try:  # qt_material precisa ser importado depois do Qt
-    from qt_material import apply_stylesheet
+    import qt_material as _qt_material
+    from qt_material import apply_stylesheet  # noqa: F401  (compatibilidade)
 
     QT_MATERIAL_AVAILABLE = True
 except Exception:  # pragma: no cover - fallback para ambientes sem a lib
+    _qt_material = None
     QT_MATERIAL_AVAILABLE = False
 
 
@@ -556,6 +558,8 @@ class ThemeManager(QObject):
         self.key = "dark"
         self.colors: dict[str, Any] = dict(PALETTES["dark"])
         self.font_scale = 1.0
+        self._qss_cache: dict[tuple[str, float], str] = {}
+        self._font_px: int | None = None
         self._build_derived("dark")
 
     def _compute_font_scale(self) -> float:
@@ -632,28 +636,21 @@ class ThemeManager(QObject):
         self._build_derived(key)
         self.font_scale = self._compute_font_scale()
         self.aboutToChange.emit(key)
-        if QT_MATERIAL_AVAILABLE:
-            try:
-                apply_stylesheet(
-                    self.app,
-                    theme=f"{key}_cyan.xml",
-                    invert_secondary=(key == "light"),
-                )
-            except Exception:
-                self.app.setStyleSheet("")
-        else:
-            self.app.setStyleSheet("")
-        qss = QSS_TEMPLATE.safe_substitute(**self.colors)
-        qss = re.sub(
-            r"font-size:\s*(\d+)px",
-            lambda match: f"font-size: {self.fs(int(match.group(1)))}px",
-            qss,
-        )
-        self.app.setStyleSheet(self.app.styleSheet() + "\n" + qss)
+
+        cache_key = (key, round(self.font_scale, 3))
+        qss = self._qss_cache.get(cache_key)
+        if qss is None:
+            qss = self._build_qss(key)
+            self._qss_cache[cache_key] = qss
+        # Uma única aplicação: o Qt repolê a árvore inteira a cada chamada.
+        self.app.setStyleSheet(qss)
         self._apply_palette()
-        font = QFont("Segoe UI")
-        font.setPixelSize(self.fs(13))
-        self.app.setFont(font)
+        px = self.fs(13)
+        if px != self._font_px:
+            font = QFont("Segoe UI")
+            font.setPixelSize(px)
+            self.app.setFont(font)
+            self._font_px = px
         if self.config is not None and persist:
             try:
                 if self.config.get("theme") != key:
@@ -661,6 +658,53 @@ class ThemeManager(QObject):
             except Exception:
                 pass
         self.changed.emit(key)
+
+    def _build_qss(self, key: str) -> str:
+        """Monta a folha de estilo completa do tema (com cache por tema)."""
+        base = ""
+        if QT_MATERIAL_AVAILABLE and _qt_material is not None:
+            try:
+                # O app usa qtawesome. A geração de ícones do qt_material grava
+                # centenas de SVG em ~/.qt_material a cada troca e é o que
+                # tornava a troca de tema lenta em máquinas com antivírus.
+                original = getattr(_qt_material, "set_icons_theme", None)
+                _qt_material.set_icons_theme = lambda *a, **k: None
+                try:
+                    base = (
+                        _qt_material.build_stylesheet(
+                            f"{key}_cyan.xml",
+                            invert_secondary=(key == "light"),
+                            export=True,
+                        )
+                        or ""
+                    )
+                finally:
+                    if original is not None:
+                        _qt_material.set_icons_theme = original
+            except Exception:
+                base = ""
+        qss = QSS_TEMPLATE.safe_substitute(**self.colors)
+        qss = re.sub(
+            r"font-size:\s*(\d+)px",
+            lambda match: f"font-size: {self.fs(int(match.group(1)))}px",
+            qss,
+        )
+        return base + "\n" + qss
+
+    def prewarm(self) -> None:
+        """Pré-monta o QSS do outro tema, para a primeira troca ser rápida."""
+        other = "light" if self.key == "dark" else "dark"
+        cache_key = (other, round(self.font_scale, 3))
+        if cache_key in self._qss_cache:
+            return
+        current = self.key
+        try:
+            self._build_derived(other)
+            self._qss_cache[cache_key] = self._build_qss(other)
+        except Exception:
+            pass
+        finally:
+            self._build_derived(current)
 
     def _apply_palette(self) -> None:
         c = self.colors
@@ -690,6 +734,13 @@ _THEME: ThemeManager | None = None
 
 def init_theme(app: QApplication, config: Any | None = None) -> ThemeManager:
     global _THEME
+    if QT_MATERIAL_AVAILABLE and _qt_material is not None:
+        try:
+            app.setStyle("Fusion")
+            # Carrega as fontes uma única vez; o build por tema usa export=True.
+            _qt_material.add_fonts()
+        except Exception:
+            pass
     _THEME = ThemeManager(app, config)
     key = "dark"
     if config is not None:

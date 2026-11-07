@@ -1,10 +1,10 @@
-# DiskPilot 1.3.4 — pacote de transporte em texto
+# DiskPilot 1.3.5 — pacote de transporte em texto
 
 Esta pasta existe para levar o projeto para um ambiente onde **só é possível
 copiar texto** (sem clone, sem ZIP, sem download de release).
 
 O conteúdo não é o código-fonte legível: é o projeto inteiro compactado
-(`tar.xz`, 64.448 bytes) e codificado em **Base85**, dividido em 4 partes de
+(`tar.xz`, 65.100 bytes) e codificado em **Base85**, dividido em 4 partes de
 texto ASCII. O script `restaurar_diskpilot.py` remonta o arquivo, confere o
 SHA-256 e extrai a pasta `DiskPilot/`.
 
@@ -12,15 +12,15 @@ SHA-256 e extrai a pasta `DiskPilot/`.
 
 | Arquivo | Bytes | SHA-256 (sem espaços/quebras) |
 |---|---|---|
-| `parte1.txt` | 20.476 | `dedd99208da147a8d686e3dcdefdebcd57f4aeac0acaf9327ca110a4dc6d33a3` |
-| `parte2.txt` | 20.476 | `0c28f61df78e0820bb8b927ff9778bcf23ba6f3d4d9041303c1e451e37dc502a` |
-| `parte3.txt` | 20.476 | `7bc91f111359777ffbaa406654aed3fa36925d57c392e109adde193442d50d21` |
-| `parte4.txt` | 20.476 | `7e86f2a06f69907498e9c675cbe8ebd089e83ac1d8c931e49922dec8fdb49f27` |
+| `parte1.txt` | 20.684 | `7559e4bbfef93c1e1fa63ca2bf13ae25ec0595f853bbdf7314a1ec9b16ea755b` |
+| `parte2.txt` | 20.684 | `6eda20772f05213b06e35979d8864fbaabe253d07f7d6fd12291ee5fccb080f0` |
+| `parte3.txt` | 20.684 | `e7a953bdec4ea76ee9dc04b877b0296f3a15c985fa9a45fac092b2406470703f` |
+| `parte4.txt` | 20.683 | `3fcdebf02d86ce65a09b5a6eb96a24a128f3296d3cf59754af6704346371281a` |
 
 SHA-256 do `tar.xz` reconstruído (verificado pelo script):
 
 ```text
-dedbaf378ce91644ddda19ff2d9be36989dcb56b25d1dc53b6e3e49607c4c095
+04f566f095c0a1cd2cc130afaa333e0c7c795ff3fb3496d83eb7e1f8db28d1c9
 ```
 
 ## Como usar
@@ -45,7 +45,7 @@ dedbaf378ce91644ddda19ff2d9be36989dcb56b25d1dc53b6e3e49607c4c095
 5. Confirme no `diskpilot.log`:
 
    ```text
-   iniciando DiskPilot 1.3.4
+   iniciando DiskPilot 1.3.5
    ```
 
 ## Diagnóstico de tela
@@ -66,7 +66,7 @@ Ele grava `diagnostico-diskpilot.txt` com Python, PySide6, versão do Qt, tela,
 py -c "from pathlib import Path; [print(p.name, len(''.join(p.read_text(encoding='ascii').split()))) for p in sorted(Path('.').glob('parte*.txt'))]"
 ```
 
-Esperado: `20140` nas quatro partes.
+Esperado: `20344`, `20344`, `20344`, `20343`.
 
 ## Observações
 
@@ -76,10 +76,10 @@ Esperado: `20140` nas quatro partes.
   `PySide6` já precisa existir no ambiente.
 - O código é distribuído sob licença **MIT** (`LICENSE`); as dependências
   mantêm suas licenças — inventário em `THIRD-PARTY.md`.
-- Esta versão: janela limitada ao tamanho da tela, correção contínua de saltos
-  de layout, barra de título sempre alcançável, avatar/logo com escala suave e
-  `diagnostico.py` incluído.
-- Este pacote é gerado a partir do commit `v1.3.4` deste repositório.
+- Esta versão: troca de tema com cache de QSS (uma única aplicação por troca),
+  sem a geração de ícones do qt_material; avatar/logo com escala suave; janela
+  limitada ao tamanho da tela e `diagnostico.py` incluído.
+- Este pacote é gerado a partir do commit `v1.3.5` deste repositório.
 
 ## URL dos arquivos crus
 

@@ -25,6 +25,7 @@ from PySide6.QtGui import (
     QShortcut,
 )
 from PySide6.QtWidgets import (
+    QApplication,
     QDialog,
     QFileDialog,
     QFrame,
@@ -304,7 +305,12 @@ class MainWindow(QWidget):
         self.repaint()
 
     def _toggle_theme(self) -> None:
-        key = self.theme.toggle()
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            QApplication.processEvents()
+            key = self.theme.toggle()
+        finally:
+            QApplication.restoreOverrideCursor()
         self.show_toast(
             f"Tema {'escuro' if key == 'dark' else 'claro'} aplicado.", "info"
         )
@@ -562,6 +568,7 @@ class MainWindow(QWidget):
             if self._start_fullscreen:
                 self._start_fullscreen = False
                 self.showFullScreen()
+            QTimer.singleShot(2500, self.theme.prewarm)
 
     # ---------------------------------------------------------------- drag
     def _start_drag(self, global_pos: QPoint) -> None:
