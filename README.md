@@ -26,7 +26,7 @@ O projeto nasceu como um "Everything gerencial e enxuto": em vez de apenas local
 - Abas verticais com ícones, indicador ativo, tooltip no modo compacto e transição de página com fade.
 - Menu hambúrguer com animação de largura; o estado (expandido/recolhido) é persistido.
 - Logo da empresa no topo da barra lateral, com clique para alterar, menu de contexto para remover e **persistência local**.
-- Usuário atual no rodapé da barra lateral, com avatar gerado a partir das iniciais (ou foto importada).
+- Usuário atual no rodapé da barra lateral, com avatar gerado a partir das iniciais (ou foto importada). Fotos são recortadas em círculo com prioridade para o topo em retratos, e a prévia do perfil usa escala correta em telas com DPI alto.
 
 ### Painel
 - Mini-dashboard com espaço total, quantidade de arquivos/pastas, espaço liberável com segurança e valores em revisão.
@@ -41,6 +41,7 @@ O projeto nasceu como um "Everything gerencial e enxuto": em vez de apenas local
 - Chips das raízes selecionadas, com remoção individual.
 - Varredura em segundo plano com `QThreadPool`, progresso, cancelamento e tolerância a erros de permissão. Logs em `diskpilot.log`/`diskpilot-crash.log` na pasta do projeto e na pasta de configuração.
 - Botão **Top 100**: ranking dos 100 maiores diretórios e dos 100 maiores arquivos da análise, com tamanho, percentual, caminho completo, cópia do caminho e abertura no Explorer.
+- **Exportação de dados** no Top 100: CSV (Excel/LibreOffice, com BOM UTF-8 e separador `;`) e JSON (resumo, raízes, Top 100 e sugestões com caminhos).
 - Árvore aninhada carregada sob demanda, com:
   - tamanho de cada pasta (soma recursiva) e de cada arquivo;
   - percentual em relação ao pai;
@@ -314,6 +315,8 @@ class ClientesPage(BasePage):
 - A árvore é preguiçosa: os filhos de uma pasta só são criados quando ela é expandida, com limite de 1.200 itens por pasta e busca global limitada para manter a responsividade.
 - As estimativas de limpeza não são destrutivas e podem se sobrepor; os cálculos já evitam contar arquivos de cache duas vezes e mostram "seguro" separado de "revisar".
 - O logo e o avatar são copiados com `shutil`, não vinculados ao arquivo original.
+- `circular_pixmap` pinta a imagem em coordenadas físicas e só aplica o `devicePixelRatio` no final; em retratos, o recorte prioriza o topo. As prévias em `QLabel` usam `setScaledContents(True)` para não cortar o canto do pixmap em telas com DPI alto.
+- A exportação de dados usa apenas a biblioteca padrão (`csv` e `json`): CSV com BOM UTF-8 e separador `;` para Excel/LibreOffice; JSON com resumo, raízes, Top 100 e sugestões.
 - O `sidebar.py` detecta se `icons.py` aceita o parâmetro `dpr` (adicionado na 1.3.4) e chama `avatar_pixmap`/`circular_pixmap` com ou sem ele. Assim, uma atualização parcial de arquivos não quebra o avatar com `TypeError`.
 - O seletor de pastas usa `QFileSystemModel` e exibe o caminho completo do item atual/selecionado em um rótulo selecionável (com cópia), além de tooltip por linha. O caminho não é abreviado, o que ajuda em compartilhamentos de rede.
 - O ranking **Top 100** percorre a árvore em memória com `heapq.nlargest` (duas passagens: diretórios e arquivos), sem ordenar todos os nós. Percentuais de diretórios são cumulativos e podem se sobrepor.

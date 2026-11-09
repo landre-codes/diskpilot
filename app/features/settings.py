@@ -149,6 +149,7 @@ class SettingsPage(BasePage):
         self.avatar_preview = QLabel()
         self.avatar_preview.setFixedSize(56, 56)
         self.avatar_preview.setAlignment(Qt.AlignCenter)
+        self.avatar_preview.setScaledContents(True)
         user_row.addWidget(self.avatar_preview)
         user_text = QVBoxLayout()
         user_text.setSpacing(1)

@@ -121,7 +121,11 @@ def avatar_pixmap(
 
 
 def circular_pixmap(path: str, size: int, dpr: float = 2.0) -> QPixmap:
-    """Carrega uma imagem, recorta no centro e aplica máscara circular."""
+    """Carrega uma imagem, recorta em círculo e aplica máscara.
+
+    Retratos são recortados com prioridade para o topo, preservando o rosto,
+    em vez de cortar o centro da imagem.
+    """
     pm = QPixmap(path)
     if pm.isNull():
         return QPixmap()
@@ -129,7 +133,6 @@ def circular_pixmap(path: str, size: int, dpr: float = 2.0) -> QPixmap:
     side = int(size * dpr)
     pm = pm.scaled(side, side, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
     result = QPixmap(side, side)
-    result.setDevicePixelRatio(dpr)
     result.fill(Qt.transparent)
     p = QPainter(result)
     p.setRenderHint(QPainter.Antialiasing)
@@ -137,10 +140,18 @@ def circular_pixmap(path: str, size: int, dpr: float = 2.0) -> QPixmap:
     mask = QPainterPath()
     mask.addEllipse(QRectF(0, 0, side, side))
     p.setClipPath(mask)
-    x = (side - pm.width()) // 2
-    y = (side - pm.height()) // 2
+    if pm.height() > side:
+        # Retrato: começa perto do topo (8% de folga) para não cortar a cabeça.
+        y = -int((pm.height() - side) * 0.08)
+        x = 0
+    else:
+        x = (side - pm.width()) // 2
+        y = 0
     p.drawPixmap(x, y, pm)
     p.end()
+    # O DPR é aplicado só depois da pintura: o QPainter usa coordenadas
+    # físicas e desenhar em `side` com DPR 2 cortava o canto da imagem.
+    result.setDevicePixelRatio(dpr)
     return result
 
 
@@ -151,7 +162,6 @@ def rounded_pixmap(path: str, size: int, radius: int = 10) -> QPixmap:
         return QPixmap()
     dpr = 2.0
     target = QPixmap(int(size * dpr), int(size * dpr))
-    target.setDevicePixelRatio(dpr)
     target.fill(Qt.transparent)
     scaled = pm.scaled(
         int(size * dpr), int(size * dpr), Qt.KeepAspectRatio, Qt.SmoothTransformation
@@ -168,6 +178,7 @@ def rounded_pixmap(path: str, size: int, radius: int = 10) -> QPixmap:
     y = (int(size * dpr) - scaled.height()) // 2
     p.drawPixmap(x, y, scaled)
     p.end()
+    target.setDevicePixelRatio(dpr)
     return target
 
 

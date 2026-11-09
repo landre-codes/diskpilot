@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import csv
+import json
 import os
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +24,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMenu,
     QToolTip,
     QTreeView,
     QTreeWidget,
@@ -29,11 +33,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .. import APP_NAME, __version__
 from ..config import AppConfig
 from ..icons import avatar_pixmap, circular_pixmap, icon
 from ..services.model import ScanResult, top_items
 from ..theme import get_theme
-from ..utils import format_bytes, normalize_path, open_in_explorer
+from ..utils import format_bytes, format_datetime, normalize_path, open_in_explorer
 from .buttons import ActionButton, IconButton, SelectButton
 
 
@@ -537,6 +542,10 @@ class TopItemsDialog(SheetDialog):
         )
         self.open_btn.clicked.connect(self._open_selected)
         self.footer.addWidget(self.open_btn)
+        self.export_btn = ActionButton("Exportar", "export-variant", "soft", self, 16)
+        self.export_btn.setToolTip("Exportar o ranking e o resumo da análise")
+        self.export_btn.clicked.connect(self._export_menu)
+        self.footer.addWidget(self.export_btn)
         self.status_label = QLabel("")
         self.status_label.setObjectName("Faint")
         self.footer.addWidget(self.status_label)
@@ -547,6 +556,198 @@ class TopItemsDialog(SheetDialog):
 
         self._populate()
         self._update_actions()
+        self.export_btn.setEnabled(result is not None)
+
+    def _export_menu(self) -> None:
+        if self.result is None:
+            return
+        theme = get_theme()
+        menu = QMenu(self.export_btn)
+        csv_action = menu.addAction(
+            icon("file-delimited", theme.color("muted"), 16),
+            "CSV — Top 100 (Excel)",
+        )
+        json_action = menu.addAction(
+            icon("code-json", theme.color("muted"), 16),
+            "JSON — resumo, Top 100 e sugestões",
+        )
+        chosen = menu.exec(
+            self.export_btn.mapToGlobal(QPoint(0, self.export_btn.height() + 5))
+        )
+        menu.deleteLater()
+        if chosen is csv_action:
+            self._export_csv()
+        elif chosen is json_action:
+            self._export_json()
+
+    @staticmethod
+    def _stamp() -> str:
+        return datetime.now().strftime("%Y%m%d-%H%M")
+
+    @staticmethod
+    def _iso_time(value: float) -> str:
+        try:
+            return datetime.fromtimestamp(float(value)).isoformat(
+                sep=" ", timespec="seconds"
+            )
+        except (OSError, OverflowError, ValueError, TypeError):
+            return ""
+
+    def _node_payload(self, node, rank: int, total: int) -> dict[str, Any]:
+        percent = node.size / total * 100.0 if total else 0.0
+        return {
+            "ranking": rank,
+            "caminho": node.path,
+            "nome": node.name,
+            "bytes": node.size,
+            "formatado": format_bytes(node.size),
+            "percentual": round(percent, 4),
+            "arquivos": node.files,
+            "pastas": node.dirs,
+            "modificado": self._iso_time(node.mtime),
+            "erro": node.error,
+        }
+
+    def _summary_payload(self) -> dict[str, Any]:
+        result = self.result
+        if result is None:
+            return {}
+        return {
+            "total_bytes": result.total_size,
+            "total_formatado": format_bytes(result.total_size),
+            "arquivos": result.total_files,
+            "pastas": result.total_dirs,
+            "erros": result.errors,
+            "duracao_s": round(result.elapsed, 3),
+            "iniciado_em": self._iso_time(result.started_at),
+            "truncado": result.truncated,
+            "raizes": [
+                {
+                    "caminho": root.path,
+                    "nome": root.name,
+                    "bytes": root.size,
+                    "formatado": format_bytes(root.size),
+                    "arquivos": root.files,
+                    "pastas": root.dirs,
+                }
+                for root in result.roots
+            ],
+        }
+
+    def _export_csv(self) -> None:
+        default = str(Path.home() / f"DiskPilot-top100-{self._stamp()}.csv")
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Exportar CSV", default, "CSV (*.csv)"
+        )
+        if not path:
+            return
+        if not path.lower().endswith(".csv"):
+            path += ".csv"
+        total = max(1, self.result.total_size if self.result is not None else 0)
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            with Path(path).open("w", encoding="utf-8-sig", newline="") as handle:
+                writer = csv.writer(handle, delimiter=";")
+                writer.writerow(
+                    [
+                        "categoria",
+                        "ranking",
+                        "caminho",
+                        "nome",
+                        "tamanho_bytes",
+                        "tamanho",
+                        "percentual",
+                        "arquivos",
+                        "pastas",
+                        "modificado",
+                        "erro",
+                    ]
+                )
+                for category, nodes in (
+                    ("Diretório", self._dirs),
+                    ("Arquivo", self._files),
+                ):
+                    for rank, node in enumerate(nodes, 1):
+                        percent = node.size / total * 100.0
+                        writer.writerow(
+                            [
+                                category,
+                                rank,
+                                node.path,
+                                node.name,
+                                node.size,
+                                format_bytes(node.size),
+                                f"{percent:.2f}".replace(".", ","),
+                                node.files,
+                                node.dirs,
+                                format_datetime(node.mtime),
+                                node.error,
+                            ]
+                        )
+        except OSError as exc:
+            self.status_label.setText("Falha ao exportar.")
+            self.status_label.setToolTip(str(exc))
+            return
+        finally:
+            QApplication.restoreOverrideCursor()
+        self.status_label.setText(f"Exportado: {Path(path).name}")
+        self.status_label.setToolTip(path)
+
+    def _export_json(self) -> None:
+        default = str(Path.home() / f"DiskPilot-analise-{self._stamp()}.json")
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Exportar JSON", default, "JSON (*.json)"
+        )
+        if not path:
+            return
+        if not path.lower().endswith(".json"):
+            path += ".json"
+        result = self.result
+        total = max(1, result.total_size if result is not None else 0)
+        payload = {
+            "aplicativo": APP_NAME,
+            "versao": __version__,
+            "exportado_em": datetime.now().isoformat(
+                sep=" ", timespec="seconds"
+            ),
+            "resumo": self._summary_payload(),
+            "top_diretorios": [
+                self._node_payload(node, rank, total)
+                for rank, node in enumerate(self._dirs, 1)
+            ],
+            "top_arquivos": [
+                self._node_payload(node, rank, total)
+                for rank, node in enumerate(self._files, 1)
+            ],
+            "sugestoes": [
+                {
+                    "chave": suggestion.key,
+                    "titulo": suggestion.title,
+                    "descricao": suggestion.description,
+                    "economia_bytes": suggestion.savings,
+                    "economia_formatada": format_bytes(suggestion.savings),
+                    "quantidade": suggestion.count,
+                    "confianca": suggestion.confidence,
+                    "nota": suggestion.note,
+                    "caminhos": list(suggestion.paths),
+                }
+                for suggestion in (result.suggestions if result is not None else [])
+            ],
+        }
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            Path(path).write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except OSError as exc:
+            self.status_label.setText("Falha ao exportar.")
+            self.status_label.setToolTip(str(exc))
+            return
+        finally:
+            QApplication.restoreOverrideCursor()
+        self.status_label.setText(f"Exportado: {Path(path).name}")
+        self.status_label.setToolTip(path)
 
     def _show_kind(self, key: str) -> None:
         self._kind = "files" if key == "files" else "dirs"
@@ -673,6 +874,7 @@ class ProfileDialog(SheetDialog):
         self.avatar = QLabel(self)
         self.avatar.setFixedSize(88, 88)
         self.avatar.setAlignment(Qt.AlignCenter)
+        self.avatar.setScaledContents(True)
         preview_row.addWidget(self.avatar, 0)
         info = QVBoxLayout()
         info.setSpacing(6)
