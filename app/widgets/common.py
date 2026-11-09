@@ -18,7 +18,6 @@ from PySide6.QtWidgets import (
 
 from ..icons import icon
 from ..theme import get_theme
-from ..utils import short_path
 from .buttons import IconButton
 
 
@@ -329,7 +328,7 @@ class Chip(QFrame):
         lay.setSpacing(6)
         self.icon = IconLabel("folder", 15, "primary", self)
         lay.addWidget(self.icon, 0, Qt.AlignVCenter)
-        self.label = QLabel(short_path(path, 44))
+        self.label = QLabel(path)
         self.label.setObjectName("ChipText")
         lay.addWidget(self.label, 1, Qt.AlignVCenter)
         close = IconButton(

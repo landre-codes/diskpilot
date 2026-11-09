@@ -42,6 +42,7 @@ O projeto nasceu como um "Everything gerencial e enxuto": em vez de apenas local
 - Varredura em segundo plano com `QThreadPool`, progresso, cancelamento e tolerância a erros de permissão. Logs em `diskpilot.log`/`diskpilot-crash.log` na pasta do projeto e na pasta de configuração.
 - Botão **Top 100**: ranking dos 100 maiores diretórios e dos 100 maiores arquivos da análise, com filtro por tamanho (todos, > 100 MB, > 1 GB), tamanho, percentual, caminho completo, cópia do caminho e abertura no Explorer.
 - Coluna opcional **Caminho completo** na árvore, ativada pelo checkbox na barra de ferramentas e persistida na configuração. A coluna cresce até o caminho mais longo exibido (sem reticências), mantém **Nome** com no mínimo 280 px e usa rolagem horizontal em janelas estreitas. O caminho do item selecionado também aparece inteiro em um rodapé selecionável.
+- Os chips das raízes e a tabela do **Top 100** também exibem o caminho completo; no Top 100 a coluna de caminho cresce até o conteúdo e há um rodapé com o caminho da linha selecionada.
 - **Exportação de dados** pelo botão **Exportar** no cabeçalho da análise (ou pelo Top 100): janela com seleção de formato e destino. CSV para Excel/LibreOffice, XLSX com abas Resumo, Top 100 e Sugestões, e XLSB binário (requer Microsoft Excel instalado).
 - Árvore aninhada carregada sob demanda, com:
   - tamanho de cada pasta (soma recursiva) e de cada arquivo;

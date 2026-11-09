@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QDir, QEvent, QModelIndex, QPoint, QStandardPaths, Qt
+from PySide6.QtCore import QDir, QEvent, QModelIndex, QPoint, QStandardPaths, Qt, QTimer
 from PySide6.QtGui import QColor, QGuiApplication
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QGraphicsDropShadowEffect,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QListWidget,
@@ -527,11 +528,20 @@ class TopItemsDialog(SheetDialog):
         self.tree.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
         self.tree.setIndentation(0)
         header = self.tree.header()
-        header.setStretchLastSection(True)
-        self.tree.setColumnWidth(0, 42)
-        self.tree.setColumnWidth(1, 92)
-        self.tree.setColumnWidth(2, 62)
+        header.setStretchLastSection(False)
+        for column, width in ((0, 42), (1, 92), (2, 62)):
+            header.setSectionResizeMode(column, QHeaderView.Fixed)
+            self.tree.setColumnWidth(column, width)
+        header.setSectionResizeMode(3, QHeaderView.Interactive)
+        self.tree.setTextElideMode(Qt.ElideMiddle)
         self.body.addWidget(self.tree, 1)
+
+        self.path_label = QLabel("")
+        self.path_label.setObjectName("PathText")
+        self.path_label.setWordWrap(True)
+        self.path_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.path_label.setVisible(False)
+        self.body.addWidget(self.path_label)
 
         note = QLabel(
             "Percentuais usam o espaço total analisado. Em diretórios, os valores "
@@ -576,6 +586,10 @@ class TopItemsDialog(SheetDialog):
         self._populate()
         self._update_actions()
         self.export_btn.setEnabled(result is not None)
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        QTimer.singleShot(0, self._fit_path_width)
 
     def _export_menu(self) -> None:
         if self.scan_result is None:
@@ -739,6 +753,20 @@ class TopItemsDialog(SheetDialog):
             f"{format_bytes(self._total)} analisados · {len(nodes)} {noun}"
         )
         self.status_label.setText("")
+        self.path_label.setText("")
+        self.path_label.setVisible(False)
+        self._fit_path_width()
+
+    def _fit_path_width(self) -> None:
+        metrics = self.tree.fontMetrics()
+        width = 0
+        for index in range(self.tree.topLevelItemCount()):
+            item = self.tree.topLevelItem(index)
+            text = item.text(3)
+            if text:
+                width = max(width, metrics.horizontalAdvance(text) + 32)
+        available = self.tree.viewport().width() - 42 - 92 - 62 - 8
+        self.tree.setColumnWidth(3, max(480, available, width))
 
     def _track_selection(self) -> None:
         item = self.tree.currentItem()
@@ -746,6 +774,8 @@ class TopItemsDialog(SheetDialog):
             self._selected_path = ""
         else:
             self._selected_path = item.text(3)
+        self.path_label.setText(self._selected_path)
+        self.path_label.setVisible(bool(self._selected_path))
         self.status_label.setText("")
         self._update_actions()
 
