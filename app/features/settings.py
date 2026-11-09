@@ -9,7 +9,6 @@ from PySide6.QtCore import QSize, QSignalBlocker, Qt
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QButtonGroup,
-    QCheckBox,
     QDialog,
     QFileDialog,
     QFrame,
@@ -99,19 +98,6 @@ class SettingsPage(BasePage):
         self.theme_note = QLabel("")
         self.theme_note.setObjectName("Faint")
         theme_card.body.addWidget(self.theme_note)
-
-        self.native_frame = QCheckBox(
-            "Usar a moldura nativa do Windows (reinicie o app para aplicar)"
-        )
-        self.native_frame.setToolTip(
-            "Se a barra de título personalizada não responder nesta tela, "
-            "ative esta opção: o app passa a usar a barra de título do Windows."
-        )
-        self.native_frame.setChecked(
-            bool(self.state.config.get("native_frame", False))
-        )
-        self.native_frame.toggled.connect(self._toggle_native_frame)
-        theme_card.body.addWidget(self.native_frame)
         body.addWidget(theme_card)
 
         # Identidade ------------------------------------------------------
@@ -317,15 +303,6 @@ class SettingsPage(BasePage):
         self._on_theme_changed(get_theme().key)
 
     # ------------------------------------------------------------------ tema
-    def _toggle_native_frame(self, checked: bool) -> None:
-        self.state.config.set("native_frame", bool(checked))
-        self.toast(
-            "Moldura nativa "
-            + ("ativada" if checked else "desativada")
-            + ". Reinicie o DiskPilot para aplicar.",
-            "info",
-        )
-
     def _apply_theme(self, key: str) -> None:
         if get_theme().key == key:
             return

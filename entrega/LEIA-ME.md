@@ -1,10 +1,10 @@
-# DiskPilot 1.3.9 — pacote de transporte em texto
+# DiskPilot 1.4.0 — pacote de transporte em texto
 
 Esta pasta existe para levar o projeto para um ambiente onde **só é possível
 copiar texto** (sem clone, sem ZIP, sem download de release).
 
 O conteúdo não é o código-fonte legível: é o projeto inteiro compactado
-(`tar.xz`, 67.132 bytes) e codificado em **Base85**, dividido em 4 partes de
+(`tar.xz`, 67.496 bytes) e codificado em **Base85**, dividido em 4 partes de
 texto ASCII. O script `restaurar_diskpilot.py` remonta o arquivo, confere o
 SHA-256 e extrai a pasta `DiskPilot/`.
 
@@ -12,15 +12,15 @@ SHA-256 e extrai a pasta `DiskPilot/`.
 
 | Arquivo | Bytes | SHA-256 (sem espaços/quebras) |
 |---|---|---|
-| `parte1.txt` | 21.329 | `9aa90c0807a93ac2c005fb5f335756d92aa8470c02ff83285bd6840462d79c5e` |
-| `parte2.txt` | 21.329 | `13ae381b0fdc83f14a90c8bbe85739623b12df3f21dd115dcf5b7aa167bcea68` |
-| `parte3.txt` | 21.329 | `cd39cda417ffb7b70ba1de661c573bd9a6dd549b87e4c9e6017ded088016ebf0` |
-| `parte4.txt` | 21.328 | `75e17ba39180e5a93ed117b8fc0b5d4de512815bad0cf0e124874a5294348c26` |
+| `parte1.txt` | 21.445 | `9e8dee7ff4203b02104013743e1e9287ca6dbb63bb48b94b6949b9a8f1ed169f` |
+| `parte2.txt` | 21.445 | `c8b527badc5c64ce91a1e5370855c49e685ffb09cb56b9e64ffc5560e37441c8` |
+| `parte3.txt` | 21.445 | `41ea77d1261b31e824d909f279ba55b1e967ec1056ddfecc70b962282375cac5` |
+| `parte4.txt` | 21.443 | `ac442bebc7f6223350bc2d16cce8628643d22eb503193614fedfd2174ab0f26e` |
 
 SHA-256 do `tar.xz` reconstruído (verificado pelo script):
 
 ```text
-ee16fc6f3d90abd36adc08de67fe7947c8c98604d44d0a71f70f13750bb740a9
+2da021cc789c50dffb68a2d055f9b320c39bf01ec109d32b9c024f6fd975639c
 ```
 
 ## Como usar
@@ -45,30 +45,30 @@ ee16fc6f3d90abd36adc08de67fe7947c8c98604d44d0a71f70f13750bb740a9
 5. Confirme no `diskpilot.log`:
 
    ```text
-   iniciando DiskPilot 1.3.9
+   iniciando DiskPilot 1.4.0
    ```
 
 ## Novidades desta versão
 
-- **Hover visível no tema claro**: tokens `hover`/`hover_border` (`#d8ebef` /
-  `#8fbac2`) aplicados a botões, itens de árvore, cartões, campos e combos.
-  O tema escuro permanece igual.
-- **Moldura nativa do Windows** (Configurações → Aparência): plano B para telas
-  ou ambientes em que a barra de título personalizada não responde. Requer
-  reiniciar o app; a escolha fica em `config.json` (`native_frame`).
-- Correção: o "vigia de geometria" é interrompido ao maximizar, restaurar ou
-  entrar em tela cheia, para não desfazer a ação do usuário.
-- Mantém: setas da árvore, cópia com `Ctrl+C`, contraste dos campos e cache de
-  tema.
+- **Barra de título responsiva**: o título e o slogan agora elidem (reticências)
+  e encolhem; os botões de janela mantêm tamanho e posição e nunca ficam fora
+  da área clicável em telas pequenas. Em larguras menores o slogan é ocultado.
+- Corrigido o "vigia de geometria" que podia desfazer um maximizar/restaurar
+  feito logo após a abertura.
+- Hover com tokens próprios, visível no tema claro (`#d8ebef` / `#8fbac2`).
+- Removida a opção experimental de moldura nativa: a janela volta a ser sempre
+  sem moldura, com a barra de título do app.
+- Mantém: setas da árvore, cópia com `Ctrl+C`, contraste dos campos em
+  azul-escuro no tema claro e cache de QSS na troca de tema.
 
-## Se a barra de título continuar falhando
+## Diagnóstico
 
-1. Rode `py diagnostico.py` e guarde `diagnostico-diskpilot.txt`.
-2. Ative **Configurações → Aparência → Usar a moldura nativa do Windows** e
-   reinicie. A barra passa a ser a do próprio Windows, que sempre responde.
-3. Se a moldura nativa resolver, o problema está no caminho sem moldura
-   (frameless) deste ambiente — e o relatório do diagnóstico mostra em qual
-   etapa a geometria sai da tela.
+```powershell
+py diagnostico.py
+```
+
+Grava `diagnostico-diskpilot.txt` com Python, PySide6, versão do Qt, tela,
+`devicePixelRatio`, escala e a geometria em cada etapa de maximizar/restaurar.
 
 ## Diagnóstico de integridade do pacote
 
@@ -76,7 +76,7 @@ ee16fc6f3d90abd36adc08de67fe7947c8c98604d44d0a71f70f13750bb740a9
 py -c "from pathlib import Path; [print(p.name, len(''.join(p.read_text(encoding='ascii').split()))) for p in sorted(Path('.').glob('parte*.txt'))]"
 ```
 
-Esperado: `20979`, `20979`, `20979`, `20978`.
+Esperado: `21093`, `21093`, `21093`, `21091`.
 
 ## Observações
 
@@ -86,14 +86,14 @@ Esperado: `20979`, `20979`, `20979`, `20978`.
   `PySide6` já precisa existir no ambiente.
 - O código é distribuído sob licença **MIT** (`LICENSE`); as dependências
   mantêm suas licenças — inventário em `THIRD-PARTY.md`.
-- Este pacote é gerado a partir do commit `v1.3.9` deste repositório.
+- Este pacote é gerado a partir do commit `v1.4.0` deste repositório.
 
 ## URL dos arquivos crus
 
 ```text
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.3.9/entrega/parte1.txt
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.3.9/entrega/parte2.txt
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.3.9/entrega/parte3.txt
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.3.9/entrega/parte4.txt
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.3.9/entrega/restaurar_diskpilot.py
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.4.0/entrega/parte1.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.4.0/entrega/parte2.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.4.0/entrega/parte3.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.4.0/entrega/parte4.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.4.0/entrega/restaurar_diskpilot.py
 ```
