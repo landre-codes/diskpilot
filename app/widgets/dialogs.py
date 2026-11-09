@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import QDir, QEvent, QModelIndex, QPoint, QStandardPaths, Qt
-from PySide6.QtGui import QColor, QGuiApplication, QPixmap
+from PySide6.QtGui import QColor, QGuiApplication
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -40,7 +40,7 @@ from ..services.exporter import (
 )
 from ..services.model import ScanResult, top_items
 from ..theme import get_theme
-from ..utils import format_bytes, format_datetime, normalize_path, open_in_explorer
+from ..utils import format_bytes, normalize_path, open_in_explorer
 from .buttons import ActionButton, IconButton, SelectButton
 
 

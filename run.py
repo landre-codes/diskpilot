@@ -100,7 +100,7 @@ def main() -> int:
     app.setApplicationVersion(__version__)
     app.setApplicationDisplayName(APP_NAME)
 
-    translators = install_pt_br(app)
+    install_pt_br(app)
     guard = SingleInstanceGuard(app)
     if not guard.acquire():
         return 0

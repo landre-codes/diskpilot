@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Iterable
 
 from PySide6.QtCore import QPoint, QRectF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QColor, QFont, QIcon, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QAction, QColor, QFont, QIcon, QPainter, QPen
 from PySide6.QtWidgets import (
     QLineEdit,
     QMenu,

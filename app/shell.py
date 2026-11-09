@@ -40,7 +40,7 @@ from . import APP_NAME, APP_TAGLINE
 from .config import AppConfig
 from .features.base import BasePage, PageSpec
 from .services.state import AppState
-from .theme import ThemeManager, get_theme
+from .theme import ThemeManager
 from .widgets.common import Toast
 from .widgets.dialogs import ProfileDialog
 from .widgets.sidebar import Sidebar

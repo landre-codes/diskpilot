@@ -3,29 +3,24 @@
 from __future__ import annotations
 
 from inspect import signature
-from typing import Any
 
 from PySide6.QtCore import (
     QEasingCurve,
     QPropertyAnimation,
     QRectF,
-    QSize,
     Qt,
     Signal,
     Property,
 )
 from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPixmap
 from PySide6.QtWidgets import (
-    QFrame,
-    QHBoxLayout,
     QMenu,
-    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 
 from ..config import AppConfig
-from ..icons import avatar_pixmap, circular_pixmap, icon, rounded_pixmap
+from ..icons import avatar_pixmap, circular_pixmap, icon
 from ..theme import get_theme
 from .buttons import NavButton
 from .common import Divider

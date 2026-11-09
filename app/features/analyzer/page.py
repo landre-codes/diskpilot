@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
@@ -22,7 +21,7 @@ from PySide6.QtWidgets import (
 from ...services.model import ScanProgress, ScanResult
 from ...utils import format_bytes, format_number, short_path
 from ...widgets.buttons import ActionButton, IconButton, SearchField, SelectButton
-from ...widgets.common import Card, Chip, ElidedLabel, EmptyState, PageHeader
+from ...widgets.common import Chip, ElidedLabel, EmptyState, PageHeader
 from ...widgets.dialogs import ExportDialog, FolderPickerDialog, TopItemsDialog
 from ..base import BasePage
 from .tree import FileTree

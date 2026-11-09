@@ -12,14 +12,12 @@ from PySide6.QtCore import QModelIndex, QRect, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QColor,
     QFont,
-    QFontMetrics,
     QKeySequence,
     QPainter,
     QPen,
     QShortcut,
 )
 from PySide6.QtWidgets import (
-    QApplication,
     QHeaderView,
     QMenu,
     QStyle,
@@ -310,7 +308,27 @@ class FileTree(QTreeWidget):
         self._path_visible = bool(visible)
         self.setColumnHidden(6, not self._path_visible)
         if self._path_visible:
-            self.setColumnWidth(6, 600)
+            self._fit_path_columns()
+        else:
+            self.header().setSectionResizeMode(0, QHeaderView.Stretch)
+
+    def _fit_path_columns(self) -> None:
+        """Divide o espaço entre Nome e Caminho sem estrangular o Nome."""
+        if not self._path_visible:
+            return
+        header = self.header()
+        header.setSectionResizeMode(0, QHeaderView.Interactive)
+        header.setSectionResizeMode(6, QHeaderView.Interactive)
+        viewport = max(1, self.viewport().width())
+        fixed = sum(self.columnWidth(column) for column in range(1, 6))
+        name_width = max(280, viewport - fixed - 600)
+        path_width = min(600, max(220, viewport - fixed - name_width))
+        self.setColumnWidth(0, name_width)
+        self.setColumnWidth(6, path_width)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._fit_path_columns()
 
     def set_query(self, query: str) -> None:
         self._query = _fold(query.strip())
