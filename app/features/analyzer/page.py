@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import Qt, QTimer
@@ -22,7 +23,7 @@ from ...services.model import ScanProgress, ScanResult
 from ...utils import format_bytes, format_number, short_path
 from ...widgets.buttons import ActionButton, IconButton, SearchField, SelectButton
 from ...widgets.common import Card, Chip, ElidedLabel, EmptyState, PageHeader
-from ...widgets.dialogs import FolderPickerDialog, TopItemsDialog
+from ...widgets.dialogs import ExportDialog, FolderPickerDialog, TopItemsDialog
 from ..base import BasePage
 from .tree import FileTree
 
@@ -49,6 +50,10 @@ class AnalyzerPage(BasePage):
         self.top_btn.setToolTip("Ver os 100 maiores diretórios e arquivos da última análise")
         self.top_btn.clicked.connect(self._open_top_items)
         self.header.add_action(self.top_btn)
+        self.export_btn = ActionButton("Exportar", "export-variant", "ghost")
+        self.export_btn.setToolTip("Exportar análise em CSV, XLSX ou XLSB")
+        self.export_btn.clicked.connect(self._open_export)
+        self.header.add_action(self.export_btn)
         self.rescan_btn = ActionButton("Reanalisar", "refresh", "ghost")
         self.rescan_btn.clicked.connect(self._rescan)
         self.header.add_action(self.rescan_btn)
@@ -268,6 +273,7 @@ class AnalyzerPage(BasePage):
         result = self.state.last_result
         count = len(self.state.roots)
         self.top_btn.setEnabled(result is not None)
+        self.export_btn.setEnabled(result is not None)
         if result is not None:
             errors = f" · {result.errors} avisos" if result.errors else ""
             self.header.subtitle.setText(
@@ -323,6 +329,16 @@ class AnalyzerPage(BasePage):
         dialog.exec()
         dialog.deleteLater()
 
+    def _open_export(self) -> None:
+        result = self.state.last_result
+        if result is None:
+            self.toast("Execute uma análise para exportar os dados.", "info")
+            return
+        dialog = ExportDialog(self.window(), result)
+        if dialog.exec() == QDialog.Accepted and dialog.exported_path:
+            self.toast(f"Dados exportados: {Path(dialog.exported_path).name}", "success")
+        dialog.deleteLater()
+
     # --------------------------------------------------------------- filtros
     def _on_search(self, text: str) -> None:
         self.tree.set_query(text)
@@ -373,6 +389,7 @@ class AnalyzerPage(BasePage):
         self.cancel_btn.setEnabled(True)
         self.rescan_btn.setEnabled(False)
         self.top_btn.setEnabled(False)
+        self.export_btn.setEnabled(False)
         self.header.subtitle.setText("Analisando as pastas selecionadas…")
         self._update_empty()
 

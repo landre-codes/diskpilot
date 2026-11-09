@@ -1,10 +1,10 @@
-# DiskPilot 1.6.2 — pacote de transporte em texto
+# DiskPilot 1.6.3 — pacote de transporte em texto
 
 Esta pasta existe para levar o projeto para um ambiente onde **só é possível
 copiar texto** (sem clone, sem ZIP, sem download de release).
 
 O conteúdo não é o código-fonte legível: é o projeto inteiro compactado
-(`tar.xz`, 74.952 bytes) e codificado em **Base85**, dividido em 4 partes de
+(`tar.xz`, 75.724 bytes) e codificado em **Base85**, dividido em 4 partes de
 texto ASCII. O script `restaurar_diskpilot.py` remonta o arquivo, confere o
 SHA-256 e extrai a pasta `DiskPilot/`.
 
@@ -12,15 +12,15 @@ SHA-256 e extrai a pasta `DiskPilot/`.
 
 | Arquivo | Bytes | SHA-256 (sem espaços/quebras) |
 |---|---|---|
-| `parte1.txt` | 23.664 | `32659003bddf37366a73bfdcb2d829c88ecee3c86c3e9fd973593ede5ee23c4c` |
-| `parte2.txt` | 23.665 | `fcacf9bf9119e065389548332adf0c4a379c4abc4b601bc381be20ad37cebfd3` |
-| `parte3.txt` | 23.662 | `d8ca4607aee72bc1bda9027e0c469ed3a20b3d27b743065eaf949ed1689eea50` |
-| `parte4.txt` | 23.666 | `6855f33c33d9591da8a630612c02aa559238cb878e8e1797003fa0371435b7ac` |
+| `parte1.txt` | 23.907 | `afb16b77af7dedd531b40e2c938609ba964130bc3794996e9fb784ace61ddcba` |
+| `parte2.txt` | 23.905 | `c12e95567f41044a569c4c0030673bce388cf557978f15a1ede6bb1909073ea9` |
+| `parte3.txt` | 23.912 | `6a3a7e2f5fb28a1062d850555d444af7f87b0f31402d0877251c59716f581e31` |
+| `parte4.txt` | 23.904 | `6b6909a0c2111dfecd572f16fb3f2610154c46e025851b2dc0ce3490f2e11377` |
 
 SHA-256 do `tar.xz` reconstruído (verificado pelo script):
 
 ```text
-589f4715135c10850e578076002968e0388e9ebedd16bacf000ecf2b7acb3a26
+20e6870135d319648c6f3a87794061bd9f4f9118b2463e38a63241b03f5eb3d6
 ```
 
 ## Como usar
@@ -45,11 +45,17 @@ SHA-256 do `tar.xz` reconstruído (verificado pelo script):
 5. Confirme no `diskpilot.log`:
 
    ```text
-   iniciando DiskPilot 1.6.2
+   iniciando DiskPilot 1.6.3
    ```
 
 ## Novidades desta versão
 
+- **Janela de exportação na análise**: botão **Exportar** no cabeçalho abre uma
+  janela para escolher CSV, XLSX ou XLSB e o destino. O XLSX traz abas Resumo,
+  Top 100 e Sugestões; o XLSB requer Microsoft Excel e pywin32.
+- **Coluna de caminho corrigida**: a coluna “Caminho completo” deixou de ter
+  largura fixa; agora é redimensionável, começa com 600 px e usa reticências no
+  meio para caminhos longos. O checkbox continua persistindo a preferência.
 - **Caminho completo na árvore**: checkbox “Caminho completo” na barra de
   ferramentas exibe a coluna com o caminho integral de cada item; a preferência
   é salva. O caminho também continua no tooltip da linha.
@@ -60,10 +66,9 @@ SHA-256 do `tar.xz` reconstruído (verificado pelo script):
   coordenadas físicas e recebe o DPR só no final, evitando o recorte em quatro
   cantos que aparecia nas prévias. Retratos priorizam o topo (rosto), e as
   prévias usam escala correta em telas com DPI alto.
-- **Exportação de dados**: no diálogo Top 100, o botão Exportar oferece CSV
-  (Excel/LibreOffice, UTF-8 com BOM e separador `;`), XLSX (abas Resumo,
-  Top 100 e Sugestões) e XLSB (binário do Excel; requer Microsoft Excel e
-  pywin32 instalados).
+- **Exportação de dados**: CSV (Excel/LibreOffice, UTF-8 com BOM e separador
+  `;`), XLSX (abas Resumo, Top 100 e Sugestões) e XLSB (binário do Excel;
+  requer Microsoft Excel e pywin32 instalados).
 - **Expansão da árvore em lotes**: pastas grandes não travam mais a interface.
   Os filhos são carregados em lotes de 120 itens, com debounce de 60 ms e aviso
   “Carregando…”; a ordenação usa `heapq` com limite de 1.200 itens e os ícones
@@ -117,7 +122,7 @@ Grava `diagnostico-diskpilot.txt` com Python, PySide6, versão do Qt, tela,
 py -c "from pathlib import Path; [print(p.name, len(''.join(p.read_text(encoding='ascii').split()))) for p in sorted(Path('.').glob('parte*.txt'))]"
 ```
 
-Esperado: `23423`, `23423`, `23423`, `23421`.
+Esperado: `23664`, `23664`, `23664`, `23663`.
 
 ## Observações
 
@@ -128,14 +133,14 @@ Esperado: `23423`, `23423`, `23423`, `23421`.
   Microsoft Excel instalado.
 - O código é distribuído sob licença **MIT** (`LICENSE`); as dependências
   mantêm suas licenças — inventário em `THIRD-PARTY.md`.
-- Este pacote é gerado a partir do commit `v1.6.2` deste repositório.
+- Este pacote é gerado a partir do commit `v1.6.3` deste repositório.
 
 ## URL dos arquivos crus
 
 ```text
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.6.2/entrega/parte1.txt
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.6.2/entrega/parte2.txt
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.6.2/entrega/parte3.txt
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.6.2/entrega/parte4.txt
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.6.2/entrega/restaurar_diskpilot.py
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.6.3/entrega/parte1.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.6.3/entrega/parte2.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.6.3/entrega/parte3.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.6.3/entrega/parte4.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.6.3/entrega/restaurar_diskpilot.py
 ```

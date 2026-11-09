@@ -148,14 +148,17 @@ class FileTree(QTreeWidget):
         header = self.header()
         header.setStretchLastSection(False)
         header.setSectionResizeMode(0, QHeaderView.Stretch)
-        for column, width in ((1, 124), (2, 82), (3, 96), (4, 140), (5, 92), (6, 360)):
+        for column, width in ((1, 124), (2, 82), (3, 96), (4, 140), (5, 92)):
             header.setSectionResizeMode(column, QHeaderView.Fixed)
             self.setColumnWidth(column, width)
+        header.setSectionResizeMode(6, QHeaderView.Interactive)
+        self.setColumnWidth(6, 600)
         header.setMinimumSectionSize(64)
         header.setHighlightSections(False)
         for column in (1, 2, 3, 4):
             self.headerItem().setTextAlignment(column, Qt.AlignRight | Qt.AlignVCenter)
         self.headerItem().setTextAlignment(6, Qt.AlignLeft | Qt.AlignVCenter)
+        self.setTextElideMode(Qt.ElideMiddle)
         self.setColumnHidden(6, True)
         self._path_visible = False
         self._size_delegate = SizeBarDelegate(self)
@@ -307,7 +310,7 @@ class FileTree(QTreeWidget):
         self._path_visible = bool(visible)
         self.setColumnHidden(6, not self._path_visible)
         if self._path_visible:
-            self.setColumnWidth(6, 360)
+            self.setColumnWidth(6, 600)
 
     def set_query(self, query: str) -> None:
         self._query = _fold(query.strip())

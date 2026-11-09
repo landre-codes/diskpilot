@@ -2,11 +2,7 @@
 
 from __future__ import annotations
 
-import csv
 import os
-import shutil
-import tempfile
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -34,9 +30,14 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .. import APP_NAME, __version__
 from ..config import AppConfig
 from ..icons import avatar_pixmap, circular_pixmap, icon
+from ..services.exporter import (
+    default_export_path,
+    write_csv,
+    write_xlsb,
+    write_xlsx,
+)
 from ..services.model import ScanResult, top_items
 from ..theme import get_theme
 from ..utils import format_bytes, format_datetime, normalize_path, open_in_explorer
@@ -460,7 +461,7 @@ class TopItemsDialog(SheetDialog):
             1080,
             680,
         )
-        self.result = result
+        self.scan_result = result
         self._kind = "dirs"
         self._selected_path = ""
         QApplication.setOverrideCursor(Qt.WaitCursor)
@@ -560,7 +561,7 @@ class TopItemsDialog(SheetDialog):
         self.export_btn.setEnabled(result is not None)
 
     def _export_menu(self) -> None:
-        if self.result is None:
+        if self.scan_result is None:
             return
         theme = get_theme()
         menu = QMenu(self.export_btn)
@@ -587,280 +588,34 @@ class TopItemsDialog(SheetDialog):
         elif chosen is xlsb_action:
             self._export_xlsb()
 
-    @staticmethod
-    def _stamp() -> str:
-        return datetime.now().strftime("%Y%m%d-%H%M")
-
-    def _item_rows(self) -> list[dict[str, Any]]:
-        result = self.result
-        total = max(1, result.total_size if result is not None else 0)
-        rows: list[dict[str, Any]] = []
-        for category, nodes in (
-            ("Diretório", self._dirs),
-            ("Arquivo", self._files),
-        ):
-            for rank, node in enumerate(nodes, 1):
-                percent = node.size / total * 100.0 if total else 0.0
-                rows.append(
-                    {
-                        "categoria": category,
-                        "ranking": rank,
-                        "caminho": node.path,
-                        "nome": node.name,
-                        "bytes": node.size,
-                        "formatado": format_bytes(node.size),
-                        "percentual": round(percent, 2),
-                        "arquivos": node.files,
-                        "pastas": node.dirs,
-                        "modificado": format_datetime(node.mtime),
-                        "erro": node.error,
-                    }
-                )
-        return rows
-
-    def _summary_payload(self) -> dict[str, Any]:
-        result = self.result
-        if result is None:
-            return {}
-        return {
-            "total_bytes": result.total_size,
-            "total_formatado": format_bytes(result.total_size),
-            "arquivos": result.total_files,
-            "pastas": result.total_dirs,
-            "erros": result.errors,
-            "duracao_s": round(result.elapsed, 3),
-            "iniciado_em": format_datetime(result.started_at),
-            "truncado": "Sim" if result.truncated else "Não",
-            "raizes": [
-                {
-                    "caminho": root.path,
-                    "nome": root.name,
-                    "bytes": root.size,
-                    "formatado": format_bytes(root.size),
-                    "arquivos": root.files,
-                    "pastas": root.dirs,
-                }
-                for root in result.roots
-            ],
-        }
-
-    @staticmethod
-    def _style_header(ws, row: int, count: int) -> None:
-        from openpyxl.styles import Alignment, Font, PatternFill
-
-        for column in range(1, count + 1):
-            cell = ws.cell(row=row, column=column)
-            cell.font = Font(bold=True, color="FFFFFF")
-            cell.fill = PatternFill("solid", fgColor="008E9C")
-            cell.alignment = Alignment(horizontal="center", vertical="center")
-
-    def _write_xlsx(self, path: str) -> None:
-        from openpyxl import Workbook
-        from openpyxl.styles import Alignment, Font
-        from openpyxl.utils import get_column_letter
-
-        result = self.result
-        if result is None:
-            raise ValueError("Nenhuma análise disponível para exportar.")
-        workbook = Workbook()
-
-        summary = workbook.active
-        summary.title = "Resumo"
-        payload = self._summary_payload()
-        summary.append([APP_NAME, ""])
-        summary.merge_cells("A1:B1")
-        summary["A1"].font = Font(bold=True, size=14)
-        summary.append(["Exportado em", datetime.now().strftime("%d/%m/%Y %H:%M")])
-        summary.append([])
-        summary.append(["Métrica", "Valor"])
-        self._style_header(summary, 4, 2)
-        for label, value in (
-            ("Espaço analisado", payload.get("total_formatado", "")),
-            ("Total em bytes", payload.get("total_bytes", 0)),
-            ("Arquivos", payload.get("arquivos", 0)),
-            ("Pastas", payload.get("pastas", 0)),
-            ("Avisos de acesso", payload.get("erros", 0)),
-            ("Duração (s)", payload.get("duracao_s", 0)),
-            ("Início", payload.get("iniciado_em", "")),
-            ("Varredura limitada", payload.get("truncado", "Não")),
-        ):
-            summary.append([label, value])
-        summary.append([])
-        roots_row = summary.max_row + 1
-        summary.append(["Raízes", ""])
-        summary.cell(row=roots_row, column=1).font = Font(bold=True)
-        summary.append(["Caminho", "Nome", "Tamanho", "Bytes", "Arquivos", "Pastas"])
-        self._style_header(summary, roots_row + 1, 6)
-        for root in payload.get("raizes", []):
-            summary.append(
-                [
-                    root["caminho"],
-                    root["nome"],
-                    root["formatado"],
-                    root["bytes"],
-                    root["arquivos"],
-                    root["pastas"],
-                ]
-            )
-        for column, width in (
-            ("A", 52),
-            ("B", 24),
-            ("C", 16),
-            ("D", 16),
-            ("E", 12),
-            ("F", 12),
-        ):
-            summary.column_dimensions[column].width = width
-        summary.freeze_panes = "A2"
-
-        top = workbook.create_sheet("Top 100")
-        headers = [
-            "Categoria",
-            "Ranking",
-            "Caminho completo",
-            "Nome",
-            "Bytes",
-            "Tamanho",
-            "Percentual",
-            "Arquivos",
-            "Pastas",
-            "Modificado",
-            "Erro",
-        ]
-        top.append(headers)
-        self._style_header(top, 1, len(headers))
-        for row in self._item_rows():
-            top.append(
-                [
-                    row["categoria"],
-                    row["ranking"],
-                    row["caminho"],
-                    row["nome"],
-                    row["bytes"],
-                    row["formatado"],
-                    row["percentual"],
-                    row["arquivos"],
-                    row["pastas"],
-                    row["modificado"],
-                    row["erro"],
-                ]
-            )
-        for column, width in (
-            ("A", 12),
-            ("B", 9),
-            ("C", 70),
-            ("D", 30),
-            ("E", 14),
-            ("F", 12),
-            ("G", 11),
-            ("H", 10),
-            ("I", 10),
-            ("J", 18),
-            ("K", 30),
-        ):
-            top.column_dimensions[column].width = width
-        for cell in top["E"][1:]:
-            cell.number_format = "#,##0"
-        for cell in top["G"][1:]:
-            cell.number_format = '0.00"%"'
-        top.freeze_panes = "A2"
-        if top.max_row > 1:
-            top.auto_filter.ref = f"A1:K{top.max_row}"
-
-        suggestions = workbook.create_sheet("Sugestões")
-        sug_headers = [
-            "Chave",
-            "Título",
-            "Descrição",
-            "Economia",
-            "Bytes",
-            "Quantidade",
-            "Confiança",
-            "Nota",
-            "Caminhos",
-        ]
-        suggestions.append(sug_headers)
-        self._style_header(suggestions, 1, len(sug_headers))
-        for suggestion in result.suggestions:
-            suggestions.append(
-                [
-                    suggestion.key,
-                    suggestion.title,
-                    suggestion.description,
-                    format_bytes(suggestion.savings),
-                    suggestion.savings,
-                    suggestion.count,
-                    suggestion.confidence,
-                    suggestion.note,
-                    "\n".join(suggestion.paths),
-                ]
-            )
-        for column, width in (
-            ("A", 20),
-            ("B", 34),
-            ("C", 48),
-            ("D", 14),
-            ("E", 14),
-            ("F", 12),
-            ("G", 12),
-            ("H", 34),
-            ("I", 60),
-        ):
-            suggestions.column_dimensions[column].width = width
-        for row in suggestions.iter_rows(min_row=2):
-            for cell in row:
-                cell.alignment = Alignment(vertical="top", wrap_text=True)
-        suggestions.freeze_panes = "A2"
-
-        workbook.save(path)
-
-    def _export_csv(self) -> None:
-        default = str(Path.home() / f"DiskPilot-top100-{self._stamp()}.csv")
+    def _ask_export(self, title: str, prefix: str, extension: str) -> str:
         path, _ = QFileDialog.getSaveFileName(
-            self, "Exportar CSV", default, "CSV (*.csv)"
+            self,
+            f"Exportar {title}",
+            default_export_path(prefix, extension),
+            f"{title} (*.{extension})",
         )
         if not path:
+            return ""
+        if not path.lower().endswith(f".{extension}"):
+            path += f".{extension}"
+        return path
+
+    def _export_error(self, message: str) -> None:
+        self.status_label.setText("Falha ao exportar.")
+        self.status_label.setToolTip(message)
+
+    def _export_csv(self) -> None:
+        if self.scan_result is None:
             return
-        if not path.lower().endswith(".csv"):
-            path += ".csv"
+        path = self._ask_export("CSV", "top100", "csv")
+        if not path:
+            return
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
-            with Path(path).open("w", encoding="utf-8-sig", newline="") as handle:
-                writer = csv.writer(handle, delimiter=";")
-                writer.writerow(
-                    [
-                        "categoria",
-                        "ranking",
-                        "caminho",
-                        "nome",
-                        "tamanho_bytes",
-                        "tamanho",
-                        "percentual",
-                        "arquivos",
-                        "pastas",
-                        "modificado",
-                        "erro",
-                    ]
-                )
-                for row in self._item_rows():
-                    writer.writerow(
-                        [
-                            row["categoria"],
-                            row["ranking"],
-                            row["caminho"],
-                            row["nome"],
-                            row["bytes"],
-                            row["formatado"],
-                            f"{row['percentual']:.2f}".replace(".", ","),
-                            row["arquivos"],
-                            row["pastas"],
-                            row["modificado"],
-                            row["erro"],
-                        ]
-                    )
-        except OSError as exc:
-            self.status_label.setText("Falha ao exportar.")
-            self.status_label.setToolTip(str(exc))
+            write_csv(self.scan_result, self._dirs, self._files, path)
+        except Exception as exc:
+            self._export_error(str(exc))
             return
         finally:
             QApplication.restoreOverrideCursor()
@@ -868,26 +623,21 @@ class TopItemsDialog(SheetDialog):
         self.status_label.setToolTip(path)
 
     def _export_xlsx(self) -> None:
-        default = str(Path.home() / f"DiskPilot-top100-{self._stamp()}.xlsx")
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Exportar XLSX", default, "XLSX (*.xlsx)"
-        )
+        if self.scan_result is None:
+            return
+        path = self._ask_export("XLSX", "top100", "xlsx")
         if not path:
             return
-        if not path.lower().endswith(".xlsx"):
-            path += ".xlsx"
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
-            self._write_xlsx(path)
+            write_xlsx(self.scan_result, self._dirs, self._files, path)
         except ImportError:
-            self.status_label.setText("XLSX requer openpyxl.")
-            self.status_label.setToolTip(
-                "Instale com: py -m pip install openpyxl"
+            self._export_error(
+                "XLSX requer openpyxl. Instale com: py -m pip install openpyxl"
             )
             return
         except Exception as exc:
-            self.status_label.setText("Falha ao exportar.")
-            self.status_label.setToolTip(str(exc))
+            self._export_error(str(exc))
             return
         finally:
             QApplication.restoreOverrideCursor()
@@ -895,53 +645,27 @@ class TopItemsDialog(SheetDialog):
         self.status_label.setToolTip(path)
 
     def _export_xlsb(self) -> None:
-        default = str(Path.home() / f"DiskPilot-top100-{self._stamp()}.xlsb")
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Exportar XLSB", default, "XLSB (*.xlsb)"
-        )
+        if self.scan_result is None:
+            return
+        path = self._ask_export("XLSB", "top100", "xlsb")
         if not path:
             return
-        if not path.lower().endswith(".xlsb"):
-            path += ".xlsb"
-        temp_dir = Path(tempfile.mkdtemp(prefix="diskpilot-xlsb-"))
-        temp_xlsx = temp_dir / "export.xlsx"
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
-            self._write_xlsx(str(temp_xlsx))
-            try:
-                import win32com.client as win32
-            except ImportError:
-                self.status_label.setText("XLSB requer pywin32.")
-                self.status_label.setToolTip(
-                    "Instale com: py -m pip install pywin32"
-                )
-                return
-            excel = win32.DispatchEx("Excel.Application")
-            try:
-                excel.Visible = False
-                excel.DisplayAlerts = False
-                book = excel.Workbooks.Open(str(temp_xlsx))
-                try:
-                    book.SaveAs(str(Path(path).resolve()), FileFormat=50)
-                finally:
-                    book.Close(False)
-            finally:
-                excel.Quit()
+            write_xlsb(self.scan_result, self._dirs, self._files, path)
         except ImportError:
-            self.status_label.setText("XLSB requer openpyxl e pywin32.")
-            self.status_label.setToolTip(
+            self._export_error(
+                "XLSB requer openpyxl e pywin32. "
                 "Instale com: py -m pip install openpyxl pywin32"
             )
             return
         except Exception as exc:
-            self.status_label.setText("Falha ao exportar XLSB.")
-            self.status_label.setToolTip(
+            self._export_error(
                 f"{exc} — XLSB requer Microsoft Excel instalado."
             )
             return
         finally:
             QApplication.restoreOverrideCursor()
-            shutil.rmtree(temp_dir, ignore_errors=True)
         self.status_label.setText(f"Exportado: {Path(path).name}")
         self.status_label.setToolTip(path)
 
@@ -1010,6 +734,108 @@ class TopItemsDialog(SheetDialog):
     def _open_path(self, path: str) -> None:
         if path:
             open_in_explorer(path)
+
+
+class ExportDialog(SheetDialog):
+    """Janela de exportação da análise em CSV, XLSX ou XLSB."""
+
+    def __init__(self, parent: QWidget | None, result: ScanResult) -> None:
+        super().__init__(
+            parent,
+            "Exportar dados",
+            "Escolha o formato e confirme o local do arquivo.",
+            560,
+            340,
+        )
+        self.scan_result = result
+        self._dirs, self._files = top_items(result, 100)
+        self.exported_path = ""
+
+        format_row = QHBoxLayout()
+        format_row.setSpacing(10)
+        caption = QLabel("Formato")
+        caption.setObjectName("Muted")
+        format_row.addWidget(caption)
+        self.format_btn = SelectButton("file-export", "CSV", self)
+        self.format_btn.setMinimumWidth(190)
+        self.format_btn.set_options(
+            [
+                ("csv", "CSV — Excel/LibreOffice", "file-delimited"),
+                ("xlsx", "XLSX — pasta do Excel", "file-excel"),
+                ("xlsb", "XLSB — binário do Excel", "microsoft-excel"),
+            ],
+            "csv",
+        )
+        format_row.addWidget(self.format_btn)
+        format_row.addStretch(1)
+        self.body.addLayout(format_row)
+
+        summary = QLabel(
+            "O arquivo inclui o resumo da análise, os 100 maiores diretórios, "
+            "os 100 maiores arquivos e as sugestões."
+        )
+        summary.setObjectName("Muted")
+        summary.setWordWrap(True)
+        self.body.addWidget(summary)
+        note = QLabel(
+            "CSV: tabela do Top 100. XLSX: abas Resumo, Top 100 e Sugestões. "
+            "XLSB: requer Microsoft Excel e pywin32 instalados."
+        )
+        note.setObjectName("Faint")
+        note.setWordWrap(True)
+        self.body.addWidget(note)
+        self.error = QLabel("")
+        self.error.setObjectName("BadgeDanger")
+        self.error.setWordWrap(True)
+        self.error.setVisible(False)
+        self.body.addWidget(self.error)
+        self.body.addStretch(1)
+
+        cancel = ActionButton("Cancelar", "", "ghost", self)
+        cancel.clicked.connect(self.reject)
+        self.footer.addStretch(1)
+        self.footer.addWidget(cancel)
+        export = ActionButton("Exportar", "export-variant", "primary", self)
+        export.clicked.connect(self._export)
+        self.footer.addWidget(export)
+
+    def _export(self) -> None:
+        fmt = self.format_btn.current()
+        titles = {"csv": "CSV", "xlsx": "XLSX", "xlsb": "XLSB"}
+        title = titles.get(fmt, "CSV")
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            f"Exportar {title}",
+            default_export_path("analise", fmt),
+            f"{title} (*.{fmt})",
+        )
+        if not path:
+            return
+        if not path.lower().endswith(f".{fmt}"):
+            path += f".{fmt}"
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            if fmt == "csv":
+                write_csv(self.scan_result, self._dirs, self._files, path)
+            elif fmt == "xlsx":
+                write_xlsx(self.scan_result, self._dirs, self._files, path)
+            else:
+                write_xlsb(self.scan_result, self._dirs, self._files, path)
+        except ImportError:
+            self.error.setText(
+                "Dependência ausente. Instale com: "
+                "py -m pip install openpyxl pywin32"
+            )
+            self.error.setVisible(True)
+            return
+        except Exception as exc:
+            self.error.setText(str(exc))
+            self.error.setVisible(True)
+            return
+        finally:
+            QApplication.restoreOverrideCursor()
+        self.exported_path = path
+        self.accept()
 
 
 class ConfirmDialog(SheetDialog):
