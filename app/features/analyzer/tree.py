@@ -117,9 +117,17 @@ class FileTree(QTreeWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("FileTree")
-        self.setColumnCount(6)
+        self.setColumnCount(7)
         self.setHeaderLabels(
-            ["Nome", "Tamanho", "% do pai", "Itens", "Modificado", "Tipo"]
+            [
+                "Nome",
+                "Tamanho",
+                "% do pai",
+                "Itens",
+                "Modificado",
+                "Tipo",
+                "Caminho completo",
+            ]
         )
         self.setAlternatingRowColors(True)
         self.setUniformRowHeights(True)
@@ -140,13 +148,16 @@ class FileTree(QTreeWidget):
         header = self.header()
         header.setStretchLastSection(False)
         header.setSectionResizeMode(0, QHeaderView.Stretch)
-        for column, width in ((1, 124), (2, 82), (3, 96), (4, 140), (5, 92)):
+        for column, width in ((1, 124), (2, 82), (3, 96), (4, 140), (5, 92), (6, 360)):
             header.setSectionResizeMode(column, QHeaderView.Fixed)
             self.setColumnWidth(column, width)
         header.setMinimumSectionSize(64)
         header.setHighlightSections(False)
         for column in (1, 2, 3, 4):
             self.headerItem().setTextAlignment(column, Qt.AlignRight | Qt.AlignVCenter)
+        self.headerItem().setTextAlignment(6, Qt.AlignLeft | Qt.AlignVCenter)
+        self.setColumnHidden(6, True)
+        self._path_visible = False
         self._size_delegate = SizeBarDelegate(self)
         self.setItemDelegateForColumn(1, self._size_delegate)
         self._result: ScanResult | None = None
@@ -291,6 +302,12 @@ class FileTree(QTreeWidget):
     def set_result(self, result: ScanResult | None) -> None:
         self._result = result
         self.rebuild()
+
+    def set_path_visible(self, visible: bool) -> None:
+        self._path_visible = bool(visible)
+        self.setColumnHidden(6, not self._path_visible)
+        if self._path_visible:
+            self.setColumnWidth(6, 360)
 
     def set_query(self, query: str) -> None:
         self._query = _fold(query.strip())
@@ -592,6 +609,7 @@ class FileTree(QTreeWidget):
                 self._item_count_text(node),
                 format_datetime(node.mtime),
                 "Raiz" if is_root else ("Pasta" if node.is_dir else self._type_text(node)),
+                node.path,
             ]
         )
         item.setData(0, NODE_ROLE, node)
@@ -603,9 +621,11 @@ class FileTree(QTreeWidget):
         for column in (1, 2, 3, 4):
             item.setTextAlignment(column, Qt.AlignRight | Qt.AlignVCenter)
         item.setTextAlignment(5, Qt.AlignLeft | Qt.AlignVCenter)
+        item.setTextAlignment(6, Qt.AlignLeft | Qt.AlignVCenter)
         if node.error:
             item.setForeground(0, QColor(get_theme().color("danger")))
         item.setToolTip(0, self._node_tooltip(node))
+        item.setToolTip(6, node.path)
         if is_root:
             f = item.font(0)
             f.setWeight(QFont.DemiBold)

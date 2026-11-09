@@ -101,12 +101,14 @@ def main() -> int:
     app.setApplicationDisplayName(APP_NAME)
 
     translators = install_pt_br(app)
-    input_guard = CtrlWheelGuard(app)
-    app.installEventFilter(input_guard)
     guard = SingleInstanceGuard(app)
     if not guard.acquire():
         return 0
     app.aboutToQuit.connect(guard.close)
+
+    input_guard = CtrlWheelGuard(app)
+    app.installEventFilter(input_guard)
+    app.aboutToQuit.connect(input_guard.stop)
 
     config = AppConfig()
     _configure_logging(config)

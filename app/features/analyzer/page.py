@@ -6,6 +6,7 @@ from typing import Any
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
+    QCheckBox,
     QDialog,
     QFrame,
     QHBoxLayout,
@@ -143,6 +144,11 @@ class AnalyzerPage(BasePage):
         )
         self.sort_btn.changed.connect(self._on_sort)
         controls_row.addWidget(self.sort_btn)
+        self.path_check = QCheckBox("Caminho completo")
+        self.path_check.setToolTip("Mostrar a coluna com o caminho completo")
+        self.path_check.setChecked(bool(self.state.config.get("ui.tree_path", False)))
+        self.path_check.toggled.connect(self._on_path_toggle)
+        controls_row.addWidget(self.path_check)
         self.readonly_hint = QLabel("Somente leitura · nada é apagado")
         self.readonly_hint.setObjectName("Faint")
         self.readonly_hint.setToolTip(
@@ -200,6 +206,7 @@ class AnalyzerPage(BasePage):
         self.stack.setContentsMargins(0, 0, 0, 0)
         self.tree = FileTree(self.stack_host)
         self.tree.set_unit(self.unit_btn.current())
+        self.tree.set_path_visible(self.path_check.isChecked())
         self.tree.countChanged.connect(self._on_count)
         self.tree.statusMessage.connect(lambda msg: self.toast(msg, "info"))
         self.stack.addWidget(self.tree)
@@ -333,6 +340,10 @@ class AnalyzerPage(BasePage):
     def _on_unit(self, unit: str) -> None:
         self.state.config.set("ui.size_unit", unit)
         self.tree.set_unit(unit)
+
+    def _on_path_toggle(self, checked: bool) -> None:
+        self.state.config.set("ui.tree_path", bool(checked))
+        self.tree.set_path_visible(bool(checked))
 
     def clear_filters(self) -> None:
         self.search.set_text("")

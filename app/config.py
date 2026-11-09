@@ -37,6 +37,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "ui": {
         "tree_sort": "size_desc",
         "tree_filter": "all",
+        "tree_path": False,
         "size_unit": "auto",
     },
 }

@@ -41,6 +41,7 @@ O projeto nasceu como um "Everything gerencial e enxuto": em vez de apenas local
 - Chips das raízes selecionadas, com remoção individual.
 - Varredura em segundo plano com `QThreadPool`, progresso, cancelamento e tolerância a erros de permissão. Logs em `diskpilot.log`/`diskpilot-crash.log` na pasta do projeto e na pasta de configuração.
 - Botão **Top 100**: ranking dos 100 maiores diretórios e dos 100 maiores arquivos da análise, com tamanho, percentual, caminho completo, cópia do caminho e abertura no Explorer.
+- Coluna opcional **Caminho completo** na árvore, ativada pelo checkbox na barra de ferramentas e persistida na configuração; o caminho integral também aparece no tooltip de cada item.
 - **Exportação de dados** no Top 100: CSV (Excel/LibreOffice, com BOM UTF-8 e separador `;`), XLSX (pasta de trabalho com abas Resumo, Top 100 e Sugestões) e XLSB (binário do Excel, requer Microsoft Excel instalado).
 - Árvore aninhada carregada sob demanda, com:
   - tamanho de cada pasta (soma recursiva) e de cada arquivo;
@@ -327,6 +328,7 @@ class ClientesPage(BasePage):
 - `qt-material` fornece a base do tema; o QSS em `theme.py` sobrescreve o que é necessário (especialmente `text-transform`, hovers e cores semânticas) para manter a identidade do app.
 - A geometria inicial e a restaurada são limitadas à área útil da tela: em notebooks pequenos (ou com escala de 125%/150%) a janela não nasce maior que o monitor, então a barra de título e os botões de janela continuam clicáveis. O tamanho mínimo também se adapta ao monitor.
 - O `WM_NCHITTEST` nativo converte a posição do cursor para o espaço lógico do Qt antes de detectar as bordas. Sem isso, em telas com escala o canto direito inteiro era confundido com borda de redimensionamento e os botões de maximizar/fechar não respondiam — o usuário precisava maximizar com duplo clique no meio da barra.
+- O filtro global de `Ctrl+roda` é removido no `aboutToQuit` (`CtrlWheelGuard.stop`) e não chama `super().eventFilter` durante o teardown. Isso evita a recursão de `RuntimeError`/objetos C++ já destruídos no encerramento do Python/Qt.
 - Maximizar e restaurar são controlados pelo próprio app, e não por `showMaximized()`: em janelas sem moldura o `normalGeometry()` do Qt pode crescer a cada ciclo e devolver um retângulo maior que a tela. O estado salvo (geometria e maximizado) é aplicado antes do primeiro `show`, para a janela não piscar em tamanhos intermediários.
 - A janela tem **tamanho máximo igual à área útil da tela** (e a posição é limitada para manter a barra de título alcançável), então nenhum salto de layout consegue empurrar os botões para fora do monitor. O log registra tela, escala e geometria em cada maximizar/restaurar para diagnóstico.
 - A troca de tema usa **cache de QSS por tema** e uma única chamada a `setStyleSheet`. A geração de ícones do `qt_material` (que reescrevia centenas de SVG em `~/.qt_material` a cada troca) é desativada — o app usa apenas qtawesome —, e o QSS do outro tema é pré-montado em segundo plano após a abertura.
