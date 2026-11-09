@@ -117,31 +117,21 @@ QToolTip {
 /* ---------------------------------------------------------- janela */
 QFrame#WindowShell {
     background: $window;
-    border: 1px solid $border;
-    border-radius: 16px;
-}
-QFrame#WindowShell[windowMaximized="true"] {
-    border-radius: 0px;
     border: none;
+    border-radius: 0px;
 }
 QFrame#TitleBar {
     background: $window;
     border: none;
     border-bottom: 1px solid $border;
-    border-top-left-radius: 16px;
-    border-top-right-radius: 16px;
-}
-QFrame#TitleBar[windowMaximized="true"] {
-    border-top-left-radius: 0px;
-    border-top-right-radius: 0px;
+    border-radius: 0px;
 }
 QWidget#Sidebar {
     background: $sidebar;
     border: none;
     border-right: 1px solid $border;
-    border-bottom-left-radius: 16px;
+    border-radius: 0px;
 }
-QWidget#Sidebar[windowMaximized="true"] { border-bottom-left-radius: 0px; }
 QWidget#ContentArea { background: transparent; }
 QLabel#AppTitle { font-size: 14px; font-weight: 600; }
 QLabel#AppStatus { color: $muted; font-size: 12px; }

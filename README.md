@@ -13,7 +13,7 @@ O projeto nasceu como um "Everything gerencial e enxuto": em vez de apenas local
 ## Recursos
 
 ### Shell / aparência
-- Janela sem moldura com barra de título própria, cantos arredondados e redimensionamento nativo nas bordas (Windows).
+- Janela sem moldura e sem borda externa, com barra de título própria (slogan centralizado) e redimensionamento nativo nas bordas (Windows).
 - Sem `QGraphicsDropShadowEffect`: a sombra gráfica foi removida para evitar artefatos de repintura em janelas translúcidas.
 - Instância única por usuário: abrir o app novamente reativa a janela existente em vez de criar outra.
 - `Ctrl + roda do mouse` é consumido globalmente para evitar zoom/rolagem acidental em widgets Qt.
@@ -314,6 +314,7 @@ class ClientesPage(BasePage):
 - O logo e o avatar são copiados com `shutil`, não vinculados ao arquivo original.
 - `qt-material` fornece a base do tema; o QSS em `theme.py` sobrescreve o que é necessário (especialmente `text-transform`, hovers e cores semânticas) para manter a identidade do app.
 - A geometria inicial e a restaurada são limitadas à área útil da tela: em notebooks pequenos (ou com escala de 125%/150%) a janela não nasce maior que o monitor, então a barra de título e os botões de janela continuam clicáveis. O tamanho mínimo também se adapta ao monitor.
+- O `WM_NCHITTEST` nativo converte a posição do cursor para o espaço lógico do Qt antes de detectar as bordas. Sem isso, em telas com escala o canto direito inteiro era confundido com borda de redimensionamento e os botões de maximizar/fechar não respondiam — o usuário precisava maximizar com duplo clique no meio da barra.
 - Maximizar e restaurar são controlados pelo próprio app, e não por `showMaximized()`: em janelas sem moldura o `normalGeometry()` do Qt pode crescer a cada ciclo e devolver um retângulo maior que a tela. O estado salvo (geometria e maximizado) é aplicado antes do primeiro `show`, para a janela não piscar em tamanhos intermediários.
 - A janela tem **tamanho máximo igual à área útil da tela** (e a posição é limitada para manter a barra de título alcançável), então nenhum salto de layout consegue empurrar os botões para fora do monitor. O log registra tela, escala e geometria em cada maximizar/restaurar para diagnóstico.
 - A troca de tema usa **cache de QSS por tema** e uma única chamada a `setStyleSheet`. A geração de ícones do `qt_material` (que reescrevia centenas de SVG em `~/.qt_material` a cada troca) é desativada — o app usa apenas qtawesome —, e o QSS do outro tema é pré-montado em segundo plano após a abertura.
@@ -321,7 +322,7 @@ class ClientesPage(BasePage):
 - A árvore aceita `Ctrl+C` e menu de contexto para copiar **linha(s)** (Nome, Tamanho, %, Itens, Modificado, Tipo e Caminho, separados por tabulação), **tamanho** ou **caminho**. A seleção múltipla copia todas as linhas escolhidas.
 - Textos de `QLineEdit`, `QComboBox` e `QAbstractSpinBox` usam o token `input_text`: claro no tema escuro e **azul-escuro** (`#06232b`) no tema claro. A cor também é fixada nos estados `:hover` e `:focus`, e o placeholder usa o token `placeholder` (mais escuro no tema claro), garantindo contraste.
 - Os estados de hover usam os tokens `hover`/`hover_border`, com contraste próprio em cada tema (no claro, `#d8ebef`), em vez de reutilizar `surface_2`/`surface_3`.
-- A barra de título é **responsiva**: título e slogan usam rótulos que elidem (reticências) em vez de empurrar o layout. Em janelas estreitas o slogan sai de cena e os botões de janela mantêm o tamanho e a posição — nunca ficam fora da área clicável.
+- A barra de título é **responsiva e sem moldura**: o título e o slogan usam rótulos que elidem (reticências) em vez de empurrar o layout. O slogan "Gestor de espaço" fica centralizado no meio exato da barra e não intercepta cliques — arraste e duplo clique funcionam em toda a barra.
 
 ---
 

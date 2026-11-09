@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ctypes
 import logging
 import os
 import sys
@@ -19,6 +18,7 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import (
     QCloseEvent,
+    QCursor,
     QGuiApplication,
     QIcon,
     QKeySequence,
@@ -88,7 +88,6 @@ class FadeStack(QStackedWidget):
 
 class MainWindow(QWidget):
     #: Faixa de redimensionamento nativa (px) a partir da borda da janela.
-    #: Fica dentro da margem transparente de 6 px + 2 px de folga.
     RESIZE_BORDER = 8
     log = logging.getLogger("diskpilot.shell")
 
@@ -138,8 +137,9 @@ class MainWindow(QWidget):
         icon_path = Path(__file__).resolve().parent / "assets" / "app_icon.svg"
         if icon_path.exists():
             self.setWindowIcon(QIcon(str(icon_path)))
-        self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
-        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setWindowFlags(
+            Qt.Window | Qt.FramelessWindowHint | Qt.NoDropShadowWindowHint
+        )
         self.setAcceptDrops(True)
         # Piso absoluto; _restore_geometry ajusta ao tamanho real da tela.
         self.setMinimumSize(880, 540)
@@ -160,7 +160,7 @@ class MainWindow(QWidget):
     # ------------------------------------------------------------------ UI
     def _build_ui(self) -> None:
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(6, 6, 6, 6)
+        outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
         self.shell = QFrame(self)
         self.shell.setObjectName("WindowShell")
@@ -327,14 +327,7 @@ class MainWindow(QWidget):
             self._apply_screen_constraints()
             maximized = self._maximized or self.isMaximized() or self.isFullScreen()
             self._shell_state = (self._maximized, self.isFullScreen())
-            margins = 0 if maximized else 6
-            self.layout().setContentsMargins(margins, margins, margins, margins)
-            self.shell.setProperty("windowMaximized", maximized)
-            self.title_bar.setProperty("windowMaximized", maximized)
-            self.sidebar.setProperty("windowMaximized", maximized)
             self.title_bar.set_maximized(maximized)
-            for widget in (self.shell, self.title_bar, self.sidebar):
-                self._repolish(widget)
         finally:
             self._applying_state = False
             self._resume_updates("state")
@@ -777,12 +770,39 @@ class MainWindow(QWidget):
         self._normal_geometry = QRect(self.geometry())
 
     # ------------------------------------------------- hit test nativo (Win)
+    def _native_resize_code(self, local: QPoint) -> int | None:
+        """Código HT* do Windows para a borda sob o ponto local (lógico)."""
+        if self._maximized or self.isMaximized() or self.isFullScreen():
+            return None
+        border = self.RESIZE_BORDER
+        left = local.x() < border
+        right = local.x() >= self.width() - border
+        top = local.y() < border
+        bottom = local.y() >= self.height() - border
+        if left and top:
+            return 13  # HTTOPLEFT
+        if right and top:
+            return 14  # HTTOPRIGHT
+        if left and bottom:
+            return 16  # HTBOTTOMLEFT
+        if right and bottom:
+            return 17  # HTBOTTOMRIGHT
+        if left:
+            return 10  # HTLEFT
+        if right:
+            return 11  # HTRIGHT
+        if top:
+            return 12  # HTTOP
+        if bottom:
+            return 15  # HTBOTTOM
+        return None
+
     def nativeEvent(self, eventType, message):  # noqa: N802
-        """Resize nativo nas bordas, inclusive sobre a sombra translúcida.
+        """Resize nativo nas bordas, inclusive sobre widgets filhos.
 
         O Windows envia WM_NCHITTEST antes de entregar o mouse ao widget;
         assim o redimensionamento funciona mesmo quando o cursor está sobre
-        a margem transparente ou sobre um filho próximo à borda.
+        um filho próximo à borda.
         """
         if sys.platform.startswith("win"):
             try:
@@ -790,37 +810,15 @@ class MainWindow(QWidget):
                     from ctypes import wintypes
 
                     msg = wintypes.MSG.from_address(int(message))
-                    if (
-                        msg.message == 0x0084  # WM_NCHITTEST
-                        and not self._maximized
-                        and not self.isMaximized()
-                        and not self.isFullScreen()
-                    ):
-                        x = ctypes.c_short(msg.lParam & 0xFFFF).value
-                        y = ctypes.c_short((msg.lParam >> 16) & 0xFFFF).value
-                        local = self.mapFromGlobal(QPoint(x, y))
-                        border = self.RESIZE_BORDER
-                        left = local.x() < border
-                        right = local.x() >= self.width() - border
-                        top = local.y() < border
-                        bottom = local.y() >= self.height() - border
-                        code = None
-                        if left and top:
-                            code = 13  # HTTOPLEFT
-                        elif right and top:
-                            code = 14  # HTTOPRIGHT
-                        elif left and bottom:
-                            code = 16  # HTBOTTOMLEFT
-                        elif right and bottom:
-                            code = 17  # HTBOTTOMRIGHT
-                        elif left:
-                            code = 10  # HTLEFT
-                        elif right:
-                            code = 11  # HTRIGHT
-                        elif top:
-                            code = 12  # HTTOP
-                        elif bottom:
-                            code = 15  # HTBOTTOM
+                    if msg.message == 0x0084:  # WM_NCHITTEST
+                        # O lParam vem em pixels físicos do Windows. Em telas
+                        # com escala (125%/150%) usar esses valores como se
+                        # fossem lógicos fazia o canto direito inteiro ser
+                        # tratado como borda de redimensionamento — inclusive
+                        # os botões de maximizar e fechar. QCursor.pos() já
+                        # está no espaço lógico do Qt.
+                        local = self.mapFromGlobal(QCursor.pos())
+                        code = self._native_resize_code(local)
                         if code is not None:
                             return True, code
             except Exception:

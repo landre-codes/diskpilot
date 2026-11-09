@@ -1,10 +1,10 @@
-# DiskPilot 1.4.0 — pacote de transporte em texto
+# DiskPilot 1.4.1 — pacote de transporte em texto
 
 Esta pasta existe para levar o projeto para um ambiente onde **só é possível
 copiar texto** (sem clone, sem ZIP, sem download de release).
 
 O conteúdo não é o código-fonte legível: é o projeto inteiro compactado
-(`tar.xz`, 67.496 bytes) e codificado em **Base85**, dividido em 4 partes de
+(`tar.xz`, 68.268 bytes) e codificado em **Base85**, dividido em 4 partes de
 texto ASCII. O script `restaurar_diskpilot.py` remonta o arquivo, confere o
 SHA-256 e extrai a pasta `DiskPilot/`.
 
@@ -12,15 +12,15 @@ SHA-256 e extrai a pasta `DiskPilot/`.
 
 | Arquivo | Bytes | SHA-256 (sem espaços/quebras) |
 |---|---|---|
-| `parte1.txt` | 21.445 | `9e8dee7ff4203b02104013743e1e9287ca6dbb63bb48b94b6949b9a8f1ed169f` |
-| `parte2.txt` | 21.445 | `c8b527badc5c64ce91a1e5370855c49e685ffb09cb56b9e64ffc5560e37441c8` |
-| `parte3.txt` | 21.445 | `41ea77d1261b31e824d909f279ba55b1e967ec1056ddfecc70b962282375cac5` |
-| `parte4.txt` | 21.443 | `ac442bebc7f6223350bc2d16cce8628643d22eb503193614fedfd2174ab0f26e` |
+| `parte1.txt` | 21.551 | `754e2a5d87f3e6307855f1461445854e25a8652b66b5ede25469d7061ff6c3e5` |
+| `parte2.txt` | 21.557 | `3a87480ae6c762313f91ce29cd54cfa0de0ba2a20aca6b73629fff9ca1faffe1` |
+| `parte3.txt` | 21.552 | `69130ec273fa686c3e063c57f1a23011eb7be19d93230188722922ad4f6da97a` |
+| `parte4.txt` | 21.545 | `07cbbbdb19effcf898a6eacd55ebb8934f6ee9dd5168d8339c00190e7ebf103f` |
 
 SHA-256 do `tar.xz` reconstruído (verificado pelo script):
 
 ```text
-2da021cc789c50dffb68a2d055f9b320c39bf01ec109d32b9c024f6fd975639c
+306d4877bd151ae3b99778428a73494df73d417a78267d599c95f0a416d3ece7
 ```
 
 ## Como usar
@@ -45,21 +45,24 @@ SHA-256 do `tar.xz` reconstruído (verificado pelo script):
 5. Confirme no `diskpilot.log`:
 
    ```text
-   iniciando DiskPilot 1.4.0
+   iniciando DiskPilot 1.4.1
    ```
 
 ## Novidades desta versão
 
-- **Barra de título responsiva**: o título e o slogan agora elidem (reticências)
-  e encolhem; os botões de janela mantêm tamanho e posição e nunca ficam fora
-  da área clicável em telas pequenas. Em larguras menores o slogan é ocultado.
-- Corrigido o "vigia de geometria" que podia desfazer um maximizar/restaurar
-  feito logo após a abertura.
-- Hover com tokens próprios, visível no tema claro (`#d8ebef` / `#8fbac2`).
-- Removida a opção experimental de moldura nativa: a janela volta a ser sempre
-  sem moldura, com a barra de título do app.
-- Mantém: setas da árvore, cópia com `Ctrl+C`, contraste dos campos em
-  azul-escuro no tema claro e cache de QSS na troca de tema.
+- **Botões de janela clicáveis em telas com escala**: o `WM_NCHITTEST` agora
+  converte a posição física do Windows para o espaço lógico do Qt. Antes, em
+  telas com 125%/150%, a região direita da barra era tratada como borda de
+  redimensionamento e os botões de maximizar/restaurar e fechar não respondiam.
+- **Sem moldura externa**: removidos o contorno arredondado e a margem
+  transparente de 6 px. A janela usa toda a área disponível e a barra de título
+  encosta nas bordas, como em um aplicativo comum.
+- **"Gestor de espaço" centralizado** de verdade na barra de título, em uma
+  camada que não bloqueia arraste, duplo clique nem os botões.
+- Removida a opção experimental de moldura nativa (e resíduos em configurações
+  antigas): a janela é sempre sem moldura, com a barra de título do app.
+- Mantém: barra de título responsiva, setas da árvore, cópia com `Ctrl+C`,
+  contraste dos campos em azul-escuro no tema claro e cache de QSS.
 
 ## Diagnóstico
 
@@ -76,7 +79,7 @@ Grava `diagnostico-diskpilot.txt` com Python, PySide6, versão do Qt, tela,
 py -c "from pathlib import Path; [print(p.name, len(''.join(p.read_text(encoding='ascii').split()))) for p in sorted(Path('.').glob('parte*.txt'))]"
 ```
 
-Esperado: `21093`, `21093`, `21093`, `21091`.
+Esperado: `21334`, `21334`, `21334`, `21333`.
 
 ## Observações
 
@@ -86,14 +89,14 @@ Esperado: `21093`, `21093`, `21093`, `21091`.
   `PySide6` já precisa existir no ambiente.
 - O código é distribuído sob licença **MIT** (`LICENSE`); as dependências
   mantêm suas licenças — inventário em `THIRD-PARTY.md`.
-- Este pacote é gerado a partir do commit `v1.4.0` deste repositório.
+- Este pacote é gerado a partir do commit `v1.4.1` deste repositório.
 
 ## URL dos arquivos crus
 
 ```text
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.4.0/entrega/parte1.txt
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.4.0/entrega/parte2.txt
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.4.0/entrega/parte3.txt
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.4.0/entrega/parte4.txt
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.4.0/entrega/restaurar_diskpilot.py
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.4.1/entrega/parte1.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.4.1/entrega/parte2.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.4.1/entrega/parte3.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.4.1/entrega/parte4.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.4.1/entrega/restaurar_diskpilot.py
 ```

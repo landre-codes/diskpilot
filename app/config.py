@@ -99,6 +99,9 @@ class AppConfig:
             if not isinstance(raw, dict):
                 raise ValueError("config raiz não é um objeto")
             self.data = _merge(DEFAULT_CONFIG, raw)
+            # A opção experimental de moldura nativa não existe mais; qualquer
+            # resíduo em configurações antigas é descartado na próxima gravação.
+            self.data.pop("native_frame", None)
             # O cargo foi removido do produto; descartamos resíduos de
             # configurações antigas para manter o perfil enxuto.
             if isinstance(self.data.get("user"), dict):
