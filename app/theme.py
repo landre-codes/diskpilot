@@ -45,6 +45,8 @@ PALETTES: dict[str, dict[str, Any]] = {
         "border_strong": "#2a4d5a",
         "text": "#e9f7f9",
         "input_text": "#e9f7f9",
+        "hover": "#1a323b",
+        "hover_border": "#2a4d5a",
         "placeholder": "#8babb4",
         "muted": "#8babb4",
         "faint": "#5f818b",
@@ -72,6 +74,8 @@ PALETTES: dict[str, dict[str, Any]] = {
         "border_strong": "#b5d4da",
         "text": "#103039",
         "input_text": "#06232b",
+        "hover": "#d8ebef",
+        "hover_border": "#8fbac2",
         "placeholder": "#1f4d57",
         "muted": "#5c7b84",
         "faint": "#88a2a9",
@@ -152,7 +156,7 @@ QPushButton {
     padding: 0px 14px;
     min-height: 34px;
 }
-QPushButton:hover { background: $surface_3; border-color: $border_strong; }
+QPushButton:hover { background: $hover; border-color: $hover_border; }
 QPushButton:pressed { background: $surface; }
 QPushButton:disabled { color: $faint; border-color: $border; background: $surface; }
 QPushButton#Primary {
@@ -173,20 +177,20 @@ QPushButton#Ghost {
     padding: 0px 14px;
     min-height: 34px;
 }
-QPushButton#Ghost:hover { background: $surface_2; border-color: $primary; color: $primary; }
+QPushButton#Ghost:hover { background: $hover; border-color: $primary; color: $primary; }
 QPushButton#Ghost:pressed { background: $surface; }
 QPushButton#Soft {
     background: $surface_2;
     border: 1px solid $border;
     color: $text;
 }
-QPushButton#Soft:hover { background: $surface_3; border-color: $border_strong; }
+QPushButton#Soft:hover { background: $hover; border-color: $hover_border; }
 QPushButton#DangerGhost {
     background: transparent;
     border: 1px solid $border_strong;
     color: $danger;
 }
-QPushButton#DangerGhost:hover { background: $surface_2; border-color: $danger; }
+QPushButton#DangerGhost:hover { background: $hover; border-color: $danger; }
 QPushButton#Link {
     background: transparent;
     border: none;
@@ -205,7 +209,7 @@ QPushButton#ThemeOption {
     text-align: left;
     font-weight: 600;
 }
-QPushButton#ThemeOption:hover { border-color: $border_strong; background: $surface_2; }
+QPushButton#ThemeOption:hover { border-color: $hover_border; background: $hover; }
 QPushButton#ThemeOption:checked {
     background: $primary_soft;
     border: 1px solid $primary;
@@ -218,7 +222,7 @@ QPushButton#IconButton {
     padding: 4px;
     min-height: 30px;
 }
-QPushButton#IconButton:hover { background: $surface_2; }
+QPushButton#IconButton:hover { background: $hover; }
 QPushButton#IconButton:pressed { background: $surface_3; }
 QPushButton#IconButton:disabled { background: transparent; }
 QPushButton#WindowButton {
@@ -228,7 +232,7 @@ QPushButton#WindowButton {
     padding: 0px;
     min-height: 0px;
 }
-QPushButton#WindowButton:hover { background: $surface_2; }
+QPushButton#WindowButton:hover { background: $hover; }
 QPushButton#WindowButton:pressed { background: $surface_3; }
 QPushButton#WindowClose {
     background: transparent;
@@ -260,7 +264,7 @@ QLineEdit {
     selection-background-color: $primary;
     selection-color: $on_primary;
 }
-QLineEdit:hover { border-color: $border_strong; color: $input_text; }
+QLineEdit:hover { border-color: $hover_border; color: $input_text; }
 QLineEdit:focus {
     border-color: $primary;
     background: $surface_2;
@@ -290,7 +294,7 @@ QComboBox {
     padding: 0px 28px 0px 12px;
     min-height: 36px;
 }
-QComboBox:hover { border-color: $border_strong; color: $input_text; }
+QComboBox:hover { border-color: $hover_border; color: $input_text; }
 QComboBox:focus { border-color: $primary; color: $input_text; }
 QComboBox::drop-down { border: none; width: 26px; }
 QComboBox::down-arrow { image: none; width: 0px; height: 0px; }
@@ -372,13 +376,13 @@ QFrame#Card {
     border: 1px solid $border;
     border-radius: 14px;
 }
-QFrame#Card:hover { border-color: $border_strong; }
+QFrame#Card:hover { border-color: $hover_border; }
 QFrame#StatCard {
     background: $surface;
     border: 1px solid $border;
     border-radius: 14px;
 }
-QFrame#StatCard:hover { border-color: $border_strong; }
+QFrame#StatCard:hover { border-color: $hover_border; }
 QFrame#HeroCard {
     background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
         stop:0 $surface_2, stop:1 $surface);
@@ -390,7 +394,7 @@ QFrame#SuggestionCard {
     border: 1px solid $border;
     border-radius: 14px;
 }
-QFrame#SuggestionCard:hover { border-color: $border_strong; }
+QFrame#SuggestionCard:hover { border-color: $hover_border; }
 QFrame#EmptyCard {
     background: $surface;
     border: 1px dashed $border_strong;
@@ -409,7 +413,7 @@ QFrame#Pill {
     border: 1px solid $border;
     border-radius: 10px;
 }
-QFrame#Pill:hover { border-color: $border_strong; }
+QFrame#Pill:hover { border-color: $hover_border; }
 QFrame#Toast {
     background: $surface_2;
     border: 1px solid $border_strong;
@@ -441,7 +445,7 @@ QTreeWidget, QTreeView, QListWidget {
     selection-color: $text;
 }
 QTreeWidget::item, QTreeView::item { min-height: 33px; border: none; }
-QTreeWidget::item:hover, QTreeView::item:hover { background: $surface_2; }
+QTreeWidget::item:hover, QTreeView::item:hover { background: $hover; }
 QTreeWidget::item:selected, QTreeView::item:selected {
     background: $selection;
     color: $text;
@@ -539,7 +543,7 @@ QTreeView#FolderTree {
 QTreeView#FolderTree::item { min-height: 30px; }
 QListWidget#QuickPlaces { background: transparent; border: none; border-radius: 0px; }
 QListWidget#QuickPlaces::item { min-height: 32px; color: $muted; }
-QListWidget#QuickPlaces::item:hover { background: $surface_2; color: $text; }
+QListWidget#QuickPlaces::item:hover { background: $hover; color: $text; }
 QListWidget#QuickPlaces::item:selected { background: $primary_soft; color: $primary; }
 
 /* -------------------------------------------------------- diversos */

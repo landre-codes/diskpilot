@@ -320,6 +320,8 @@ class ClientesPage(BasePage):
 - A árvore desenha as **setas de expandir/recolher** e as guias de hierarquia em `drawBranches`, com a cor do tema, porque o QSS de `::branch` desliga o indicador nativo. O clique na seta alterna o nó.
 - A árvore aceita `Ctrl+C` e menu de contexto para copiar **linha(s)** (Nome, Tamanho, %, Itens, Modificado, Tipo e Caminho, separados por tabulação), **tamanho** ou **caminho**. A seleção múltipla copia todas as linhas escolhidas.
 - Textos de `QLineEdit`, `QComboBox` e `QAbstractSpinBox` usam o token `input_text`: claro no tema escuro e **azul-escuro** (`#06232b`) no tema claro. A cor também é fixada nos estados `:hover` e `:focus`, e o placeholder usa o token `placeholder` (mais escuro no tema claro), garantindo contraste.
+- Os estados de hover usam os tokens `hover`/`hover_border`, com contraste próprio em cada tema (no claro, `#d8ebef`), em vez de reutilizar `surface_2`/`surface_3`.
+- **Moldura nativa do Windows**: em Configurações → Aparência existe a opção "Usar a moldura nativa do Windows". É o plano B para telas ou ambientes em que a barra de título personalizada não responde; a mudança vale após reiniciar o app (fica em `config.json`, chave `native_frame`).
 
 ---
 

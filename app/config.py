@@ -21,6 +21,7 @@ from PySide6.QtCore import QStandardPaths
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "theme": "dark",
+    "native_frame": False,
     "sidebar_collapsed": False,
     "geometry": "",
     "window_state": "normal",
