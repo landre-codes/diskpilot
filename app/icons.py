@@ -118,18 +118,38 @@ def avatar_pixmap(
     return pm
 
 
-def circular_pixmap(path: str, size: int, dpr: float = 2.0) -> QPixmap:
+def circular_pixmap(
+    path: str,
+    size: int,
+    dpr: float = 2.0,
+    focus_x: float = 0.5,
+    focus_y: float = 0.5,
+    zoom: float = 1.0,
+) -> QPixmap:
     """Carrega uma imagem, recorta em círculo e aplica máscara.
 
-    Retratos são recortados com prioridade para o topo, preservando o rosto,
-    em vez de cortar o centro da imagem.
+    ``focus_x``/``focus_y`` são o ponto da imagem (0..1) mantido no centro
+    do círculo; ``zoom`` amplia a partir do enquadramento mínimo.
     """
     pm = QPixmap(path)
     if pm.isNull():
         return QPixmap()
     dpr = max(1.0, dpr)
     side = int(size * dpr)
-    pm = pm.scaled(side, side, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+    if pm.width() <= 0 or pm.height() <= 0:
+        return QPixmap()
+    focus_x = max(0.0, min(1.0, float(focus_x)))
+    focus_y = max(0.0, min(1.0, float(focus_y)))
+    zoom = max(1.0, min(4.0, float(zoom)))
+    scale = max(side / pm.width(), side / pm.height()) * zoom
+    scaled_w = max(1, int(round(pm.width() * scale)))
+    scaled_h = max(1, int(round(pm.height() * scale)))
+    pm = pm.scaled(
+        scaled_w,
+        scaled_h,
+        Qt.IgnoreAspectRatio,
+        Qt.SmoothTransformation,
+    )
     result = QPixmap(side, side)
     result.fill(Qt.transparent)
     p = QPainter(result)
@@ -138,13 +158,10 @@ def circular_pixmap(path: str, size: int, dpr: float = 2.0) -> QPixmap:
     mask = QPainterPath()
     mask.addEllipse(QRectF(0, 0, side, side))
     p.setClipPath(mask)
-    if pm.height() > side:
-        # Retrato: começa perto do topo (8% de folga) para não cortar a cabeça.
-        y = -int((pm.height() - side) * 0.08)
-        x = 0
-    else:
-        x = (side - pm.width()) // 2
-        y = 0
+    x = int(round(side / 2 - focus_x * scaled_w))
+    y = int(round(side / 2 - focus_y * scaled_h))
+    x = min(0, max(side - scaled_w, x))
+    y = min(0, max(side - scaled_h, y))
     p.drawPixmap(x, y, pm)
     p.end()
     # O DPR é aplicado só depois da pintura: o QPainter usa coordenadas

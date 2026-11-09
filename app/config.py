@@ -28,6 +28,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "user": {
         "name": "",
         "avatar": "",
+        "avatar_focus_x": 0.5,
+        "avatar_focus_y": 0.3,
+        "avatar_zoom": 1.0,
     },
     "scan": {
         "roots": [],
@@ -211,6 +214,27 @@ class AppConfig:
     def avatar_path(self) -> str:
         path = str(self.get("user.avatar", "") or "")
         return path if path and Path(path).exists() else ""
+
+    @property
+    def avatar_framing(self) -> tuple[float, float, float]:
+        """Ponto focal (x, y) e zoom do avatar, com valores seguros."""
+        try:
+            focus_x = float(self.get("user.avatar_focus_x", 0.5))
+        except (TypeError, ValueError):
+            focus_x = 0.5
+        try:
+            focus_y = float(self.get("user.avatar_focus_y", 0.3))
+        except (TypeError, ValueError):
+            focus_y = 0.3
+        try:
+            zoom = float(self.get("user.avatar_zoom", 1.0))
+        except (TypeError, ValueError):
+            zoom = 1.0
+        return (
+            max(0.0, min(1.0, focus_x)),
+            max(0.0, min(1.0, focus_y)),
+            max(1.0, min(4.0, zoom)),
+        )
 
     @property
     def logo_path(self) -> str:

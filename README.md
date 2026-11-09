@@ -26,7 +26,7 @@ O projeto nasceu como um "Everything gerencial e enxuto": em vez de apenas local
 - Abas verticais com ícones, indicador ativo, tooltip no modo compacto e transição de página com fade.
 - Menu hambúrguer com animação de largura; o estado (expandido/recolhido) é persistido.
 - Logo da empresa no topo da barra lateral, com clique para alterar, menu de contexto para remover e **persistência local**.
-- Usuário atual no rodapé da barra lateral, com avatar gerado a partir das iniciais (ou foto importada). Fotos são recortadas em círculo com prioridade para o topo em retratos, e a prévia do perfil usa escala correta em telas com DPI alto.
+- Usuário atual no rodapé da barra lateral, com avatar gerado a partir das iniciais (ou foto importada). Fotos podem ser **arrastadas para reposicionar** e ajustadas com a **roda do mouse (zoom)**; o enquadramento é salvo localmente e aplicado na sidebar, nas configurações e na prévia do perfil.
 
 ### Painel
 - Mini-dashboard com espaço total, quantidade de arquivos/pastas, espaço liberável com segurança e valores em revisão.
@@ -319,7 +319,8 @@ class ClientesPage(BasePage):
 - A árvore é preguiçosa: os filhos de uma pasta só são criados quando ela é expandida, com limite de 1.200 itens por pasta e busca global limitada para manter a responsividade.
 - As estimativas de limpeza não são destrutivas e podem se sobrepor; os cálculos já evitam contar arquivos de cache duas vezes e mostram "seguro" separado de "revisar".
 - O logo e o avatar são copiados com `shutil`, não vinculados ao arquivo original.
-- `circular_pixmap` pinta a imagem em coordenadas físicas e só aplica o `devicePixelRatio` no final; em retratos, o recorte prioriza o topo. As prévias em `QLabel` usam `setScaledContents(True)` para não cortar o canto do pixmap em telas com DPI alto.
+- `circular_pixmap` pinta a imagem em coordenadas físicas e só aplica o `devicePixelRatio` no final; aceita `focus_x`, `focus_y` e `zoom`, permitindo o enquadramento ajustável do avatar. As prévias em `QLabel` usam `setScaledContents(True)` para não cortar o canto do pixmap em telas com DPI alto.
+- O perfil salva `user.avatar_focus_x`, `user.avatar_focus_y` e `user.avatar_zoom`. No diálogo de perfil, arraste a foto para reposicionar e use a roda do mouse para ampliar; “Centralizar” volta ao ponto central.
 - A exportação de dados usa `csv` (BOM UTF-8 e separador `;`), `openpyxl` (XLSX com abas de resumo, Top 100 e sugestões) e `pywin32` + Microsoft Excel (XLSB). O XLSB é gerado a partir do XLSX temporário com `FileFormat=50`; se o Excel ou o pywin32 não estiverem disponíveis, o app informa o requisito em vez de falhar silenciosamente.
 - O `sidebar.py` detecta se `icons.py` aceita o parâmetro `dpr` (adicionado na 1.3.4) e chama `avatar_pixmap`/`circular_pixmap` com ou sem ele. Assim, uma atualização parcial de arquivos não quebra o avatar com `TypeError`.
 - O seletor de pastas mostra unidades mapeadas pelo **caminho UNC** (`\\servidor\compartilhamento`) em vez da letra (`W:\`), e navega pelos nomes das pastas de rede quando o compartilhamento está acessível.

@@ -6,7 +6,9 @@ import os
 import subprocess
 import sys
 from datetime import datetime
+from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
 from PySide6.QtCore import QStorageInfo
 
@@ -110,6 +112,39 @@ def resolve_network_path(path: str) -> str:
     except Exception:
         pass
     return text
+
+
+def avatar_photo(
+    path: str,
+    size: int,
+    dpr: float = 2.0,
+    focus_x: float = 0.5,
+    focus_y: float = 0.5,
+    zoom: float = 1.0,
+):
+    """Chama circular_pixmap com apenas os parâmetros suportados pela versão."""
+    parameters = _circular_parameters()
+    kwargs: dict[str, Any] = {}
+    if "dpr" in parameters:
+        kwargs["dpr"] = dpr
+    if "focus_x" in parameters:
+        kwargs["focus_x"] = focus_x
+    if "focus_y" in parameters:
+        kwargs["focus_y"] = focus_y
+    if "zoom" in parameters:
+        kwargs["zoom"] = zoom
+    from .icons import circular_pixmap
+
+    return circular_pixmap(path, size, **kwargs)
+
+
+@lru_cache(maxsize=1)
+def _circular_parameters():
+    from inspect import signature
+
+    from .icons import circular_pixmap
+
+    return signature(circular_pixmap).parameters
 
 
 def path_key(path: str) -> str:

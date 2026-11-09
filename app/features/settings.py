@@ -22,9 +22,9 @@ from PySide6.QtWidgets import (
 )
 
 from .. import APP_NAME, __version__
-from ..icons import avatar_pixmap, circular_pixmap, icon
+from ..icons import avatar_pixmap, icon
 from ..theme import get_theme
-from ..utils import format_bytes, format_datetime, open_in_explorer
+from ..utils import avatar_photo, format_bytes, format_datetime, open_in_explorer
 from ..widgets.buttons import ActionButton
 from ..widgets.common import Card, ElidedLabel, IconLabel, PageHeader
 from ..widgets.dialogs import ConfirmDialog, ProfileDialog
@@ -342,7 +342,10 @@ class SettingsPage(BasePage):
 
         avatar_path = self.state.config.avatar_path
         if avatar_path:
-            pm = circular_pixmap(avatar_path, 54)
+            focus_x, focus_y, zoom = self.state.config.avatar_framing
+            pm = avatar_photo(
+                avatar_path, 54, 2.0, focus_x, focus_y, zoom
+            )
         else:
             pm = avatar_pixmap(
                 self.state.config.user_name,

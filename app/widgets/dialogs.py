@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..config import AppConfig
-from ..icons import avatar_pixmap, circular_pixmap, icon
+from ..icons import avatar_pixmap, icon
 from ..services.exporter import (
     default_export_path,
     write_csv,
@@ -41,7 +41,7 @@ from ..services.exporter import (
 )
 from ..services.model import ScanResult, top_items
 from ..theme import get_theme
-from ..utils import format_bytes, normalize_path, open_in_explorer, resolve_network_path
+from ..utils import avatar_photo, format_bytes, normalize_path, open_in_explorer, resolve_network_path
 from .buttons import ActionButton, IconButton, SelectButton
 
 
@@ -955,6 +955,137 @@ class ConfirmDialog(SheetDialog):
         self.footer.addWidget(confirm)
 
 
+class AvatarEditor(QLabel):
+    """Prévia circular com arraste para reposicionar e roda para zoom."""
+
+    def __init__(self, parent: QWidget | None = None, size: int = 120) -> None:
+        super().__init__(parent)
+        self.setFixedSize(size, size)
+        self.setAlignment(Qt.AlignCenter)
+        self.setScaledContents(True)
+        self.setMouseTracking(True)
+        self.setCursor(Qt.ArrowCursor)
+        self._path = ""
+        self._initials = "?"
+        self._focus_x = 0.5
+        self._focus_y = 0.5
+        self._zoom = 1.0
+        self._drag_start: QPoint | None = None
+        self._drag_focus = (0.5, 0.5)
+
+    @property
+    def framing(self) -> tuple[float, float, float]:
+        return self._focus_x, self._focus_y, self._zoom
+
+    def set_initials(self, name: str) -> None:
+        self._path = ""
+        self._initials = name or "?"
+        self.setCursor(Qt.ArrowCursor)
+        self._render()
+
+    @property
+    def photo_path(self) -> str:
+        return self._path
+
+    def set_photo(
+        self,
+        path: str,
+        focus_x: float | None = None,
+        focus_y: float | None = None,
+        zoom: float | None = None,
+        reset: bool = False,
+    ) -> None:
+        if reset or path != self._path or focus_x is not None:
+            self._focus_x = 0.5 if focus_x is None else float(focus_x)
+            self._focus_y = 0.5 if focus_y is None else float(focus_y)
+            self._zoom = 1.0 if zoom is None else float(zoom)
+            self._focus_x = max(0.0, min(1.0, self._focus_x))
+            self._focus_y = max(0.0, min(1.0, self._focus_y))
+            self._zoom = max(1.0, min(4.0, self._zoom))
+        self._path = path
+        self.setCursor(Qt.OpenHandCursor)
+        self._render()
+
+    def reset_framing(self) -> None:
+        self._focus_x = 0.5
+        self._focus_y = 0.5
+        self._zoom = 1.0
+        self._render()
+
+    def _render(self) -> None:
+        if self._path:
+            self.setPixmap(
+                avatar_photo(
+                    self._path,
+                    self.width(),
+                    max(2.0, self.devicePixelRatioF()),
+                    self._focus_x,
+                    self._focus_y,
+                    self._zoom,
+                )
+            )
+            return
+        theme = get_theme()
+        self.setPixmap(
+            avatar_pixmap(
+                self._initials,
+                self.width(),
+                theme.color("primary"),
+                theme.color("info"),
+                theme.color("on_primary"),
+            )
+        )
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802
+        if self._path and event.button() == Qt.LeftButton:
+            self._drag_start = event.position().toPoint()
+            self._drag_focus = (self._focus_x, self._focus_y)
+            self.setCursor(Qt.ClosedHandCursor)
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802
+        if self._drag_start is not None and event.buttons() & Qt.LeftButton:
+            pos = event.position().toPoint()
+            dx = pos.x() - self._drag_start.x()
+            dy = pos.y() - self._drag_start.y()
+            span_x = max(1.0, self.width() * self._zoom)
+            span_y = max(1.0, self.height() * self._zoom)
+            self._focus_x = max(
+                0.0, min(1.0, self._drag_focus[0] - dx / span_x)
+            )
+            self._focus_y = max(
+                0.0, min(1.0, self._drag_focus[1] - dy / span_y)
+            )
+            self._render()
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+        if event.button() == Qt.LeftButton and self._drag_start is not None:
+            self._drag_start = None
+            if self._path:
+                self.setCursor(Qt.OpenHandCursor)
+            else:
+                self.setCursor(Qt.ArrowCursor)
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def wheelEvent(self, event) -> None:  # noqa: N802
+        if self._path:
+            delta = event.angleDelta().y()
+            if delta:
+                step = 0.1 if delta > 0 else -0.1
+                self._zoom = max(1.0, min(4.0, self._zoom + step))
+                self._render()
+                event.accept()
+                return
+        super().wheelEvent(event)
+
+
 class ProfileDialog(SheetDialog):
     """Edição de nome e foto do usuário."""
 
@@ -962,9 +1093,9 @@ class ProfileDialog(SheetDialog):
         super().__init__(
             parent,
             "Perfil do usuário",
-            "O nome e a foto aparecem no rodapé do menu lateral.",
-            540,
-            370,
+            "Ajuste o nome e o enquadramento da foto exibida no menu lateral.",
+            580,
+            470,
         )
         self.config = config
         self._picked_avatar: str | None = None
@@ -972,10 +1103,7 @@ class ProfileDialog(SheetDialog):
 
         preview_row = QHBoxLayout()
         preview_row.setSpacing(18)
-        self.avatar = QLabel(self)
-        self.avatar.setFixedSize(88, 88)
-        self.avatar.setAlignment(Qt.AlignCenter)
-        self.avatar.setScaledContents(True)
+        self.avatar = AvatarEditor(self, 120)
         preview_row.addWidget(self.avatar, 0)
         info = QVBoxLayout()
         info.setSpacing(6)
@@ -1002,6 +1130,21 @@ class ProfileDialog(SheetDialog):
         actions.addWidget(remove)
         actions.addStretch(1)
         self.body.addLayout(actions)
+
+        framing_row = QHBoxLayout()
+        framing_row.setSpacing(8)
+        self.framing_hint = QLabel(
+            "Arraste a foto para enquadrar · use a roda do mouse para zoom"
+        )
+        self.framing_hint.setObjectName("Faint")
+        self.framing_hint.setWordWrap(True)
+        framing_row.addWidget(self.framing_hint, 1)
+        self.reset_frame_btn = ActionButton(
+            "Centralizar", "image-filter-center-focus", "ghost", self, 15
+        )
+        self.reset_frame_btn.clicked.connect(self._reset_framing)
+        framing_row.addWidget(self.reset_frame_btn)
+        self.body.addLayout(framing_row)
 
         self.error = QLabel("")
         self.error.setObjectName("BadgeDanger")
@@ -1038,26 +1181,22 @@ class ProfileDialog(SheetDialog):
 
     def _refresh_avatar(self, *_args: Any) -> None:
         source = self._avatar_source()
-        theme = get_theme()
+        name = self.name_edit.text() or self.config.user_name
         if source:
-            pm = circular_pixmap(source, 82)
-            if pm.isNull():
-                pm = avatar_pixmap(
-                    self.name_edit.text() or self.config.user_name,
-                    82,
-                    theme.color("primary"),
-                    theme.color("info"),
-                    theme.color("on_primary"),
-                )
+            if self.avatar.photo_path != source:
+                focus_x, focus_y, zoom = self.config.avatar_framing
+                self.avatar.set_photo(source, focus_x, focus_y, zoom)
+            else:
+                self.avatar.set_photo(source)
+            self.framing_hint.setVisible(True)
+            self.reset_frame_btn.setVisible(True)
         else:
-            pm = avatar_pixmap(
-                self.name_edit.text() or self.config.user_name,
-                82,
-                theme.color("primary"),
-                theme.color("info"),
-                theme.color("on_primary"),
-            )
-        self.avatar.setPixmap(pm)
+            self.avatar.set_initials(name)
+            self.framing_hint.setVisible(False)
+            self.reset_frame_btn.setVisible(False)
+
+    def _reset_framing(self) -> None:
+        self.avatar.reset_framing()
 
     def _choose_avatar(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -1069,6 +1208,7 @@ class ProfileDialog(SheetDialog):
         if path:
             self._picked_avatar = path
             self._remove_avatar = False
+            self.avatar.set_photo(path, 0.5, 0.3, 1.0, reset=True)
             self._refresh_avatar()
 
     def _clear_avatar(self) -> None:
@@ -1095,5 +1235,9 @@ class ProfileDialog(SheetDialog):
                 return
         elif self._remove_avatar:
             self.config.set("user.avatar", "", save=False)
+        focus_x, focus_y, zoom = self.avatar.framing
+        self.config.set("user.avatar_focus_x", focus_x, save=False)
+        self.config.set("user.avatar_focus_y", focus_y, save=False)
+        self.config.set("user.avatar_zoom", zoom, save=False)
         self.config.save()
         self.accept()
