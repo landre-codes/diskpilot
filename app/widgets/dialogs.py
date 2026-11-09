@@ -41,7 +41,7 @@ from ..services.exporter import (
 )
 from ..services.model import ScanResult, top_items
 from ..theme import get_theme
-from ..utils import format_bytes, normalize_path, open_in_explorer
+from ..utils import format_bytes, normalize_path, open_in_explorer, resolve_network_path
 from .buttons import ActionButton, IconButton, SelectButton
 
 
@@ -193,7 +193,7 @@ class FolderPickerDialog(SheetDialog):
         left.addWidget(left_title)
         self.places = QListWidget(self)
         self.places.setObjectName("QuickPlaces")
-        self.places.setFixedWidth(172)
+        self.places.setFixedWidth(230)
         left.addWidget(self.places, 1)
         work.addLayout(left)
 
@@ -313,16 +313,27 @@ class FolderPickerDialog(SheetDialog):
                     continue
                 seen.add(key)
                 item = QListWidgetItem(icon("folder", theme.color("muted"), 16), label)
+                item.setToolTip(path)
                 item.setData(Qt.UserRole, path)
                 self.places.addItem(item)
         for drive in QDir.drives():
             path = drive.absolutePath()
-            key = os.path.normcase(path)
+            resolved = resolve_network_path(path)
+            key = os.path.normcase(resolved)
             if key in seen:
                 continue
             seen.add(key)
-            item = QListWidgetItem(icon("harddisk", theme.color("muted"), 16), path)
-            item.setData(Qt.UserRole, path)
+            network = resolved.startswith("\\\\")
+            item = QListWidgetItem(
+                icon(
+                    "server-network" if network else "harddisk",
+                    theme.color("muted"),
+                    16,
+                ),
+                resolved if network else path,
+            )
+            item.setToolTip(resolved if network else path)
+            item.setData(Qt.UserRole, resolved)
             self.places.addItem(item)
 
     def _place_clicked(self, item: QListWidgetItem) -> None:
@@ -336,7 +347,12 @@ class FolderPickerDialog(SheetDialog):
         for i in range(self.places.count()):
             item = self.places.item(i)
             path = str(item.data(Qt.UserRole) or "")
-            md = "harddisk" if len(path) <= 3 else "folder"
+            if path.startswith("\\\\"):
+                md = "server-network"
+            elif len(path) <= 3:
+                md = "harddisk"
+            else:
+                md = "folder"
             item.setIcon(icon(md, theme.color("muted"), 16))
             if os.path.normcase(path) == os.path.normcase(self._current):
                 self.places.setCurrentItem(item)
@@ -353,7 +369,7 @@ class FolderPickerDialog(SheetDialog):
         return super().eventFilter(obj, event)
 
     def _navigate(self, path: str) -> None:
-        path = normalize_path(path)
+        path = resolve_network_path(normalize_path(path))
         if not Path(path).exists() or not Path(path).is_dir():
             return
         self._current = path

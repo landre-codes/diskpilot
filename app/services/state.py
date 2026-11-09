@@ -17,7 +17,7 @@ from typing import Any
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, Signal, Slot
 
 from ..config import AppConfig
-from ..utils import normalize_path, path_key
+from ..utils import normalize_path, path_key, resolve_network_path
 from .model import ScanProgress, ScanResult, Suggestion
 from .scanner import ScanCancelled, scan_paths
 
@@ -77,7 +77,11 @@ class AppState(QObject):
     def __init__(self, config: AppConfig) -> None:
         super().__init__()
         self.config = config
-        self.roots: list[str] = config.roots
+        self.roots: list[str] = [
+            resolve_network_path(path) for path in config.roots
+        ]
+        if self.roots != config.roots:
+            config.roots = self.roots
         self.last_result: ScanResult | None = None
         self.last_error: str = ""
         self.is_scanning = False
@@ -97,6 +101,7 @@ class AppState(QObject):
         for raw in paths:
             try:
                 path = normalize_path(str(raw))
+                path = resolve_network_path(path)
             except Exception:
                 continue
             if not os.path.isdir(path):

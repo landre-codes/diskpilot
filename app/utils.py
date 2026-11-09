@@ -8,6 +8,8 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+from PySide6.QtCore import QStorageInfo
+
 
 _SIZE_UNITS = ("B", "KB", "MB", "GB", "TB", "PB")
 _DISPLAY_UNITS = {"KB": 1, "MB": 2, "GB": 3, "TB": 4}
@@ -83,6 +85,31 @@ def plural(count: int, singular: str, plural_form: str) -> str:
 
 def normalize_path(path: str) -> str:
     return os.path.abspath(os.path.expanduser(os.path.normpath(path)))
+
+
+def resolve_network_path(path: str) -> str:
+    """Converte uma unidade mapeada (W:\\...) no caminho UNC equivalente."""
+    text = str(path)
+    if len(text) < 2 or text[1] != ":":
+        return text
+    root = text[:3] if len(text) >= 3 and text[2] in "\\/" else text[:2] + "\\"
+    try:
+        device = QStorageInfo(root).device()
+        if isinstance(device, bytes):
+            device = device.decode("utf-8", "ignore")
+        else:
+            device = bytes(device).decode("utf-8", "ignore")
+        device = str(device)
+        if not device.startswith("\\\\") or device.startswith("\\\\?\\"):
+            return text
+        unc = device.rstrip("\\/")
+        suffix = text[2:].lstrip("\\/")
+        candidate = f"{unc}\\{suffix}" if suffix else unc
+        if os.path.isdir(candidate):
+            return candidate
+    except Exception:
+        pass
+    return text
 
 
 def path_key(path: str) -> str:
