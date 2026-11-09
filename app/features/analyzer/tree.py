@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import heapq
 import os
 import unicodedata
+from collections import deque
 from typing import Any
 
-from PySide6.QtCore import QModelIndex, QRect, QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QModelIndex, QRect, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QColor,
     QFont,
@@ -44,6 +46,8 @@ PLACEHOLDER_ROLE = Qt.UserRole + 14
 MAX_CHILDREN = 1200
 MAX_RENDERED = 2800
 MAX_FILTER_SCAN = 30000
+EXPAND_BATCH = 120
+EXPAND_DEBOUNCE_MS = 60
 MB = 1024 * 1024
 GB = 1024 * MB
 
@@ -154,6 +158,14 @@ class FileTree(QTreeWidget):
         self._matches = -1
         self._shown = 0
         self._overflow = False
+        self._expand_queue: deque[tuple[QTreeWidgetItem, Node]] = deque()
+        self._expand_active: list[Any] | None = None
+        self._expand_all_budget = 0
+        self._restore_paths: set[str] = set()
+        self._expand_timer = QTimer(self)
+        self._expand_timer.setSingleShot(True)
+        self._expand_timer.setInterval(EXPAND_DEBOUNCE_MS)
+        self._expand_timer.timeout.connect(self._expand_step)
         get_theme().changed.connect(self._refresh_visuals)
 
     # ------------------------------------------------------------- galhos
@@ -318,31 +330,64 @@ class FileTree(QTreeWidget):
         return self._shown
 
     def expand_all_bounded(self, max_items: int = 2200) -> bool:
-        """Expande em largura com limite para não materializar a árvore inteira."""
+        """Expande em largura, em lotes, sem materializar a árvore inteira."""
         if self._result is None:
             return False
-        count = 0
-        truncated = False
-
-        def visit(item: QTreeWidgetItem) -> None:
-            nonlocal count, truncated
-            if count >= max_items:
-                truncated = True
-                return
-            if item.data(0, NODE_ROLE) is None:
-                return
-            count += 1
-            if not item.isExpanded():
-                item.setExpanded(True)
-            for i in range(item.childCount()):
-                visit(item.child(i))
-
+        self._expand_all_budget = max_items
         for i in range(self.topLevelItemCount()):
-            visit(self.topLevelItem(i))
-        return truncated
+            item = self.topLevelItem(i)
+            if self._node_at(item) is None:
+                continue
+            if item.isExpanded() and item.data(0, POPULATED_ROLE) is True:
+                self._expand_all_children(item)
+            else:
+                item.setExpanded(True)
+        return False
+
+    def _restore_pending_children(self, item: QTreeWidgetItem) -> None:
+        if not self._restore_paths:
+            return
+        node = self._node_at(item)
+        if node is not None:
+            self._restore_paths.discard(os.path.normcase(node.path))
+        for i in range(item.childCount()):
+            child = item.child(i)
+            child_node = self._node_at(child)
+            if child_node is None:
+                continue
+            key = os.path.normcase(child_node.path)
+            if key in self._restore_paths:
+                self._restore_paths.discard(key)
+                child.setExpanded(True)
+
+    def _expand_all_children(self, item: QTreeWidgetItem) -> None:
+        if self._expand_all_budget <= 0:
+            return
+        for i in range(item.childCount()):
+            child = item.child(i)
+            node = self._node_at(child)
+            if node is None or not node.is_dir:
+                continue
+            if child.isExpanded():
+                if child.data(0, POPULATED_ROLE) is True:
+                    self._expand_all_children(child)
+                continue
+            child.setExpanded(True)
+            self._expand_all_budget -= 1
+            if self._expand_all_budget <= 0:
+                break
+
+    def _cancel_pending_expands(self) -> None:
+        self._expand_timer.stop()
+        self._expand_queue.clear()
+        self._expand_active = None
+        self._expand_all_budget = 0
+        self._restore_paths.clear()
 
     def rebuild(self) -> None:
+        self._cancel_pending_expands()
         expanded = self._expanded_paths()
+        self._restore_paths = set(expanded)
         self.setUpdatesEnabled(False)
         self._building = True
         self.clear()
@@ -488,20 +533,35 @@ class FileTree(QTreeWidget):
         self._shown = rendered
         self.countChanged.emit(matched, rendered)
 
-    def _sorted_children(self, node: Node) -> list[Node]:
+    def _sorted_children(self, node: Node, limit: int | None = None) -> list[Node]:
         key = self._sort
         if key == "size_asc":
-            return sorted(node.children, key=lambda n: (n.size, _fold(n.name)))
+            func = lambda n: (n.size, _fold(n.name))
+            if limit is not None:
+                return heapq.nsmallest(limit, node.children, key=func)
+            return sorted(node.children, key=func)
         if key == "name_asc":
-            return sorted(node.children, key=lambda n: (not n.is_dir, _fold(n.name)))
+            func = lambda n: (not n.is_dir, _fold(n.name))
+            if limit is not None:
+                return heapq.nsmallest(limit, node.children, key=func)
+            return sorted(node.children, key=func)
         if key == "name_desc":
+            func = lambda n: (n.is_dir, _fold(n.name))
+            if limit is not None:
+                return heapq.nlargest(limit, node.children, key=func)
             names = sorted(
                 node.children, key=lambda n: _fold(n.name), reverse=True
             )
             return sorted(names, key=lambda n: not n.is_dir)
         if key == "recent":
-            return sorted(node.children, key=lambda n: n.mtime, reverse=True)
-        return sorted(node.children, key=lambda n: (n.size, _fold(n.name)), reverse=True)
+            func = lambda n: n.mtime
+            if limit is not None:
+                return heapq.nlargest(limit, node.children, key=func)
+            return sorted(node.children, key=func, reverse=True)
+        func = lambda n: (n.size, _fold(n.name))
+        if limit is not None:
+            return heapq.nlargest(limit, node.children, key=func)
+        return sorted(node.children, key=func, reverse=True)
 
     def _node_tooltip(self, node: Node) -> str:
         tip = [
@@ -586,20 +646,82 @@ class FileTree(QTreeWidget):
     def _on_expanded(self, item: QTreeWidgetItem) -> None:
         if self._building:
             return
-        node = item.data(0, NODE_ROLE)
+        node = self._node_at(item)
         if node is None or not node.is_dir:
             return
         if item.data(0, POPULATED_ROLE):
             return
+        item.setData(0, POPULATED_ROLE, "pending")
         while item.childCount():
             child = item.takeChild(0)
             del child
-        self._building = True
-        children = self._sorted_children(node)
+        loading = QTreeWidgetItem(["  Carregando…"])
+        loading.setFirstColumnSpanned(True)
+        loading.setFlags(Qt.NoItemFlags)
+        loading.setForeground(0, QColor(get_theme().color("muted")))
+        item.addChild(loading)
+        self._expand_queue.append((item, node))
+        if self._expand_active is None and not self._expand_timer.isActive():
+            self._expand_timer.start()
+
+    def _expand_step(self) -> None:
+        active = self._expand_active
+        if active is None:
+            while self._expand_queue:
+                item, node = self._expand_queue.popleft()
+                try:
+                    valid = (
+                        item.treeWidget() is self
+                        and item.data(0, NODE_ROLE) is node
+                    )
+                except RuntimeError:
+                    valid = False
+                if not valid:
+                    continue
+                if not item.isExpanded():
+                    item.setData(0, POPULATED_ROLE, False)
+                    while item.childCount():
+                        child = item.takeChild(0)
+                        del child
+                    continue
+                while item.childCount():
+                    child = item.takeChild(0)
+                    del child
+                children = self._sorted_children(node, limit=MAX_CHILDREN)
+                self._expand_active = [item, node, children, 0, len(node.children)]
+                break
+            active = self._expand_active
+            if active is None:
+                return
+        item, node, children, index, total = active
+        try:
+            valid = item.treeWidget() is self and item.data(0, NODE_ROLE) is node
+        except RuntimeError:
+            valid = False
+        if not valid or not item.isExpanded():
+            if index and self._shown > 0:
+                self._shown -= index
+            if valid:
+                item.setData(0, POPULATED_ROLE, False)
+                while item.childCount():
+                    child = item.takeChild(0)
+                    del child
+            self._expand_active = None
+            if self._expand_queue:
+                self._expand_timer.start(0)
+            return
+        end = min(index + EXPAND_BATCH, len(children))
         parent_size = node.size or 1
-        for child in children[:MAX_CHILDREN]:
+        for child in children[index:end]:
             self._create_item(item, child, parent_size, lazy=True)
-        hidden = len(children) - MAX_CHILDREN
+        active[3] = end
+        added = end - index
+        if added and self._shown >= 0:
+            self._shown += added
+        if end < len(children):
+            self._expand_timer.start(0)
+            return
+        hidden = total - len(children)
         if hidden > 0:
             info = QTreeWidgetItem(
                 [f"  … {format_number(hidden)} itens não exibidos — refine a busca."]
@@ -609,9 +731,12 @@ class FileTree(QTreeWidget):
             info.setForeground(0, QColor(get_theme().color("muted")))
             item.addChild(info)
         item.setData(0, POPULATED_ROLE, True)
-        self._building = False
-        self._shown = self._count_items()
-        self.countChanged.emit(self._matches, self._shown)
+        self._expand_active = None
+        self._restore_pending_children(item)
+        self._expand_all_children(item)
+        self.countChanged.emit(self._matches, max(0, self._shown))
+        if self._expand_queue:
+            self._expand_timer.start(0)
 
     # -------------------------------------------------------------- interação
     def _node_at(self, item: QTreeWidgetItem | None) -> Node | None:

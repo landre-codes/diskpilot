@@ -52,10 +52,9 @@ def icon(name: str, color: str, size: int = 20):
 
 
 @lru_cache(maxsize=256)
-def file_icon(name: str, is_dir: bool, color: str, accent: str):
+def _file_icon_cached(ext: str, is_dir: bool, color: str, accent: str):
     if is_dir:
-        return qta.icon("mdi.folder", color=accent)
-    ext = Path(name).suffix.lower()
+        return icon("folder", accent)
     if ext in _IMAGE_EXT:
         md = "file-image-outline"
     elif ext in _VIDEO_EXT:
@@ -73,6 +72,12 @@ def file_icon(name: str, is_dir: bool, color: str, accent: str):
     else:
         md = "file-outline"
     return icon(md, color)
+
+
+def file_icon(name: str, is_dir: bool, color: str, accent: str):
+    """Ícone por extensão (não por nome), para reutilizar em pastas grandes."""
+    ext = "" if is_dir else Path(name).suffix.lower()
+    return _file_icon_cached(ext, is_dir, color, accent)
 
 
 def initials(name: str) -> str:
