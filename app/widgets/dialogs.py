@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import csv
-import json
 import os
+import shutil
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -565,11 +566,15 @@ class TopItemsDialog(SheetDialog):
         menu = QMenu(self.export_btn)
         csv_action = menu.addAction(
             icon("file-delimited", theme.color("muted"), 16),
-            "CSV — Top 100 (Excel)",
+            "CSV — Top 100 (Excel/LibreOffice)",
         )
-        json_action = menu.addAction(
-            icon("code-json", theme.color("muted"), 16),
-            "JSON — resumo, Top 100 e sugestões",
+        xlsx_action = menu.addAction(
+            icon("file-excel", theme.color("muted"), 16),
+            "XLSX — pasta de trabalho do Excel",
+        )
+        xlsb_action = menu.addAction(
+            icon("microsoft-excel", theme.color("muted"), 16),
+            "XLSB — binário do Excel",
         )
         chosen = menu.exec(
             self.export_btn.mapToGlobal(QPoint(0, self.export_btn.height() + 5))
@@ -577,36 +582,41 @@ class TopItemsDialog(SheetDialog):
         menu.deleteLater()
         if chosen is csv_action:
             self._export_csv()
-        elif chosen is json_action:
-            self._export_json()
+        elif chosen is xlsx_action:
+            self._export_xlsx()
+        elif chosen is xlsb_action:
+            self._export_xlsb()
 
     @staticmethod
     def _stamp() -> str:
         return datetime.now().strftime("%Y%m%d-%H%M")
 
-    @staticmethod
-    def _iso_time(value: float) -> str:
-        try:
-            return datetime.fromtimestamp(float(value)).isoformat(
-                sep=" ", timespec="seconds"
-            )
-        except (OSError, OverflowError, ValueError, TypeError):
-            return ""
-
-    def _node_payload(self, node, rank: int, total: int) -> dict[str, Any]:
-        percent = node.size / total * 100.0 if total else 0.0
-        return {
-            "ranking": rank,
-            "caminho": node.path,
-            "nome": node.name,
-            "bytes": node.size,
-            "formatado": format_bytes(node.size),
-            "percentual": round(percent, 4),
-            "arquivos": node.files,
-            "pastas": node.dirs,
-            "modificado": self._iso_time(node.mtime),
-            "erro": node.error,
-        }
+    def _item_rows(self) -> list[dict[str, Any]]:
+        result = self.result
+        total = max(1, result.total_size if result is not None else 0)
+        rows: list[dict[str, Any]] = []
+        for category, nodes in (
+            ("Diretório", self._dirs),
+            ("Arquivo", self._files),
+        ):
+            for rank, node in enumerate(nodes, 1):
+                percent = node.size / total * 100.0 if total else 0.0
+                rows.append(
+                    {
+                        "categoria": category,
+                        "ranking": rank,
+                        "caminho": node.path,
+                        "nome": node.name,
+                        "bytes": node.size,
+                        "formatado": format_bytes(node.size),
+                        "percentual": round(percent, 2),
+                        "arquivos": node.files,
+                        "pastas": node.dirs,
+                        "modificado": format_datetime(node.mtime),
+                        "erro": node.error,
+                    }
+                )
+        return rows
 
     def _summary_payload(self) -> dict[str, Any]:
         result = self.result
@@ -619,8 +629,8 @@ class TopItemsDialog(SheetDialog):
             "pastas": result.total_dirs,
             "erros": result.errors,
             "duracao_s": round(result.elapsed, 3),
-            "iniciado_em": self._iso_time(result.started_at),
-            "truncado": result.truncated,
+            "iniciado_em": format_datetime(result.started_at),
+            "truncado": "Sim" if result.truncated else "Não",
             "raizes": [
                 {
                     "caminho": root.path,
@@ -634,6 +644,176 @@ class TopItemsDialog(SheetDialog):
             ],
         }
 
+    @staticmethod
+    def _style_header(ws, row: int, count: int) -> None:
+        from openpyxl.styles import Alignment, Font, PatternFill
+
+        for column in range(1, count + 1):
+            cell = ws.cell(row=row, column=column)
+            cell.font = Font(bold=True, color="FFFFFF")
+            cell.fill = PatternFill("solid", fgColor="008E9C")
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+
+    def _write_xlsx(self, path: str) -> None:
+        from openpyxl import Workbook
+        from openpyxl.styles import Alignment, Font
+        from openpyxl.utils import get_column_letter
+
+        result = self.result
+        if result is None:
+            raise ValueError("Nenhuma análise disponível para exportar.")
+        workbook = Workbook()
+
+        summary = workbook.active
+        summary.title = "Resumo"
+        payload = self._summary_payload()
+        summary.append([APP_NAME, ""])
+        summary.merge_cells("A1:B1")
+        summary["A1"].font = Font(bold=True, size=14)
+        summary.append(["Exportado em", datetime.now().strftime("%d/%m/%Y %H:%M")])
+        summary.append([])
+        summary.append(["Métrica", "Valor"])
+        self._style_header(summary, 4, 2)
+        for label, value in (
+            ("Espaço analisado", payload.get("total_formatado", "")),
+            ("Total em bytes", payload.get("total_bytes", 0)),
+            ("Arquivos", payload.get("arquivos", 0)),
+            ("Pastas", payload.get("pastas", 0)),
+            ("Avisos de acesso", payload.get("erros", 0)),
+            ("Duração (s)", payload.get("duracao_s", 0)),
+            ("Início", payload.get("iniciado_em", "")),
+            ("Varredura limitada", payload.get("truncado", "Não")),
+        ):
+            summary.append([label, value])
+        summary.append([])
+        roots_row = summary.max_row + 1
+        summary.append(["Raízes", ""])
+        summary.cell(row=roots_row, column=1).font = Font(bold=True)
+        summary.append(["Caminho", "Nome", "Tamanho", "Bytes", "Arquivos", "Pastas"])
+        self._style_header(summary, roots_row + 1, 6)
+        for root in payload.get("raizes", []):
+            summary.append(
+                [
+                    root["caminho"],
+                    root["nome"],
+                    root["formatado"],
+                    root["bytes"],
+                    root["arquivos"],
+                    root["pastas"],
+                ]
+            )
+        for column, width in (
+            ("A", 52),
+            ("B", 24),
+            ("C", 16),
+            ("D", 16),
+            ("E", 12),
+            ("F", 12),
+        ):
+            summary.column_dimensions[column].width = width
+        summary.freeze_panes = "A2"
+
+        top = workbook.create_sheet("Top 100")
+        headers = [
+            "Categoria",
+            "Ranking",
+            "Caminho completo",
+            "Nome",
+            "Bytes",
+            "Tamanho",
+            "Percentual",
+            "Arquivos",
+            "Pastas",
+            "Modificado",
+            "Erro",
+        ]
+        top.append(headers)
+        self._style_header(top, 1, len(headers))
+        for row in self._item_rows():
+            top.append(
+                [
+                    row["categoria"],
+                    row["ranking"],
+                    row["caminho"],
+                    row["nome"],
+                    row["bytes"],
+                    row["formatado"],
+                    row["percentual"],
+                    row["arquivos"],
+                    row["pastas"],
+                    row["modificado"],
+                    row["erro"],
+                ]
+            )
+        for column, width in (
+            ("A", 12),
+            ("B", 9),
+            ("C", 70),
+            ("D", 30),
+            ("E", 14),
+            ("F", 12),
+            ("G", 11),
+            ("H", 10),
+            ("I", 10),
+            ("J", 18),
+            ("K", 30),
+        ):
+            top.column_dimensions[column].width = width
+        for cell in top["E"][1:]:
+            cell.number_format = "#,##0"
+        for cell in top["G"][1:]:
+            cell.number_format = '0.00"%"'
+        top.freeze_panes = "A2"
+        if top.max_row > 1:
+            top.auto_filter.ref = f"A1:K{top.max_row}"
+
+        suggestions = workbook.create_sheet("Sugestões")
+        sug_headers = [
+            "Chave",
+            "Título",
+            "Descrição",
+            "Economia",
+            "Bytes",
+            "Quantidade",
+            "Confiança",
+            "Nota",
+            "Caminhos",
+        ]
+        suggestions.append(sug_headers)
+        self._style_header(suggestions, 1, len(sug_headers))
+        for suggestion in result.suggestions:
+            suggestions.append(
+                [
+                    suggestion.key,
+                    suggestion.title,
+                    suggestion.description,
+                    format_bytes(suggestion.savings),
+                    suggestion.savings,
+                    suggestion.count,
+                    suggestion.confidence,
+                    suggestion.note,
+                    "\n".join(suggestion.paths),
+                ]
+            )
+        for column, width in (
+            ("A", 20),
+            ("B", 34),
+            ("C", 48),
+            ("D", 14),
+            ("E", 14),
+            ("F", 12),
+            ("G", 12),
+            ("H", 34),
+            ("I", 60),
+        ):
+            suggestions.column_dimensions[column].width = width
+        for row in suggestions.iter_rows(min_row=2):
+            for cell in row:
+                cell.alignment = Alignment(vertical="top", wrap_text=True)
+        suggestions.freeze_panes = "A2"
+
+        workbook.save(path)
+
     def _export_csv(self) -> None:
         default = str(Path.home() / f"DiskPilot-top100-{self._stamp()}.csv")
         path, _ = QFileDialog.getSaveFileName(
@@ -643,7 +823,6 @@ class TopItemsDialog(SheetDialog):
             return
         if not path.lower().endswith(".csv"):
             path += ".csv"
-        total = max(1, self.result.total_size if self.result is not None else 0)
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
             with Path(path).open("w", encoding="utf-8-sig", newline="") as handle:
@@ -663,27 +842,22 @@ class TopItemsDialog(SheetDialog):
                         "erro",
                     ]
                 )
-                for category, nodes in (
-                    ("Diretório", self._dirs),
-                    ("Arquivo", self._files),
-                ):
-                    for rank, node in enumerate(nodes, 1):
-                        percent = node.size / total * 100.0
-                        writer.writerow(
-                            [
-                                category,
-                                rank,
-                                node.path,
-                                node.name,
-                                node.size,
-                                format_bytes(node.size),
-                                f"{percent:.2f}".replace(".", ","),
-                                node.files,
-                                node.dirs,
-                                format_datetime(node.mtime),
-                                node.error,
-                            ]
-                        )
+                for row in self._item_rows():
+                    writer.writerow(
+                        [
+                            row["categoria"],
+                            row["ranking"],
+                            row["caminho"],
+                            row["nome"],
+                            row["bytes"],
+                            row["formatado"],
+                            f"{row['percentual']:.2f}".replace(".", ","),
+                            row["arquivos"],
+                            row["pastas"],
+                            row["modificado"],
+                            row["erro"],
+                        ]
+                    )
         except OSError as exc:
             self.status_label.setText("Falha ao exportar.")
             self.status_label.setToolTip(str(exc))
@@ -693,59 +867,81 @@ class TopItemsDialog(SheetDialog):
         self.status_label.setText(f"Exportado: {Path(path).name}")
         self.status_label.setToolTip(path)
 
-    def _export_json(self) -> None:
-        default = str(Path.home() / f"DiskPilot-analise-{self._stamp()}.json")
+    def _export_xlsx(self) -> None:
+        default = str(Path.home() / f"DiskPilot-top100-{self._stamp()}.xlsx")
         path, _ = QFileDialog.getSaveFileName(
-            self, "Exportar JSON", default, "JSON (*.json)"
+            self, "Exportar XLSX", default, "XLSX (*.xlsx)"
         )
         if not path:
             return
-        if not path.lower().endswith(".json"):
-            path += ".json"
-        result = self.result
-        total = max(1, result.total_size if result is not None else 0)
-        payload = {
-            "aplicativo": APP_NAME,
-            "versao": __version__,
-            "exportado_em": datetime.now().isoformat(
-                sep=" ", timespec="seconds"
-            ),
-            "resumo": self._summary_payload(),
-            "top_diretorios": [
-                self._node_payload(node, rank, total)
-                for rank, node in enumerate(self._dirs, 1)
-            ],
-            "top_arquivos": [
-                self._node_payload(node, rank, total)
-                for rank, node in enumerate(self._files, 1)
-            ],
-            "sugestoes": [
-                {
-                    "chave": suggestion.key,
-                    "titulo": suggestion.title,
-                    "descricao": suggestion.description,
-                    "economia_bytes": suggestion.savings,
-                    "economia_formatada": format_bytes(suggestion.savings),
-                    "quantidade": suggestion.count,
-                    "confianca": suggestion.confidence,
-                    "nota": suggestion.note,
-                    "caminhos": list(suggestion.paths),
-                }
-                for suggestion in (result.suggestions if result is not None else [])
-            ],
-        }
+        if not path.lower().endswith(".xlsx"):
+            path += ".xlsx"
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
-            Path(path).write_text(
-                json.dumps(payload, ensure_ascii=False, indent=2),
-                encoding="utf-8",
+            self._write_xlsx(path)
+        except ImportError:
+            self.status_label.setText("XLSX requer openpyxl.")
+            self.status_label.setToolTip(
+                "Instale com: py -m pip install openpyxl"
             )
-        except OSError as exc:
+            return
+        except Exception as exc:
             self.status_label.setText("Falha ao exportar.")
             self.status_label.setToolTip(str(exc))
             return
         finally:
             QApplication.restoreOverrideCursor()
+        self.status_label.setText(f"Exportado: {Path(path).name}")
+        self.status_label.setToolTip(path)
+
+    def _export_xlsb(self) -> None:
+        default = str(Path.home() / f"DiskPilot-top100-{self._stamp()}.xlsb")
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Exportar XLSB", default, "XLSB (*.xlsb)"
+        )
+        if not path:
+            return
+        if not path.lower().endswith(".xlsb"):
+            path += ".xlsb"
+        temp_dir = Path(tempfile.mkdtemp(prefix="diskpilot-xlsb-"))
+        temp_xlsx = temp_dir / "export.xlsx"
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            self._write_xlsx(str(temp_xlsx))
+            try:
+                import win32com.client as win32
+            except ImportError:
+                self.status_label.setText("XLSB requer pywin32.")
+                self.status_label.setToolTip(
+                    "Instale com: py -m pip install pywin32"
+                )
+                return
+            excel = win32.DispatchEx("Excel.Application")
+            try:
+                excel.Visible = False
+                excel.DisplayAlerts = False
+                book = excel.Workbooks.Open(str(temp_xlsx))
+                try:
+                    book.SaveAs(str(Path(path).resolve()), FileFormat=50)
+                finally:
+                    book.Close(False)
+            finally:
+                excel.Quit()
+        except ImportError:
+            self.status_label.setText("XLSB requer openpyxl e pywin32.")
+            self.status_label.setToolTip(
+                "Instale com: py -m pip install openpyxl pywin32"
+            )
+            return
+        except Exception as exc:
+            self.status_label.setText("Falha ao exportar XLSB.")
+            self.status_label.setToolTip(
+                f"{exc} — XLSB requer Microsoft Excel instalado."
+            )
+            return
+        finally:
+            QApplication.restoreOverrideCursor()
+            shutil.rmtree(temp_dir, ignore_errors=True)
         self.status_label.setText(f"Exportado: {Path(path).name}")
         self.status_label.setToolTip(path)
 

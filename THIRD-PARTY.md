@@ -17,6 +17,9 @@ Versões verificadas no ambiente de desenvolvimento (Windows, Python 3.14).
 | qt-material | 2.17 | **BSD-2-Clause** | base do tema (paleta e QSS de controles nativos) |
 | qtawesome | 1.4.2 | **MIT** | ícones da interface |
 | QtPy | 2.4.3 | **MIT** | camada de compatibilidade exigida pelo qtawesome |
+| openpyxl | 3.1.5 | **MIT** | exportação XLSX |
+| et-xmlfile | 2.0.0 | **MIT** | dependência do openpyxl |
+| pywin32 | 312 | **PSF-2.0** | automação do Excel para exportação XLSB (Windows) |
 
 `qt-material` também distribui as fontes **Roboto** (Apache-2.0). O app fixa
 `font-family: "Segoe UI"` no QSS, então essas fontes normalmente não são

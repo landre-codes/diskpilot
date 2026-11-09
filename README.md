@@ -41,7 +41,7 @@ O projeto nasceu como um "Everything gerencial e enxuto": em vez de apenas local
 - Chips das raízes selecionadas, com remoção individual.
 - Varredura em segundo plano com `QThreadPool`, progresso, cancelamento e tolerância a erros de permissão. Logs em `diskpilot.log`/`diskpilot-crash.log` na pasta do projeto e na pasta de configuração.
 - Botão **Top 100**: ranking dos 100 maiores diretórios e dos 100 maiores arquivos da análise, com tamanho, percentual, caminho completo, cópia do caminho e abertura no Explorer.
-- **Exportação de dados** no Top 100: CSV (Excel/LibreOffice, com BOM UTF-8 e separador `;`) e JSON (resumo, raízes, Top 100 e sugestões com caminhos).
+- **Exportação de dados** no Top 100: CSV (Excel/LibreOffice, com BOM UTF-8 e separador `;`), XLSX (pasta de trabalho com abas Resumo, Top 100 e Sugestões) e XLSB (binário do Excel, requer Microsoft Excel instalado).
 - Árvore aninhada carregada sob demanda, com:
   - tamanho de cada pasta (soma recursiva) e de cada arquivo;
   - percentual em relação ao pai;
@@ -168,6 +168,8 @@ No Windows, o app usa o plugin nativo do Qt e o redimensionamento por `WM_NCHITT
 - `PySide6-Essentials` (módulos Qt usados pelo app, sem WebEngine)
 - `qt-material`
 - `qtawesome` (tema MDI)
+- `openpyxl` (exportação XLSX)
+- `pywin32` (exportação XLSB via Microsoft Excel, Windows)
 
 ---
 
@@ -316,7 +318,7 @@ class ClientesPage(BasePage):
 - As estimativas de limpeza não são destrutivas e podem se sobrepor; os cálculos já evitam contar arquivos de cache duas vezes e mostram "seguro" separado de "revisar".
 - O logo e o avatar são copiados com `shutil`, não vinculados ao arquivo original.
 - `circular_pixmap` pinta a imagem em coordenadas físicas e só aplica o `devicePixelRatio` no final; em retratos, o recorte prioriza o topo. As prévias em `QLabel` usam `setScaledContents(True)` para não cortar o canto do pixmap em telas com DPI alto.
-- A exportação de dados usa apenas a biblioteca padrão (`csv` e `json`): CSV com BOM UTF-8 e separador `;` para Excel/LibreOffice; JSON com resumo, raízes, Top 100 e sugestões.
+- A exportação de dados usa `csv` (BOM UTF-8 e separador `;`), `openpyxl` (XLSX com abas de resumo, Top 100 e sugestões) e `pywin32` + Microsoft Excel (XLSB). O XLSB é gerado a partir do XLSX temporário com `FileFormat=50`; se o Excel ou o pywin32 não estiverem disponíveis, o app informa o requisito em vez de falhar silenciosamente.
 - O `sidebar.py` detecta se `icons.py` aceita o parâmetro `dpr` (adicionado na 1.3.4) e chama `avatar_pixmap`/`circular_pixmap` com ou sem ele. Assim, uma atualização parcial de arquivos não quebra o avatar com `TypeError`.
 - O seletor de pastas usa `QFileSystemModel` e exibe o caminho completo do item atual/selecionado em um rótulo selecionável (com cópia), além de tooltip por linha. O caminho não é abreviado, o que ajuda em compartilhamentos de rede.
 - O ranking **Top 100** percorre a árvore em memória com `heapq.nlargest` (duas passagens: diretórios e arquivos), sem ordenar todos os nós. Percentuais de diretórios são cumulativos e podem se sobrepor.
@@ -359,6 +361,8 @@ este projeto. As principais:
 | PySide6 / Qt (via PySide6-Essentials, shiboken6) | LGPL-3.0-only (ou GPL / comercial) |
 | qt-material | BSD-2-Clause |
 | qtawesome | MIT |
+| openpyxl / et-xmlfile | MIT |
+| pywin32 | PSF-2.0 |
 | Material Design Icons (fonte usada nos ícones) | Apache-2.0 |
 
 O inventário completo, com as obrigações da LGPLv3 em caso de redistribuição
