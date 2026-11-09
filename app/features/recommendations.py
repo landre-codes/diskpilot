@@ -24,7 +24,6 @@ from ..utils import (
     format_bytes,
     format_datetime,
     open_in_explorer,
-    short_path,
 )
 from ..widgets.buttons import ActionButton, SelectButton
 from ..widgets.common import DisclaimerBanner, EmptyState, IconLabel, PageHeader
@@ -129,11 +128,15 @@ class SuggestionCard(QFrame):
             tree.setMinimumHeight(94)
             tree.setMaximumHeight(min(214, max(94, len(suggestion.paths) * 34 + 16)))
             theme = get_theme()
+            paths_width = 0
             for path in suggestion.paths:
                 is_dir = os.path.isdir(path)
-                item = QTreeWidgetItem([short_path(path, 110)])
+                item = QTreeWidgetItem([path])
                 item.setData(0, Qt.UserRole, path)
                 item.setToolTip(0, path)
+                paths_width = max(
+                    paths_width, tree.fontMetrics().horizontalAdvance(path) + 32
+                )
                 from ..icons import file_icon
 
                 item.setIcon(
@@ -146,6 +149,9 @@ class SuggestionCard(QFrame):
                     ),
                 )
                 tree.addTopLevelItem(item)
+            tree.setTextElideMode(Qt.ElideNone)
+            if paths_width:
+                tree.setColumnWidth(0, paths_width)
             tree.itemDoubleClicked.connect(self._open_item)
             lay.addWidget(tree)
 

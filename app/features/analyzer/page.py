@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 from ...services.model import ScanProgress, ScanResult
-from ...utils import format_bytes, format_number, short_path
+from ...utils import format_bytes, format_number
 from ...widgets.buttons import ActionButton, IconButton, SearchField, SelectButton
 from ...widgets.common import Chip, ElidedLabel, EmptyState, PageHeader
 from ...widgets.dialogs import ExportDialog, FolderPickerDialog, TopItemsDialog
@@ -187,8 +187,10 @@ class AnalyzerPage(BasePage):
         banner_text.setSpacing(1)
         self.banner_title = ElidedLabel("Analisando pastas…")
         self.banner_title.setObjectName("ScanText")
-        self.banner_path = ElidedLabel("")
+        self.banner_path = QLabel("")
         self.banner_path.setObjectName("PathText")
+        self.banner_path.setWordWrap(True)
+        self.banner_path.setTextInteractionFlags(Qt.TextSelectableByMouse)
         banner_text.addWidget(self.banner_title)
         banner_text.addWidget(self.banner_path)
         bl.addLayout(banner_text, 1)
@@ -414,7 +416,7 @@ class AnalyzerPage(BasePage):
         )
         path = progress.current or ""
         self.banner_path.setText(
-            f"Lendo: {short_path(path, 110)}" if path else "Mapeando estrutura…"
+            f"Lendo pasta: {path}" if path else "Mapeando estrutura…"
         )
 
     def _cancel_scan(self) -> None:

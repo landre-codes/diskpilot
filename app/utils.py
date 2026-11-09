@@ -89,15 +89,6 @@ def path_key(path: str) -> str:
     return os.path.normcase(normalize_path(path))
 
 
-def short_path(path: str, max_chars: int = 52) -> str:
-    """Encurta caminhos longos preservando início e fim."""
-    if len(path) <= max_chars:
-        return path
-    head = max(10, max_chars // 3)
-    tail = max(16, max_chars - head - 3)
-    return f"{path[:head]}…{path[-tail:]}"
-
-
 def open_in_explorer(path: str, select: bool = False) -> bool:
     """Abre o Explorer no caminho (ou seleciona o arquivo)."""
     target = normalize_path(path)
