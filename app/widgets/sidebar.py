@@ -99,7 +99,7 @@ class LogoButton(QWidget):
         p.fillRect(self.rect(), QColor(theme.color("sidebar")))
         if self._hover:
             p.setPen(Qt.NoPen)
-            p.setBrush(QColor(theme.color("surface_2")))
+            p.setBrush(QColor(theme.color("hover")))
             p.drawRoundedRect(QRectF(6, 7, w - 12, h - 14), 10, 10)
 
         ratio = self._ratio
@@ -220,7 +220,7 @@ class UserCard(QWidget):
         p.fillRect(self.rect(), QColor(theme.color("sidebar")))
         if self._hover:
             p.setPen(Qt.NoPen)
-            p.setBrush(QColor(theme.color("surface_2")))
+            p.setBrush(QColor(theme.color("hover")))
             p.drawRoundedRect(QRectF(6, 5, w - 12, h - 10), 10, 10)
         ratio = self._ratio
         avatar_size = 38

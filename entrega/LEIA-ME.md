@@ -1,10 +1,10 @@
-# DiskPilot 1.4.1 — pacote de transporte em texto
+# DiskPilot 1.4.2 — pacote de transporte em texto
 
 Esta pasta existe para levar o projeto para um ambiente onde **só é possível
 copiar texto** (sem clone, sem ZIP, sem download de release).
 
 O conteúdo não é o código-fonte legível: é o projeto inteiro compactado
-(`tar.xz`, 68.268 bytes) e codificado em **Base85**, dividido em 4 partes de
+(`tar.xz`, 68.288 bytes) e codificado em **Base85**, dividido em 4 partes de
 texto ASCII. O script `restaurar_diskpilot.py` remonta o arquivo, confere o
 SHA-256 e extrai a pasta `DiskPilot/`.
 
@@ -12,15 +12,15 @@ SHA-256 e extrai a pasta `DiskPilot/`.
 
 | Arquivo | Bytes | SHA-256 (sem espaços/quebras) |
 |---|---|---|
-| `parte1.txt` | 21.551 | `754e2a5d87f3e6307855f1461445854e25a8652b66b5ede25469d7061ff6c3e5` |
-| `parte2.txt` | 21.557 | `3a87480ae6c762313f91ce29cd54cfa0de0ba2a20aca6b73629fff9ca1faffe1` |
-| `parte3.txt` | 21.552 | `69130ec273fa686c3e063c57f1a23011eb7be19d93230188722922ad4f6da97a` |
-| `parte4.txt` | 21.545 | `07cbbbdb19effcf898a6eacd55ebb8934f6ee9dd5168d8339c00190e7ebf103f` |
+| `parte1.txt` | 21.562 | `0002f8383fb09f5497b126580e9828a72b45059df5ce2529aff011c3522a52e1` |
+| `parte2.txt` | 21.557 | `57b43d0ebbab1b8b5cb166d56d3e0b8262e0b6424a23213227f72550aedc04bb` |
+| `parte3.txt` | 21.559 | `50ceef7570de21fd33a9596962457a8255fb2ea673cfb698036b70231ed7dfdb` |
+| `parte4.txt` | 21.560 | `428146a6a1bca7cc5cddd2a8ed235e526721cdc1d6dd9ea2575143a6ed8b083b` |
 
 SHA-256 do `tar.xz` reconstruído (verificado pelo script):
 
 ```text
-306d4877bd151ae3b99778428a73494df73d417a78267d599c95f0a416d3ece7
+2b24eaa5c3d39caa406a0e492e58e14c7b7382dfc42a6bc03c1eb0a809574716
 ```
 
 ## Como usar
@@ -45,11 +45,15 @@ SHA-256 do `tar.xz` reconstruído (verificado pelo script):
 5. Confirme no `diskpilot.log`:
 
    ```text
-   iniciando DiskPilot 1.4.1
+   iniciando DiskPilot 1.4.2
    ```
 
 ## Novidades desta versão
 
+- **Hover das abas verticais no tema claro**: o fundo das abas, do logo e do
+  cartão do usuário agora usa o token `hover` (`#d8ebef`), em vez de
+  `surface_2` — que era quase idêntico ao fundo da barra lateral e deixava o
+  hover praticamente invisível.
 - **Botões de janela clicáveis em telas com escala**: o `WM_NCHITTEST` agora
   converte a posição física do Windows para o espaço lógico do Qt. Antes, em
   telas com 125%/150%, a região direita da barra era tratada como borda de
@@ -79,7 +83,7 @@ Grava `diagnostico-diskpilot.txt` com Python, PySide6, versão do Qt, tela,
 py -c "from pathlib import Path; [print(p.name, len(''.join(p.read_text(encoding='ascii').split()))) for p in sorted(Path('.').glob('parte*.txt'))]"
 ```
 
-Esperado: `21334`, `21334`, `21334`, `21333`.
+Esperado: `21340`, `21340`, `21340`, `21340`.
 
 ## Observações
 
@@ -89,14 +93,14 @@ Esperado: `21334`, `21334`, `21334`, `21333`.
   `PySide6` já precisa existir no ambiente.
 - O código é distribuído sob licença **MIT** (`LICENSE`); as dependências
   mantêm suas licenças — inventário em `THIRD-PARTY.md`.
-- Este pacote é gerado a partir do commit `v1.4.1` deste repositório.
+- Este pacote é gerado a partir do commit `v1.4.2` deste repositório.
 
 ## URL dos arquivos crus
 
 ```text
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.4.1/entrega/parte1.txt
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.4.1/entrega/parte2.txt
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.4.1/entrega/parte3.txt
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.4.1/entrega/parte4.txt
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.4.1/entrega/restaurar_diskpilot.py
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.4.2/entrega/parte1.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.4.2/entrega/parte2.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.4.2/entrega/parte3.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.4.2/entrega/parte4.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.4.2/entrega/restaurar_diskpilot.py
 ```

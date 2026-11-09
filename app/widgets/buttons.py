@@ -225,7 +225,7 @@ class NavButton(QWidget):
             p.drawRoundedRect(QRectF(8, (h - 20) / 2, 3, 20), 1.5, 1.5)
         elif self._hover:
             p.setPen(Qt.NoPen)
-            p.setBrush(QColor(theme.color("surface_2")))
+            p.setBrush(QColor(theme.color("hover")))
             p.drawRoundedRect(QRectF(8, 3, w - 16, h - 6), 9, 9)
 
         if self.hasFocus():
