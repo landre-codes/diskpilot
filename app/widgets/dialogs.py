@@ -463,6 +463,7 @@ class TopItemsDialog(SheetDialog):
         )
         self.scan_result = result
         self._kind = "dirs"
+        self._size_filter = "all"
         self._selected_path = ""
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
@@ -490,6 +491,22 @@ class TopItemsDialog(SheetDialog):
         )
         self.kind_btn.changed.connect(self._show_kind)
         selector_row.addWidget(self.kind_btn)
+        size_caption = QLabel("Tamanho")
+        size_caption.setObjectName("Muted")
+        selector_row.addWidget(size_caption)
+        self.size_btn = SelectButton("filter-variant", "Todos", self)
+        self.size_btn.setMinimumWidth(150)
+        self.size_btn.setMaximumWidth(190)
+        self.size_btn.set_options(
+            [
+                ("all", "Todos", "filter-variant"),
+                ("large100", "> 100 MB", "file-alert-outline"),
+                ("large1g", "> 1 GB", "database-alert-outline"),
+            ],
+            "all",
+        )
+        self.size_btn.changed.connect(self._show_size)
+        selector_row.addWidget(self.size_btn)
         selector_row.addStretch(1)
         self.summary = QLabel("")
         self.summary.setObjectName("Muted")
@@ -675,8 +692,24 @@ class TopItemsDialog(SheetDialog):
         self._populate()
         self._update_actions()
 
-    def _populate(self) -> None:
+    def _show_size(self, key: str) -> None:
+        self._size_filter = key if key in {"large100", "large1g"} else "all"
+        self._selected_path = ""
+        self._populate()
+        self._update_actions()
+
+    def _filtered_nodes(self) -> list:
         nodes = self._files if self._kind == "files" else self._dirs
+        if self._size_filter == "large100":
+            threshold = 100 * 1024 * 1024
+        elif self._size_filter == "large1g":
+            threshold = 1024 * 1024 * 1024
+        else:
+            return nodes
+        return [node for node in nodes if node.size >= threshold]
+
+    def _populate(self) -> None:
+        nodes = self._filtered_nodes()
         self.tree.clear()
         self.tree.setUpdatesEnabled(False)
         try:

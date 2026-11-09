@@ -1,10 +1,10 @@
-# DiskPilot 1.6.3 — pacote de transporte em texto
+# DiskPilot 1.6.4 — pacote de transporte em texto
 
 Esta pasta existe para levar o projeto para um ambiente onde **só é possível
 copiar texto** (sem clone, sem ZIP, sem download de release).
 
 O conteúdo não é o código-fonte legível: é o projeto inteiro compactado
-(`tar.xz`, 75.724 bytes) e codificado em **Base85**, dividido em 4 partes de
+(`tar.xz`, 75.904 bytes) e codificado em **Base85**, dividido em 4 partes de
 texto ASCII. O script `restaurar_diskpilot.py` remonta o arquivo, confere o
 SHA-256 e extrai a pasta `DiskPilot/`.
 
@@ -12,15 +12,15 @@ SHA-256 e extrai a pasta `DiskPilot/`.
 
 | Arquivo | Bytes | SHA-256 (sem espaços/quebras) |
 |---|---|---|
-| `parte1.txt` | 23.907 | `afb16b77af7dedd531b40e2c938609ba964130bc3794996e9fb784ace61ddcba` |
-| `parte2.txt` | 23.905 | `c12e95567f41044a569c4c0030673bce388cf557978f15a1ede6bb1909073ea9` |
-| `parte3.txt` | 23.912 | `6a3a7e2f5fb28a1062d850555d444af7f87b0f31402d0877251c59716f581e31` |
-| `parte4.txt` | 23.904 | `6b6909a0c2111dfecd572f16fb3f2610154c46e025851b2dc0ce3490f2e11377` |
+| `parte1.txt` | 23.962 | `6c2cd1680f137dc90c62cb0f04038fe24e53b821590c5328457dabfb2a55ee60` |
+| `parte2.txt` | 23.964 | `e7a29c3f56d3f32574f6c191632b0235a68f7bb7ca25d309ae4a4cb43ae29323` |
+| `parte3.txt` | 23.962 | `e3c1e318a3468c364c98415023acd450b87e49f73eca65874034bc1dfea65680` |
+| `parte4.txt` | 23.965 | `d3fe59c3ff61077d166dadac92bcdb84d7012642b6d32c83c4c0099f8ea32463` |
 
 SHA-256 do `tar.xz` reconstruído (verificado pelo script):
 
 ```text
-20e6870135d319648c6f3a87794061bd9f4f9118b2463e38a63241b03f5eb3d6
+754d85724cd3c5e47d238da67859f3161a79832a10bda4d78cc68dc240096564
 ```
 
 ## Como usar
@@ -45,11 +45,14 @@ SHA-256 do `tar.xz` reconstruído (verificado pelo script):
 5. Confirme no `diskpilot.log`:
 
    ```text
-   iniciando DiskPilot 1.6.3
+   iniciando DiskPilot 1.6.4
    ```
 
 ## Novidades desta versão
 
+- **Filtro por tamanho no Top 100**: a tabela dos maiores itens agora tem um
+  seletor “Tamanho” com as opções Todos, > 100 MB e > 1 GB, aplicado tanto a
+  diretórios quanto a arquivos.
 - **Janela de exportação na análise**: botão **Exportar** no cabeçalho abre uma
   janela para escolher CSV, XLSX ou XLSB e o destino. O XLSX traz abas Resumo,
   Top 100 e Sugestões; o XLSB requer Microsoft Excel e pywin32.
@@ -122,7 +125,7 @@ Grava `diagnostico-diskpilot.txt` com Python, PySide6, versão do Qt, tela,
 py -c "from pathlib import Path; [print(p.name, len(''.join(p.read_text(encoding='ascii').split()))) for p in sorted(Path('.').glob('parte*.txt'))]"
 ```
 
-Esperado: `23664`, `23664`, `23664`, `23663`.
+Esperado: `23720`, `23720`, `23720`, `23720`.
 
 ## Observações
 
@@ -133,14 +136,14 @@ Esperado: `23664`, `23664`, `23664`, `23663`.
   Microsoft Excel instalado.
 - O código é distribuído sob licença **MIT** (`LICENSE`); as dependências
   mantêm suas licenças — inventário em `THIRD-PARTY.md`.
-- Este pacote é gerado a partir do commit `v1.6.3` deste repositório.
+- Este pacote é gerado a partir do commit `v1.6.4` deste repositório.
 
 ## URL dos arquivos crus
 
 ```text
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.6.3/entrega/parte1.txt
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.6.3/entrega/parte2.txt
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.6.3/entrega/parte3.txt
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.6.3/entrega/parte4.txt
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.6.3/entrega/restaurar_diskpilot.py
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.6.4/entrega/parte1.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.6.4/entrega/parte2.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.6.4/entrega/parte3.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.6.4/entrega/parte4.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.6.4/entrega/restaurar_diskpilot.py
 ```

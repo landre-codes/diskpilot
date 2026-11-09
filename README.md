@@ -40,7 +40,7 @@ O projeto nasceu como um "Everything gerencial e enxuto": em vez de apenas local
 - O seletor de pastas mostra o **caminho completo** da pasta atual ou da pasta selecionada, com botão de copiar; cada linha também exibe o caminho integral em tooltip, útil para caminhos longos e unidades de rede.
 - Chips das raízes selecionadas, com remoção individual.
 - Varredura em segundo plano com `QThreadPool`, progresso, cancelamento e tolerância a erros de permissão. Logs em `diskpilot.log`/`diskpilot-crash.log` na pasta do projeto e na pasta de configuração.
-- Botão **Top 100**: ranking dos 100 maiores diretórios e dos 100 maiores arquivos da análise, com tamanho, percentual, caminho completo, cópia do caminho e abertura no Explorer.
+- Botão **Top 100**: ranking dos 100 maiores diretórios e dos 100 maiores arquivos da análise, com filtro por tamanho (todos, > 100 MB, > 1 GB), tamanho, percentual, caminho completo, cópia do caminho e abertura no Explorer.
 - Coluna opcional **Caminho completo** na árvore, ativada pelo checkbox na barra de ferramentas e persistida na configuração. A coluna é redimensionável (largura inicial de 600 px) para exibir caminhos longos; o caminho integral também aparece no tooltip de cada item.
 - **Exportação de dados** pelo botão **Exportar** no cabeçalho da análise (ou pelo Top 100): janela com seleção de formato e destino. CSV para Excel/LibreOffice, XLSX com abas Resumo, Top 100 e Sugestões, e XLSB binário (requer Microsoft Excel instalado).
 - Árvore aninhada carregada sob demanda, com:
