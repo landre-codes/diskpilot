@@ -364,6 +364,7 @@ class Toast(QFrame):
         lay.addWidget(self.label, 1)
         self._effect: QGraphicsOpacityEffect | None = None
         self._anim: QPropertyAnimation | None = None
+        self._anim_callback = None
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.timeout.connect(self._fade_out)
@@ -396,22 +397,41 @@ class Toast(QFrame):
             self._effect = QGraphicsOpacityEffect(self)
             self.setGraphicsEffect(self._effect)
         self._effect.setOpacity(0.0)
-        self._anim = QPropertyAnimation(self._effect, b"opacity", self)
-        self._anim.setDuration(180)
-        self._anim.setStartValue(0.0)
-        self._anim.setEndValue(1.0)
-        self._anim.setEasingCurve(QEasingCurve.OutCubic)
-        self._anim.start()
+        self._animate(0.0, 1.0, 180, QEasingCurve.OutCubic)
         self._timer.start(duration)
+
+    def _animate(
+        self,
+        start: float,
+        end: float,
+        duration: int,
+        easing: QEasingCurve.Type,
+        finished=None,
+    ) -> None:
+        if self._effect is None:
+            return
+        if self._anim is None:
+            self._anim = QPropertyAnimation(self._effect, b"opacity", self)
+            self._anim.finished.connect(self._on_anim_finished)
+        anim = self._anim
+        anim.stop()
+        anim.setDuration(duration)
+        anim.setStartValue(start)
+        anim.setEndValue(end)
+        anim.setEasingCurve(easing)
+        self._anim_callback = finished
+        anim.start()
+
+    def _on_anim_finished(self) -> None:
+        callback = self._anim_callback
+        self._anim_callback = None
+        if callback is not None:
+            callback()
 
     def _fade_out(self) -> None:
         if self._effect is None:
             self.hide()
             return
-        self._anim = QPropertyAnimation(self._effect, b"opacity", self)
-        self._anim.setDuration(220)
-        self._anim.setStartValue(self._effect.opacity())
-        self._anim.setEndValue(0.0)
-        self._anim.setEasingCurve(QEasingCurve.InCubic)
-        self._anim.finished.connect(self.hide)
-        self._anim.start()
+        self._animate(
+            self._effect.opacity(), 0.0, 220, QEasingCurve.InCubic, self.hide
+        )

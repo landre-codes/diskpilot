@@ -1,10 +1,10 @@
-# DiskPilot 1.4.3 — pacote de transporte em texto
+# DiskPilot 1.5.0 — pacote de transporte em texto
 
 Esta pasta existe para levar o projeto para um ambiente onde **só é possível
 copiar texto** (sem clone, sem ZIP, sem download de release).
 
 O conteúdo não é o código-fonte legível: é o projeto inteiro compactado
-(`tar.xz`, 68.528 bytes) e codificado em **Base85**, dividido em 4 partes de
+(`tar.xz`, 70.708 bytes) e codificado em **Base85**, dividido em 4 partes de
 texto ASCII. O script `restaurar_diskpilot.py` remonta o arquivo, confere o
 SHA-256 e extrai a pasta `DiskPilot/`.
 
@@ -12,15 +12,15 @@ SHA-256 e extrai a pasta `DiskPilot/`.
 
 | Arquivo | Bytes | SHA-256 (sem espaços/quebras) |
 |---|---|---|
-| `parte1.txt` | 21.632 | `a990bf86f9de27e0850910b1b7a07e24f2fe0f1402e7695c0d3276bec0969652` |
-| `parte2.txt` | 21.640 | `bb962bd241e19ee8f4ac61edc8e01bbbb10226ef9ebb8a7f3625a07acedacc8f` |
-| `parte3.txt` | 21.631 | `c9f39f751469db432ccf2592a10d9feae04ee179c5c9f8d4ef5de2fdeb60ae89` |
-| `parte4.txt` | 21.634 | `899f78ca4e805d53a8048bf4d814ca1096590b0c2e129e82f74e46af2ca70be0` |
+| `parte1.txt` | 22.327 | `adbcbe36395294ef513d1059757aa71a21b815969d3f1cd7fcfa3afa1dc37e81` |
+| `parte2.txt` | 22.323 | `4c5df3bdb4c0d91cbc3a5e77e17bdf7159ed270131a0e65521a0d719873f1ca0` |
+| `parte3.txt` | 22.331 | `839fbf5e6dd539b95df7b310655ff46d51215e8a3d48e76f8e1bd09ba4b2fa7a` |
+| `parte4.txt` | 22.316 | `bd54238d56003418a9caea23b62a2ea66583065e0f4f9f792dbedc87cce4363c` |
 
 SHA-256 do `tar.xz` reconstruído (verificado pelo script):
 
 ```text
-1432daabc90db9f8a8e8cceee2fa03b5bfb994e73edd9bf3d6fbbed3d9eb01de
+9f5b708cb025a99a5d160c1872bba1b16334d0e0668af51e3927f4bd06822b6c
 ```
 
 ## Como usar
@@ -45,11 +45,22 @@ SHA-256 do `tar.xz` reconstruído (verificado pelo script):
 5. Confirme no `diskpilot.log`:
 
    ```text
-   iniciando DiskPilot 1.4.3
+   iniciando DiskPilot 1.5.0
    ```
 
 ## Novidades desta versão
 
+- **Caminho completo no seletor de pastas**: além da navegação, o diálogo mostra
+  o caminho inteiro da pasta atual ou da pasta selecionada, com botão de copiar
+  e tooltip com o caminho integral em cada linha. Útil para caminhos longos e
+  compartilhamentos de rede.
+- **Top 100**: novo botão na análise abre o ranking dos 100 maiores diretórios
+  e dos 100 maiores arquivos, com tamanho, percentual, caminho completo,
+  cópia do caminho e abertura no Explorer.
+- **Gerenciamento de memória**: diálogos transitórios, menus e animações são
+  destruídos ou reutilizados; o resultado grande anterior é liberado antes de
+  uma nova varredura; o Top 100 e o resumo usam `heapq.nlargest`, mantendo
+  apenas os itens necessários em memória.
 - **Compatibilidade do avatar**: o `sidebar.py` detecta se o `icons.py`
   instalado aceita `dpr` e chama `avatar_pixmap`/`circular_pixmap`
   adequadamente. Corrige o `TypeError` que aparecia ao misturar um `sidebar.py`
@@ -87,7 +98,7 @@ Grava `diagnostico-diskpilot.txt` com Python, PySide6, versão do Qt, tela,
 py -c "from pathlib import Path; [print(p.name, len(''.join(p.read_text(encoding='ascii').split()))) for p in sorted(Path('.').glob('parte*.txt'))]"
 ```
 
-Esperado: `21415`, `21415`, `21415`, `21415`.
+Esperado: `22097`, `22097`, `22097`, `22094`.
 
 ## Observações
 
@@ -97,14 +108,14 @@ Esperado: `21415`, `21415`, `21415`, `21415`.
   `PySide6` já precisa existir no ambiente.
 - O código é distribuído sob licença **MIT** (`LICENSE`); as dependências
   mantêm suas licenças — inventário em `THIRD-PARTY.md`.
-- Este pacote é gerado a partir do commit `v1.4.3` deste repositório.
+- Este pacote é gerado a partir do commit `v1.5.0` deste repositório.
 
 ## URL dos arquivos crus
 
 ```text
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.4.3/entrega/parte1.txt
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.4.3/entrega/parte2.txt
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.4.3/entrega/parte3.txt
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.4.3/entrega/parte4.txt
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.4.3/entrega/restaurar_diskpilot.py
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.5.0/entrega/parte1.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.5.0/entrega/parte2.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.5.0/entrega/parte3.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.5.0/entrega/parte4.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.5.0/entrega/restaurar_diskpilot.py
 ```

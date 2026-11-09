@@ -61,6 +61,7 @@ class FadeStack(QStackedWidget):
             return
         if self._anim is not None:
             self._anim.stop()
+            self._anim.deleteLater()
             self._anim = None
             for i in range(self.count()):
                 self.widget(i).setGraphicsEffect(None)
@@ -80,6 +81,7 @@ class FadeStack(QStackedWidget):
                 page.setGraphicsEffect(None)
             if self._anim is anim:
                 self._anim = None
+            anim.deleteLater()
 
         anim.finished.connect(clear)
         self._anim = anim
@@ -943,7 +945,9 @@ class MainWindow(QWidget):
 
     def _edit_profile(self) -> None:
         dialog = ProfileDialog(self, self.config)
-        if dialog.exec() == QDialog.Accepted:
+        result = dialog.exec()
+        dialog.deleteLater()
+        if result == QDialog.Accepted:
             self._refresh_identity()
             self.show_toast("Perfil atualizado.", "success")
 

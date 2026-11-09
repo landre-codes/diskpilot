@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import heapq
 from dataclasses import dataclass, field
 from typing import Iterator
 
@@ -78,11 +79,11 @@ class ScanResult:
     def review_savings(self) -> int:
         return sum(s.savings for s in self.suggestions if s.confidence != "safe")
 
-    def largest_paths(self) -> list[Node]:
-        nodes: list[Node] = []
-        for root in self.roots:
-            nodes.extend(root.children)
-        return sorted(nodes, key=lambda n: n.size, reverse=True)
+    def largest_paths(self, limit: int | None = None) -> list[Node]:
+        nodes = (child for root in self.roots for child in root.children)
+        if limit is None:
+            return sorted(nodes, key=lambda n: n.size, reverse=True)
+        return heapq.nlargest(limit, nodes, key=lambda n: n.size)
 
 
 def walk_nodes(node: Node) -> Iterator[Node]:
@@ -98,3 +99,22 @@ def walk_nodes(node: Node) -> Iterator[Node]:
 def all_nodes(result: ScanResult) -> Iterator[Node]:
     for root in result.roots:
         yield from walk_nodes(root)
+
+
+def top_items(
+    result: ScanResult, limit: int = 100
+) -> tuple[list[Node], list[Node]]:
+    """Os maiores diretórios e arquivos, em ordem decrescente de tamanho.
+
+    Percorre a árvore uma vez por categoria; ``heapq.nlargest`` mantém apenas
+    os ``limit`` maiores, sem ordenar todos os nós.
+    """
+    nodes = all_nodes(result)
+    dirs = heapq.nlargest(
+        limit, (node for node in nodes if node.is_dir), key=lambda n: (n.size, n.path)
+    )
+    nodes = all_nodes(result)
+    files = heapq.nlargest(
+        limit, (node for node in nodes if not node.is_dir), key=lambda n: (n.size, n.path)
+    )
+    return dirs, files

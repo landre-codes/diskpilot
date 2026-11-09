@@ -380,7 +380,9 @@ class SettingsPage(BasePage):
 
     def _edit_profile(self) -> None:
         dialog = ProfileDialog(self.window(), self.state.config)
-        if dialog.exec() == QDialog.Accepted:
+        result = dialog.exec()
+        dialog.deleteLater()
+        if result == QDialog.Accepted:
             self._refresh_identity()
             self.identityChanged.emit()
             self.toast("Perfil atualizado.", "success")
@@ -410,7 +412,9 @@ class SettingsPage(BasePage):
             "Limpar resultados",
             danger=True,
         )
-        if dialog.exec() != QDialog.Accepted:
+        result = dialog.exec()
+        dialog.deleteLater()
+        if result != QDialog.Accepted:
             return
         self.state.cancel_scan()
         self.state.clear_results(persist=True)

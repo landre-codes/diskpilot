@@ -394,3 +394,4 @@ class SelectButton(ActionButton):
             action.triggered.connect(lambda _=False, k=key: self.set_current(k))
             menu.addAction(action)
         menu.exec(self.mapToGlobal(QPoint(0, self.height() + 5)))
+        menu.deleteLater()

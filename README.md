@@ -37,8 +37,10 @@ O projeto nasceu como um "Everything gerencial e enxuto": em vez de apenas local
 
 ### Análise de diretórios
 - Seleção de **uma ou várias pastas** pelo seletor próprio (Ctrl+clique), por arrastar e soltar ou por múltiplas adições.
+- O seletor de pastas mostra o **caminho completo** da pasta atual ou da pasta selecionada, com botão de copiar; cada linha também exibe o caminho integral em tooltip, útil para caminhos longos e unidades de rede.
 - Chips das raízes selecionadas, com remoção individual.
 - Varredura em segundo plano com `QThreadPool`, progresso, cancelamento e tolerância a erros de permissão. Logs em `diskpilot.log`/`diskpilot-crash.log` na pasta do projeto e na pasta de configuração.
+- Botão **Top 100**: ranking dos 100 maiores diretórios e dos 100 maiores arquivos da análise, com tamanho, percentual, caminho completo, cópia do caminho e abertura no Explorer.
 - Árvore aninhada carregada sob demanda, com:
   - tamanho de cada pasta (soma recursiva) e de cada arquivo;
   - percentual em relação ao pai;
@@ -313,6 +315,9 @@ class ClientesPage(BasePage):
 - As estimativas de limpeza não são destrutivas e podem se sobrepor; os cálculos já evitam contar arquivos de cache duas vezes e mostram "seguro" separado de "revisar".
 - O logo e o avatar são copiados com `shutil`, não vinculados ao arquivo original.
 - O `sidebar.py` detecta se `icons.py` aceita o parâmetro `dpr` (adicionado na 1.3.4) e chama `avatar_pixmap`/`circular_pixmap` com ou sem ele. Assim, uma atualização parcial de arquivos não quebra o avatar com `TypeError`.
+- O seletor de pastas usa `QFileSystemModel` e exibe o caminho completo do item atual/selecionado em um rótulo selecionável (com cópia), além de tooltip por linha. O caminho não é abreviado, o que ajuda em compartilhamentos de rede.
+- O ranking **Top 100** percorre a árvore em memória com `heapq.nlargest` (duas passagens: diretórios e arquivos), sem ordenar todos os nós. Percentuais de diretórios são cumulativos e podem se sobrepor.
+- **Memória**: diálogos transitórios são destruídos com `deleteLater`, menus e animações são liberados/reutilizados, e o resultado grande anterior é descartado antes de uma nova varredura (`RELEASE_RESULT_THRESHOLD`). A varredura tem limite de 1,5 milhão de entradas; o resumo persistido guarda apenas os 6 maiores diretórios, calculados com `heapq.nlargest`.
 - `qt-material` fornece a base do tema; o QSS em `theme.py` sobrescreve o que é necessário (especialmente `text-transform`, hovers e cores semânticas) para manter a identidade do app.
 - A geometria inicial e a restaurada são limitadas à área útil da tela: em notebooks pequenos (ou com escala de 125%/150%) a janela não nasce maior que o monitor, então a barra de título e os botões de janela continuam clicáveis. O tamanho mínimo também se adapta ao monitor.
 - O `WM_NCHITTEST` nativo converte a posição do cursor para o espaço lógico do Qt antes de detectar as bordas. Sem isso, em telas com escala o canto direito inteiro era confundido com borda de redimensionamento e os botões de maximizar/fechar não respondiam — o usuário precisava maximizar com duplo clique no meio da barra.

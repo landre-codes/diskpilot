@@ -21,7 +21,7 @@ from ...services.model import ScanProgress, ScanResult
 from ...utils import format_bytes, format_number, short_path
 from ...widgets.buttons import ActionButton, IconButton, SearchField, SelectButton
 from ...widgets.common import Card, Chip, ElidedLabel, EmptyState, PageHeader
-from ...widgets.dialogs import FolderPickerDialog
+from ...widgets.dialogs import FolderPickerDialog, TopItemsDialog
 from ..base import BasePage
 from .tree import FileTree
 
@@ -44,6 +44,10 @@ class AnalyzerPage(BasePage):
             "Selecione uma ou mais pastas para mapear onde o espaço está sendo usado.",
             "Armazenamento",
         )
+        self.top_btn = ActionButton("Top 100", "podium", "ghost")
+        self.top_btn.setToolTip("Ver os 100 maiores diretórios e arquivos da última análise")
+        self.top_btn.clicked.connect(self._open_top_items)
+        self.header.add_action(self.top_btn)
         self.rescan_btn = ActionButton("Reanalisar", "refresh", "ghost")
         self.rescan_btn.clicked.connect(self._rescan)
         self.header.add_action(self.rescan_btn)
@@ -256,6 +260,7 @@ class AnalyzerPage(BasePage):
     def _update_header(self) -> None:
         result = self.state.last_result
         count = len(self.state.roots)
+        self.top_btn.setEnabled(result is not None)
         if result is not None:
             errors = f" · {result.errors} avisos" if result.errors else ""
             self.header.subtitle.setText(
@@ -302,6 +307,15 @@ class AnalyzerPage(BasePage):
         self.state.start_scan(force=True)
         self.toast("Reanalisando as pastas selecionadas…", "info")
 
+    def _open_top_items(self) -> None:
+        result = self.state.last_result
+        if result is None:
+            self.toast("Execute uma análise para gerar o ranking.", "info")
+            return
+        dialog = TopItemsDialog(self.window(), result)
+        dialog.exec()
+        dialog.deleteLater()
+
     # --------------------------------------------------------------- filtros
     def _on_search(self, text: str) -> None:
         self.tree.set_query(text)
@@ -347,6 +361,7 @@ class AnalyzerPage(BasePage):
         self.scan_bar.setRange(0, 0)
         self.cancel_btn.setEnabled(True)
         self.rescan_btn.setEnabled(False)
+        self.top_btn.setEnabled(False)
         self.header.subtitle.setText("Analisando as pastas selecionadas…")
         self._update_empty()
 

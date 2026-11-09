@@ -281,7 +281,7 @@ class AppState(QObject):
             ],
             "top_dirs": [
                 {"path": node.path, "name": node.name, "size": node.size}
-                for node in result.largest_paths()[:6]
+                for node in result.largest_paths(6)
             ],
             "suggestion_count": len(result.suggestions),
         }
@@ -314,7 +314,7 @@ class AppState(QObject):
                 ],
                 "top_dirs": [
                     {"path": node.path, "name": node.name, "size": node.size}
-                    for node in self.last_result.largest_paths()[:6]
+                    for node in self.last_result.largest_paths(6)
                 ],
                 "suggestion_count": len(self.last_result.suggestions),
             }

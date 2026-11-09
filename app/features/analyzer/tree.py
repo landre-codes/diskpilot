@@ -664,6 +664,7 @@ class FileTree(QTreeWidget):
         elif chosen == act_parent:
             parent = node.path if node.is_dir else os.path.dirname(node.path)
             open_in_explorer(parent)
+        menu.deleteLater()
 
     def _refresh_visuals(self, *_args: Any) -> None:
         iterator = QTreeWidgetItemIterator(self)

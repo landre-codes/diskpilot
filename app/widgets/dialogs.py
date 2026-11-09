@@ -6,10 +6,11 @@ import os
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QDir, QModelIndex, QPoint, QStandardPaths, Qt
+from PySide6.QtCore import QDir, QEvent, QModelIndex, QPoint, QStandardPaths, Qt
 from PySide6.QtGui import QColor, QGuiApplication, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
     QDialog,
     QFileDialog,
     QFileSystemModel,
@@ -20,16 +21,20 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QToolTip,
     QTreeView,
+    QTreeWidget,
+    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
 from ..config import AppConfig
 from ..icons import avatar_pixmap, circular_pixmap, icon
+from ..services.model import ScanResult, top_items
 from ..theme import get_theme
-from ..utils import normalize_path
-from .buttons import ActionButton, IconButton
+from ..utils import format_bytes, normalize_path, open_in_explorer
+from .buttons import ActionButton, IconButton, SelectButton
 
 
 class _DialogHeader(QFrame):
@@ -224,6 +229,24 @@ class FolderPickerDialog(SheetDialog):
         self.tree.setColumnWidth(0, 560)
         self.tree.doubleClicked.connect(self._enter_index)
         right.addWidget(self.tree, 1)
+        self.full_path_caption = QLabel("CAMINHO COMPLETO")
+        self.full_path_caption.setObjectName("Eyebrow")
+        right.addWidget(self.full_path_caption)
+        path_row = QHBoxLayout()
+        path_row.setSpacing(6)
+        self.full_path_label = QLabel("")
+        self.full_path_label.setObjectName("PathText")
+        self.full_path_label.setWordWrap(True)
+        self.full_path_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self._full_path_value = ""
+        path_row.addWidget(self.full_path_label, 1)
+        self.copy_path_btn = IconButton(
+            "content-copy", "Copiar caminho completo", self, 15, 28, "primary"
+        )
+        self.copy_path_btn.clicked.connect(self._copy_full_path)
+        path_row.addWidget(self.copy_path_btn, 0, Qt.AlignTop)
+        right.addLayout(path_row)
+        self.tree.viewport().installEventFilter(self)
         hint = QLabel(
             "Dica: use Ctrl+clique para marcar várias pastas · duplo clique abre uma pasta"
         )
@@ -311,12 +334,23 @@ class FolderPickerDialog(SheetDialog):
                 self.places.setCurrentItem(item)
 
     # ------------------------------------------------------------- navegação
+    def eventFilter(self, obj, event) -> bool:  # noqa: N802
+        if obj is self.tree.viewport() and event.type() == QEvent.ToolTip:
+            index = self.tree.indexAt(event.pos())
+            if index.isValid():
+                path = self.model.filePath(index)
+                if path:
+                    QToolTip.showText(event.globalPos(), path, self.tree)
+                    return True
+        return super().eventFilter(obj, event)
+
     def _navigate(self, path: str) -> None:
         path = normalize_path(path)
         if not Path(path).exists() or not Path(path).is_dir():
             return
         self._current = path
         self.path_edit.setText(path)
+        self.path_edit.setToolTip(path)
         if hasattr(self, "add_current_btn"):
             self.add_current_btn.setToolTip(f"Adicionar a pasta exibida: {path}")
         index = self.model.index(path)
@@ -324,6 +358,7 @@ class FolderPickerDialog(SheetDialog):
             self.tree.setRootIndex(index)
             self.tree.clearSelection()
             self._update_selection_label()
+        self._update_full_path()
         self.up_btn.setEnabled(Path(path).parent != Path(path))
 
     def _go_up(self) -> None:
@@ -368,6 +403,33 @@ class FolderPickerDialog(SheetDialog):
         self._current_only = True
         self.accept()
 
+    def _update_full_path(self) -> None:
+        if not hasattr(self, "full_path_label"):
+            return
+        selected = self._selected_rows()
+        if len(selected) == 1:
+            self.full_path_caption.setText("CAMINHO SELECIONADO")
+            self._full_path_value = selected[0]
+            text = selected[0]
+        else:
+            self.full_path_caption.setText("CAMINHO COMPLETO")
+            self._full_path_value = self._current
+            text = self._current
+            if len(selected) > 1:
+                text = f"{text}  ·  {len(selected)} pastas selecionadas"
+        self.full_path_label.setText(text)
+        self.full_path_label.setToolTip(self._full_path_value)
+
+    def _copy_full_path(self) -> None:
+        if not self._full_path_value:
+            return
+        QApplication.clipboard().setText(self._full_path_value)
+        QToolTip.showText(
+            self.copy_path_btn.mapToGlobal(self.copy_path_btn.rect().bottomLeft()),
+            "Caminho copiado.",
+            self.copy_path_btn,
+        )
+
     def _update_selection_label(self, *_args: Any) -> None:
         count = len(self._selected_rows())
         if count:
@@ -378,6 +440,179 @@ class FolderPickerDialog(SheetDialog):
             self.selection_label.setText("Nenhuma pasta selecionada")
         self.add_btn.setText(f"Adicionar {count}" if count else "Adicionar")
         self.add_btn.setEnabled(count > 0)
+        self._update_full_path()
+
+
+class TopItemsDialog(SheetDialog):
+    """Ranking dos maiores diretórios e arquivos da última análise."""
+
+    def __init__(self, parent: QWidget | None, result: ScanResult | None) -> None:
+        super().__init__(
+            parent,
+            "Maiores itens",
+            "Os 100 diretórios e os 100 arquivos que mais ocupam espaço.",
+            1080,
+            680,
+        )
+        self.result = result
+        self._kind = "dirs"
+        self._selected_path = ""
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            self._dirs, self._files = (
+                top_items(result, 100) if result is not None else ([], [])
+            )
+        finally:
+            QApplication.restoreOverrideCursor()
+        self._total = max(1, result.total_size if result is not None else 0)
+
+        selector_row = QHBoxLayout()
+        selector_row.setSpacing(8)
+        selector_caption = QLabel("Mostrar")
+        selector_caption.setObjectName("Muted")
+        selector_row.addWidget(selector_caption)
+        self.kind_btn = SelectButton("folder", "Diretórios (100)", self)
+        self.kind_btn.setMinimumWidth(190)
+        self.kind_btn.setMaximumWidth(240)
+        self.kind_btn.set_options(
+            [
+                ("dirs", f"Diretórios ({len(self._dirs)})", "folder"),
+                ("files", f"Arquivos ({len(self._files)})", "file-outline"),
+            ],
+            "dirs",
+        )
+        self.kind_btn.changed.connect(self._show_kind)
+        selector_row.addWidget(self.kind_btn)
+        selector_row.addStretch(1)
+        self.summary = QLabel("")
+        self.summary.setObjectName("Muted")
+        selector_row.addWidget(self.summary)
+        self.body.addLayout(selector_row)
+
+        self.tree = QTreeWidget(self)
+        self.tree.setObjectName("TopTree")
+        self.tree.setColumnCount(4)
+        self.tree.setHeaderLabels(["#", "Tamanho", "%", "Caminho completo"])
+        self.tree.setRootIsDecorated(False)
+        self.tree.setUniformRowHeights(True)
+        self.tree.setAlternatingRowColors(True)
+        self.tree.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.tree.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.tree.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.tree.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+        self.tree.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
+        self.tree.setIndentation(0)
+        header = self.tree.header()
+        header.setStretchLastSection(True)
+        self.tree.setColumnWidth(0, 42)
+        self.tree.setColumnWidth(1, 92)
+        self.tree.setColumnWidth(2, 62)
+        self.body.addWidget(self.tree, 1)
+
+        note = QLabel(
+            "Percentuais usam o espaço total analisado. Em diretórios, os valores "
+            "são cumulativos e podem se sobrepor."
+        )
+        note.setObjectName("Faint")
+        note.setWordWrap(True)
+        self.body.addWidget(note)
+        if result is not None and result.truncated:
+            warning = QLabel(
+                "A varredura foi limitada; o ranking considera apenas os itens visitados."
+            )
+            warning.setObjectName("Muted")
+            warning.setWordWrap(True)
+            self.body.addWidget(warning)
+
+        self.tree.itemSelectionChanged.connect(self._track_selection)
+        self.tree.itemDoubleClicked.connect(
+            lambda item, _column: self._open_path(item.text(3))
+        )
+
+        self.copy_btn = ActionButton("Copiar caminho", "content-copy", "soft", self, 16)
+        self.copy_btn.clicked.connect(self._copy_selected)
+        self.footer.addWidget(self.copy_btn)
+        self.open_btn = ActionButton(
+            "Abrir no Explorer", "folder-open-outline", "ghost", self, 16
+        )
+        self.open_btn.clicked.connect(self._open_selected)
+        self.footer.addWidget(self.open_btn)
+        self.status_label = QLabel("")
+        self.status_label.setObjectName("Faint")
+        self.footer.addWidget(self.status_label)
+        self.footer.addStretch(1)
+        close = ActionButton("Fechar", "", "primary", self)
+        close.clicked.connect(self.accept)
+        self.footer.addWidget(close)
+
+        self._populate()
+        self._update_actions()
+
+    def _show_kind(self, key: str) -> None:
+        self._kind = "files" if key == "files" else "dirs"
+        self._selected_path = ""
+        self._populate()
+        self._update_actions()
+
+    def _populate(self) -> None:
+        nodes = self._files if self._kind == "files" else self._dirs
+        self.tree.clear()
+        self.tree.setUpdatesEnabled(False)
+        try:
+            for rank, node in enumerate(nodes, 1):
+                percent = node.size / self._total * 100.0
+                item = QTreeWidgetItem(
+                    [
+                        f"{rank}",
+                        format_bytes(node.size),
+                        f"{percent:.1f}%",
+                        node.path,
+                    ]
+                )
+                item.setTextAlignment(0, Qt.AlignRight | Qt.AlignVCenter)
+                item.setTextAlignment(1, Qt.AlignRight | Qt.AlignVCenter)
+                item.setTextAlignment(2, Qt.AlignRight | Qt.AlignVCenter)
+                item.setToolTip(3, node.path)
+                self.tree.addTopLevelItem(item)
+            if not nodes:
+                empty = QTreeWidgetItem(["", "—", "", "Nenhum item para exibir."])
+                empty.setDisabled(True)
+                self.tree.addTopLevelItem(empty)
+        finally:
+            self.tree.setUpdatesEnabled(True)
+        noun = "arquivos" if self._kind == "files" else "diretórios"
+        self.summary.setText(
+            f"{format_bytes(self._total)} analisados · {len(nodes)} {noun}"
+        )
+        self.status_label.setText("")
+
+    def _track_selection(self) -> None:
+        item = self.tree.currentItem()
+        if item is None or item.isDisabled():
+            self._selected_path = ""
+        else:
+            self._selected_path = item.text(3)
+        self.status_label.setText("")
+        self._update_actions()
+
+    def _update_actions(self) -> None:
+        enabled = bool(self._selected_path)
+        self.copy_btn.setEnabled(enabled)
+        self.open_btn.setEnabled(enabled)
+
+    def _copy_selected(self) -> None:
+        if not self._selected_path:
+            return
+        QApplication.clipboard().setText(self._selected_path)
+        self.status_label.setText("Caminho copiado.")
+
+    def _open_selected(self) -> None:
+        if self._selected_path:
+            self._open_path(self._selected_path)
+
+    def _open_path(self, path: str) -> None:
+        if path:
+            open_in_explorer(path)
 
 
 class ConfirmDialog(SheetDialog):

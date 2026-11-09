@@ -96,6 +96,7 @@ class LogoButton(QWidget):
             self.clicked.emit()
         elif chosen == act_remove:
             self.removeRequested.emit()
+        menu.deleteLater()
 
     def paintEvent(self, event) -> None:  # noqa: N802
         theme = get_theme()
@@ -365,18 +366,28 @@ class Sidebar(QWidget):
         target = COLLAPSED_WIDTH if collapsed else EXPANDED_WIDTH
         if self._anim is not None:
             self._anim.stop()
+            self._anim.deleteLater()
+            self._anim = None
         if not animate:
             self.setFixedWidth(target)
             self._apply_expansion(self._width_to_ratio(target))
             self.collapsedChanged.emit(collapsed)
             return
-        self._anim = QPropertyAnimation(self, b"sidebarWidth", self)
-        self._anim.setDuration(240)
-        self._anim.setStartValue(self.width())
-        self._anim.setEndValue(target)
-        self._anim.setEasingCurve(QEasingCurve.OutCubic)
-        self._anim.finished.connect(lambda: self.collapsedChanged.emit(self._collapsed))
-        self._anim.start()
+        anim = QPropertyAnimation(self, b"sidebarWidth", self)
+        anim.setDuration(240)
+        anim.setStartValue(self.width())
+        anim.setEndValue(target)
+        anim.setEasingCurve(QEasingCurve.OutCubic)
+
+        def finish() -> None:
+            if self._anim is anim:
+                self._anim = None
+            anim.deleteLater()
+            self.collapsedChanged.emit(self._collapsed)
+
+        anim.finished.connect(finish)
+        self._anim = anim
+        anim.start()
 
     def toggle(self) -> None:
         self.set_collapsed(not self._collapsed)
