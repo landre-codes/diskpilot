@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from inspect import signature
 from typing import Any
 
 from PySide6.QtCore import (
@@ -28,6 +29,12 @@ from ..icons import avatar_pixmap, circular_pixmap, icon, rounded_pixmap
 from ..theme import get_theme
 from .buttons import NavButton
 from .common import Divider
+
+
+# Compatibilidade com instalações antigas de app/icons.py (antes do parâmetro
+# dpr, adicionado na 1.3.4). Evita TypeError quando só o sidebar.py é atualizado.
+_AVATAR_HAS_DPR = "dpr" in signature(avatar_pixmap).parameters
+_CIRCULAR_HAS_DPR = "dpr" in signature(circular_pixmap).parameters
 
 
 EXPANDED_WIDTH = 248
@@ -175,8 +182,10 @@ class UserCard(QWidget):
     def refresh(self) -> None:
         dpr = max(2.0, self.devicePixelRatioF())
         path = self.config.avatar_path
+        circular_kwargs = {"dpr": dpr} if _CIRCULAR_HAS_DPR else {}
+        avatar_kwargs = {"dpr": dpr} if _AVATAR_HAS_DPR else {}
         if path:
-            self._avatar = circular_pixmap(path, 38, dpr)
+            self._avatar = circular_pixmap(path, 38, **circular_kwargs)
         else:
             theme = get_theme()
             self._avatar = avatar_pixmap(
@@ -185,7 +194,7 @@ class UserCard(QWidget):
                 theme.color("primary"),
                 theme.color("info"),
                 theme.color("on_primary"),
-                dpr,
+                **avatar_kwargs,
             )
         self.setToolTip(
             f"{self.config.user_name}\nConta local\nClique para editar o perfil"
