@@ -230,6 +230,13 @@ class AnalyzerPage(BasePage):
         self.empty.add_action(self.empty_clear)
         self.stack.addWidget(self.empty)
         root.addWidget(self.stack_host, 1)
+        self.path_detail = QLabel("")
+        self.path_detail.setObjectName("PathText")
+        self.path_detail.setWordWrap(True)
+        self.path_detail.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.path_detail.setVisible(False)
+        root.addWidget(self.path_detail)
+        self.tree.currentItemChanged.connect(self._update_path_detail)
 
         # conexões ---------------------------------------------------------
         self.state.rootsChanged.connect(self._refresh_roots)
@@ -360,6 +367,11 @@ class AnalyzerPage(BasePage):
         self.state.config.set("ui.tree_path", bool(checked))
         self.tree.set_path_visible(bool(checked))
 
+    def _update_path_detail(self, *_args) -> None:
+        path = self.tree.current_path()
+        self.path_detail.setText(path)
+        self.path_detail.setVisible(bool(path))
+
     def clear_filters(self) -> None:
         self.search.set_text("")
         self.filter_btn.set_current("all", emit=False)
@@ -416,6 +428,7 @@ class AnalyzerPage(BasePage):
         self.tree.set_result(result)
         self._update_header()
         self._update_empty()
+        self._update_path_detail()
         suffix = ""
         if result.errors:
             suffix = f" com {result.errors} aviso{'s' if result.errors != 1 else ''} de acesso"
@@ -449,6 +462,7 @@ class AnalyzerPage(BasePage):
         self.tree.set_result(None)
         self._update_header()
         self._update_empty()
+        self._update_path_detail()
 
     def _on_count(self, matches: int, shown: int) -> None:
         self._last_matches = matches

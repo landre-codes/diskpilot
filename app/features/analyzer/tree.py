@@ -159,6 +159,7 @@ class FileTree(QTreeWidget):
         self.setTextElideMode(Qt.ElideMiddle)
         self.setColumnHidden(6, True)
         self._path_visible = False
+        self._path_content_width = 600
         self._size_delegate = SizeBarDelegate(self)
         self.setItemDelegateForColumn(1, self._size_delegate)
         self._result: ScanResult | None = None
@@ -308,9 +309,24 @@ class FileTree(QTreeWidget):
         self._path_visible = bool(visible)
         self.setColumnHidden(6, not self._path_visible)
         if self._path_visible:
+            self._update_path_content_width()
             self._fit_path_columns()
         else:
             self.header().setSectionResizeMode(0, QHeaderView.Stretch)
+
+    def _update_path_content_width(self) -> None:
+        if not self._path_visible:
+            return
+        metrics = self.fontMetrics()
+        width = self._path_content_width
+        iterator = QTreeWidgetItemIterator(self)
+        while iterator.value():
+            item = iterator.value()
+            text = item.text(6)
+            if text:
+                width = max(width, metrics.horizontalAdvance(text) + 28)
+            iterator += 1
+        self._path_content_width = max(600, width)
 
     def _fit_path_columns(self) -> None:
         """Divide o espaço entre Nome e Caminho sem estrangular o Nome."""
@@ -321,8 +337,8 @@ class FileTree(QTreeWidget):
         header.setSectionResizeMode(6, QHeaderView.Interactive)
         viewport = max(1, self.viewport().width())
         fixed = sum(self.columnWidth(column) for column in range(1, 6))
-        name_width = max(280, viewport - fixed - 600)
-        path_width = min(600, max(220, viewport - fixed - name_width))
+        path_width = max(600, self._path_content_width)
+        name_width = max(280, viewport - fixed - path_width)
         self.setColumnWidth(0, name_width)
         self.setColumnWidth(6, path_width)
 
@@ -424,6 +440,7 @@ class FileTree(QTreeWidget):
 
     def rebuild(self) -> None:
         self._cancel_pending_expands()
+        self._path_content_width = 600
         expanded = self._expanded_paths()
         self._restore_paths = set(expanded)
         self.setUpdatesEnabled(False)
@@ -456,6 +473,8 @@ class FileTree(QTreeWidget):
         self._building = False
         self.setUpdatesEnabled(True)
         self.viewport().update()
+        if self._path_visible:
+            self._fit_path_columns()
         if filtered:
             self.expandAll()
             self.scrollToTop()
@@ -647,6 +666,11 @@ class FileTree(QTreeWidget):
             item.setForeground(0, QColor(get_theme().color("danger")))
         item.setToolTip(0, self._node_tooltip(node))
         item.setToolTip(6, node.path)
+        if self._path_visible:
+            self._path_content_width = max(
+                self._path_content_width,
+                self.fontMetrics().horizontalAdvance(node.path) + 28,
+            )
         if is_root:
             f = item.font(0)
             f.setWeight(QFont.DemiBold)
@@ -775,6 +799,8 @@ class FileTree(QTreeWidget):
         self._expand_active = None
         self._restore_pending_children(item)
         self._expand_all_children(item)
+        if self._path_visible:
+            self._fit_path_columns()
         self.countChanged.emit(self._matches, max(0, self._shown))
         if self._expand_queue:
             self._expand_timer.start(0)
@@ -785,6 +811,10 @@ class FileTree(QTreeWidget):
             return None
         node = item.data(0, NODE_ROLE)
         return node if isinstance(node, Node) else None
+
+    def current_path(self) -> str:
+        node = self._node_at(self.currentItem())
+        return node.path if node is not None else ""
 
     def _on_double_clicked(self, item: QTreeWidgetItem, column: int) -> None:
         node = self._node_at(item)
@@ -841,4 +871,7 @@ class FileTree(QTreeWidget):
                 is_root = item.parent() is None
                 self._apply_icon(item, node, is_root)
             iterator += 1
+        if self._path_visible:
+            self._update_path_content_width()
+            self._fit_path_columns()
         self.viewport().update()
