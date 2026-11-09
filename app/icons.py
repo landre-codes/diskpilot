@@ -11,6 +11,7 @@ from PySide6.QtGui import (
     QBrush,
     QColor,
     QFont,
+    QImageReader,
     QLinearGradient,
     QPainter,
     QPainterPath,
@@ -118,6 +119,21 @@ def avatar_pixmap(
     return pm
 
 
+def oriented_pixmap(path: str) -> QPixmap:
+    """Carrega a imagem já corrigida pela orientação EXIF.
+
+    Fotos de celular costumam ser gravadas "deitadas" e trazem a rotação em
+    ``Orientation``. ``QPixmap(path)`` ignora esse metadado e exibe a foto
+    girada; ``QImageReader`` com ``autoTransform`` aplica a rotação correta.
+    """
+    reader = QImageReader(path)
+    reader.setAutoTransform(True)
+    image = reader.read()
+    if image.isNull():
+        return QPixmap(path)
+    return QPixmap.fromImage(image)
+
+
 def circular_pixmap(
     path: str,
     size: int,
@@ -131,7 +147,7 @@ def circular_pixmap(
     ``focus_x``/``focus_y`` são o ponto da imagem (0..1) mantido no centro
     do círculo; ``zoom`` amplia a partir do enquadramento mínimo.
     """
-    pm = QPixmap(path)
+    pm = oriented_pixmap(path)
     if pm.isNull():
         return QPixmap()
     dpr = max(1.0, dpr)
@@ -172,7 +188,7 @@ def circular_pixmap(
 
 def rounded_pixmap(path: str, size: int, radius: int = 10) -> QPixmap:
     """Carrega imagem preservando proporção, com cantos arredondados."""
-    pm = QPixmap(path)
+    pm = oriented_pixmap(path)
     if pm.isNull():
         return QPixmap()
     dpr = 2.0

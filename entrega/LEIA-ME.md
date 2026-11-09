@@ -1,10 +1,10 @@
-# DiskPilot 1.7.0 — pacote de transporte em texto
+# DiskPilot 1.7.1 — pacote de transporte em texto
 
 Esta pasta existe para levar o projeto para um ambiente onde **só é possível
 copiar texto** (sem clone, sem ZIP, sem download de release).
 
 O conteúdo não é o código-fonte legível: é o projeto inteiro compactado
-(`tar.xz`, 78.236 bytes) e codificado em **Base85**, dividido em 4 partes de
+(`tar.xz`, 78.448 bytes) e codificado em **Base85**, dividido em 4 partes de
 texto ASCII. O script `restaurar_diskpilot.py` remonta o arquivo, confere o
 SHA-256 e extrai a pasta `DiskPilot/`.
 
@@ -12,15 +12,15 @@ SHA-256 e extrai a pasta `DiskPilot/`.
 
 | Arquivo | Bytes | SHA-256 (sem espaços/quebras) |
 |---|---|---|
-| `parte1.txt` | 24.701 | `e983207bcfb3a4949d5e4dfe8938af3511550b9014c77045933443af37484bc6` |
-| `parte2.txt` | 24.707 | `6bd5791f2f0fe9ff756a8effadc8442320f769e5eb8b68e65869168bb044f376` |
-| `parte3.txt` | 24.700 | `4a79755f6755891f7b0520ca383abcb623cc26f60824eaa6f9668375896ff0a1` |
-| `parte4.txt` | 24.702 | `fc8adcee8fdbd834bc1aa89939522be3a1eccae7b08a18998b45b1e66363e7a3` |
+| `parte1.txt` | 24.773 | `c37dad89bfef405f89dee9288a036f8c7d52a6629d8454117e2ecaad72fcae5a` |
+| `parte2.txt` | 24.769 | `0831beddf08f3b33a1e7af8e46579a81c2155c2eb4f4e55ac0c9baae814d32ce` |
+| `parte3.txt` | 24.766 | `1e6768a199703cdbc39ddb16cf7bb5742f02819329a3410fe9e872830039ca2d` |
+| `parte4.txt` | 24.769 | `1a6c50d32567e75f422f7bdb49e573ea392dc3f4405e55e2f7044f010476953f` |
 
 SHA-256 do `tar.xz` reconstruído (verificado pelo script):
 
 ```text
-3589ac82c04cb5fb40c1a76ba489ee51c0edc26ce8df9096c0a7d5b9dc249264
+2cd9f21f45e6d701a9122c06e37eb32af9c1d4abc4219cf79122232a345d8a70
 ```
 
 ## Como usar
@@ -45,11 +45,15 @@ SHA-256 do `tar.xz` reconstruído (verificado pelo script):
 5. Confirme no `diskpilot.log`:
 
    ```text
-   iniciando DiskPilot 1.7.0
+   iniciando DiskPilot 1.7.1
    ```
 
 ## Novidades desta versão
 
+- **Orientação EXIF da foto**: fotos de celular gravadas “deitadas” com a
+  rotação no metadado EXIF agora são exibidas na posição correta no perfil, na
+  sidebar e nas configurações. O carregamento usa `QImageReader` com
+  `autoTransform`, em vez de `QPixmap(path)`.
 - **Enquadramento da foto do perfil**: no diálogo de perfil, arraste a foto
   dentro do círculo para reposicionar e use a roda do mouse para zoom. O botão
   “Centralizar” redefine o enquadramento. Os valores são salvos em
@@ -152,7 +156,7 @@ Grava `diagnostico-diskpilot.txt` com Python, PySide6, versão do Qt, tela,
 py -c "from pathlib import Path; [print(p.name, len(''.join(p.read_text(encoding='ascii').split()))) for p in sorted(Path('.').glob('parte*.txt'))]"
 ```
 
-Esperado: `24449`, `24449`, `24449`, `24448`.
+Esperado: `24515`, `24515`, `24515`, `24515`.
 
 ## Observações
 
@@ -163,14 +167,14 @@ Esperado: `24449`, `24449`, `24449`, `24448`.
   Microsoft Excel instalado.
 - O código é distribuído sob licença **MIT** (`LICENSE`); as dependências
   mantêm suas licenças — inventário em `THIRD-PARTY.md`.
-- Este pacote é gerado a partir do commit `v1.7.0` deste repositório.
+- Este pacote é gerado a partir do commit `v1.7.1` deste repositório.
 
 ## URL dos arquivos crus
 
 ```text
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.7.0/entrega/parte1.txt
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.7.0/entrega/parte2.txt
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.7.0/entrega/parte3.txt
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.7.0/entrega/parte4.txt
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.7.0/entrega/restaurar_diskpilot.py
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.7.1/entrega/parte1.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.7.1/entrega/parte2.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.7.1/entrega/parte3.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.7.1/entrega/parte4.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.7.1/entrega/restaurar_diskpilot.py
 ```
