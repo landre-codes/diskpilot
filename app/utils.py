@@ -214,59 +214,121 @@ def save_file_dialog(
     return path
 
 
-_owner_cache: dict[str, str] = {}
-_owner_sid_cache: dict[str, str] = {}
+_author_cache: dict[str, str] = {}
+_OOXML_EXT = {
+    ".docx",
+    ".docm",
+    ".dotx",
+    ".xlsx",
+    ".xlsm",
+    ".xltx",
+    ".pptx",
+    ".pptm",
+    ".potx",
+    ".ppsx",
+    ".vsdx",
+}
 
 
-def cached_file_owner(path: str) -> str | None:
-    """Proprietário já resolvido, ou ``None`` se ainda não foi consultado."""
-    return _owner_cache.get(os.path.normcase(str(path)))
+def cached_file_author(path: str) -> str | None:
+    """Autor já resolvido, ou ``None`` se ainda não foi consultado."""
+    return _author_cache.get(os.path.normcase(str(path)))
 
 
-def file_owner(path: str) -> str:
-    """Nome do proprietário (dono) do arquivo ou da pasta.
-
-    O Windows não grava “quem criou” na maioria dos arquivos; o campo
-    disponível e verificável é o proprietário do descritor de segurança.
-    """
+def file_author(path: str) -> str:
+    """Autor gravado nos metadados do arquivo (campo “Authors”)."""
     text = str(path)
     key = os.path.normcase(text)
-    cached = _owner_cache.get(key)
+    cached = _author_cache.get(key)
     if cached is not None:
         return cached
-    owner = ""
+    author = ""
     if sys.platform.startswith("win"):
-        try:
-            import win32security
+        author = _windows_author(text)
+    if not author:
+        author = _embedded_author(text)
+    _author_cache[key] = author
+    return author
 
-            target = text
-            if len(target) >= 248 and not target.startswith("\\\\?\\"):
-                if target.startswith("\\\\"):
-                    target = "\\\\?\\UNC\\" + target[2:]
-                else:
-                    target = "\\\\?\\" + target
-            descriptor = win32security.GetFileSecurity(
-                target, win32security.OWNER_SECURITY_INFORMATION
-            )
-            sid = descriptor.GetSecurityDescriptorOwner()
-            sid_key = win32security.ConvertSidToStringSid(sid)
-            owner = _owner_sid_cache.get(sid_key, "")
-            if not owner:
-                name, domain, _kind = win32security.LookupAccountSid(None, sid)
-                owner = f"{domain}\\{name}" if domain else str(name)
-                if owner:
-                    _owner_sid_cache[sid_key] = owner
-        except Exception:
-            owner = ""
-    else:
-        try:
-            import pwd
 
-            owner = pwd.getpwuid(os.stat(text).st_uid).pw_name
+def _windows_author(text: str) -> str:
+    """Lê ``System.Author`` pelo Property System do Windows."""
+    try:
+        import pythoncom
+        from win32com.propsys import propsys, pscon  # noqa: F401
+    except Exception:
+        return ""
+    try:
+        pythoncom.CoInitialize()
+    except Exception:
+        return ""
+    try:
+        return _property_author(text)
+    except Exception:
+        return ""
+    finally:
+        pythoncom.CoUninitialize()
+
+
+def _property_author(text: str) -> str:
+    from win32com.propsys import propsys, pscon
+
+    store = propsys.SHGetPropertyStoreFromParsingName(text)
+    value = store.GetValue(pscon.PKEY_Author).GetValue()
+    if isinstance(value, (list, tuple)):
+        authors = [str(item).strip() for item in value if str(item).strip()]
+        return "; ".join(authors)
+    return str(value).strip() if value else ""
+
+
+def _embedded_author(text: str) -> str:
+    """Fallback para OOXML/PDF quando o Property System não responde."""
+    suffix = Path(text).suffix.lower()
+    try:
+        if suffix in _OOXML_EXT:
+            return _ooxml_author(text)
+        if suffix == ".pdf":
+            return _pdf_author(text)
+    except Exception:
+        pass
+    return ""
+
+
+def _ooxml_author(text: str) -> str:
+    import zipfile
+    from xml.etree import ElementTree
+
+    with zipfile.ZipFile(text) as archive:
+        data = archive.read("docProps/core.xml")
+    root = ElementTree.fromstring(data)
+    node = root.find("{http://purl.org/dc/elements/1.1/}creator")
+    if node is not None and (node.text or "").strip():
+        return (node.text or "").strip()
+    node = root.find(
+        "{http://schemas.openxmlformats.org/package/2006/metadata/core-properties}creator"
+    )
+    return (node.text or "").strip() if node is not None else ""
+
+
+def _pdf_author(text: str) -> str:
+    import re
+
+    data = Path(text).read_bytes()[:4_000_000]
+    match = re.search(rb"/Author\s*\(((?:\\.|[^\\)])*)\)", data)
+    if match:
+        raw = match.group(1)
+        raw = raw.replace(b"\\(", b"(").replace(b"\\)", b")")
+        raw = raw.replace(b"\\\\", b"\\")
+        return raw.decode("latin-1", "ignore").strip()
+    match = re.search(rb"/Author\s*<([0-9A-Fa-f\s]+)>", data)
+    if match:
+        try:
+            return bytes.fromhex(
+                "".join(match.group(1).decode("ascii").split())
+            ).decode("utf-16-be", "ignore").strip()
         except Exception:
-            owner = ""
-    _owner_cache[key] = owner
-    return owner
+            return ""
+    return ""
 
 
 def copy_to_clipboard(text: str) -> None:

@@ -1,10 +1,10 @@
-# DiskPilot 1.8.0 — pacote de transporte em texto
+# DiskPilot 1.8.1 — pacote de transporte em texto
 
 Esta pasta existe para levar o projeto para um ambiente onde **só é possível
 copiar texto** (sem clone, sem ZIP, sem download de release).
 
 O conteúdo não é o código-fonte legível: é o projeto inteiro compactado
-(`tar.xz`, 80.596 bytes) e codificado em **Base85**, dividido em 4 partes de
+(`tar.xz`, 81.000 bytes) e codificado em **Base85**, dividido em 4 partes de
 texto ASCII. O script `restaurar_diskpilot.py` remonta o arquivo, confere o
 SHA-256 e extrai a pasta `DiskPilot/`.
 
@@ -12,15 +12,15 @@ SHA-256 e extrai a pasta `DiskPilot/`.
 
 | Arquivo | Bytes | SHA-256 (sem espaços/quebras) |
 |---|---|---|
-| `parte1.txt` | 25.442 | `4c0fdf281db2f77a09860292b523ba736c895f22a6111ad50b02349c29b8a05c` |
-| `parte2.txt` | 25.443 | `b70052a1fe67714ecc4b2ba3b098c68005d88766fce98f66e064f4e5f820b4d9` |
-| `parte3.txt` | 25.456 | `6fa84b8ea4d916f9ba9ea6e036e149974deebeed63a292be62a8503ab9429d40` |
-| `parte4.txt` | 25.441 | `072c87d714c474203957043195120c4aa1c0364def778a8d7e2993ecf083a019` |
+| `parte1.txt` | 25.574 | `4ede2ea63c48e6c7fc92bfead382185f05b9abe9ed2264a28ee5d2b3719ea25f` |
+| `parte2.txt` | 25.569 | `68b99fcd3821c15873f3b8acbe7b0826e03317fd48104effee8b310b8a1f1597` |
+| `parte3.txt` | 25.579 | `92b5d100fd4d4082b510b63b8133f465ab1e55544afd2aa878e6b9d1a85778ff` |
+| `parte4.txt` | 25.573 | `2d6f9e95150a0c04868c259718d1c6dc910c88209868cf734fe2a122ebe46b5b` |
 
 SHA-256 do `tar.xz` reconstruído (verificado pelo script):
 
 ```text
-769c84c3ff14a5088d095bb4651df9c6bdb8c6710e79ae1b8b39644b5b0e9ba5
+6ff83cbf31be5003e41bee76544920e75f2e703b7798b363b3f2e9bc84a711a4
 ```
 
 ## Como usar
@@ -45,15 +45,17 @@ SHA-256 do `tar.xz` reconstruído (verificado pelo script):
 5. Confirme no `diskpilot.log`:
 
    ```text
-   iniciando DiskPilot 1.8.0
+   iniciando DiskPilot 1.8.1
    ```
 
 ## Novidades desta versão
 
-- **Coluna Proprietário**: a tabela da análise agora mostra o dono de cada
-  pasta/arquivo (o dado de autoria disponível no Windows). A consulta é feita
-  em segundo plano, com cache por caminho e por SID, e o nome completo aparece
-  no tooltip e nas linhas copiadas. CSV/XLSX/XLSB incluem a coluna.
+- **Coluna Autor**: a tabela da análise agora mostra o autor gravado nos
+  metadados de cada arquivo (campo “Authors” do Windows; funciona para Office,
+  PDF e formatos que guardam essa informação). A consulta é feita em segundo
+  plano, com cache por caminho, e o nome aparece no tooltip e nas linhas
+  copiadas. Pastas e arquivos sem metadados mostram `—`; CSV/XLSX/XLSB incluem
+  a coluna.
 - **Cancelar exportação sem fechar o app**: os diálogos de abrir/salvar usam a
   implementação do Qt em vez da nativa do Windows, e a automação do XLSB
   inicializa/finaliza o COM na mesma thread. Isso elimina o
@@ -171,7 +173,7 @@ Grava `diagnostico-diskpilot.txt` com Python, PySide6, versão do Qt, tela,
 py -c "from pathlib import Path; [print(p.name, len(''.join(p.read_text(encoding='ascii').split()))) for p in sorted(Path('.').glob('parte*.txt'))]"
 ```
 
-Esperado: `25187`, `25187`, `25187`, `25184`.
+Esperado: `25313`, `25313`, `25313`, `25311`.
 
 ## Observações
 
@@ -179,19 +181,20 @@ Esperado: `25187`, `25187`, `25187`, `25184`.
 - O pacote não inclui `.venv`, `dist`, caches ou logs.
 - As dependências `qt-material`, `qtawesome`, `openpyxl` e `pywin32` são
   instaladas por `pip`; `PySide6` já precisa existir no ambiente. O XLSB exige
-  Microsoft Excel instalado. A coluna **Proprietário** usa `pywin32`; quando o
-  caminho não permite leitura do descritor de segurança (rede/permissão), ela
-  mostra `—` sem interromper a análise.
+  Microsoft Excel instalado. A coluna **Autor** usa o Property System do
+  Windows via `pywin32`, com fallback para OOXML/PDF; quando o arquivo não tem
+  autor gravado ou o caminho não permite a leitura, ela mostra `—` sem
+  interromper a análise.
 - O código é distribuído sob licença **MIT** (`LICENSE`); as dependências
   mantêm suas licenças — inventário em `THIRD-PARTY.md`.
-- Este pacote é gerado a partir do commit `v1.8.0` deste repositório.
+- Este pacote é gerado a partir do commit `v1.8.1` deste repositório.
 
 ## URL dos arquivos crus
 
 ```text
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.8.0/entrega/parte1.txt
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.8.0/entrega/parte2.txt
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.8.0/entrega/parte3.txt
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.8.0/entrega/parte4.txt
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.8.0/entrega/restaurar_diskpilot.py
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.8.1/entrega/parte1.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.8.1/entrega/parte2.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.8.1/entrega/parte3.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.8.1/entrega/parte4.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.8.1/entrega/restaurar_diskpilot.py
 ```

@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from .. import APP_NAME
-from ..utils import file_owner, format_bytes, format_datetime
+from ..utils import file_author, format_bytes, format_datetime
 from .model import Node, ScanResult
 
 
@@ -39,7 +39,7 @@ def item_rows(
                     "arquivos": node.files,
                     "pastas": node.dirs,
                     "modificado": format_datetime(node.mtime),
-                    "proprietario": file_owner(node.path) or "—",
+                    "autor": file_author(node.path) or "—",
                     "erro": node.error,
                 }
             )
@@ -64,7 +64,7 @@ def summary_payload(result: ScanResult) -> dict[str, Any]:
                 "formatado": format_bytes(root.size),
                 "arquivos": root.files,
                 "pastas": root.dirs,
-                "proprietario": file_owner(root.path) or "—",
+                "autor": file_author(root.path) or "—",
             }
             for root in result.roots
         ],
@@ -88,7 +88,7 @@ def write_csv(
                 "arquivos",
                 "pastas",
                 "modificado",
-                "proprietario",
+                "autor",
                 "erro",
             ]
         )
@@ -105,7 +105,7 @@ def write_csv(
                     row["arquivos"],
                     row["pastas"],
                     row["modificado"],
-                    row["proprietario"],
+                    row["autor"],
                     row["erro"],
                 ]
             )
@@ -164,7 +164,7 @@ def write_xlsx(
             "Bytes",
             "Arquivos",
             "Pastas",
-            "Proprietário",
+            "Autor",
         ]
     )
     _style_header(summary, roots_row + 1, 7)
@@ -177,7 +177,7 @@ def write_xlsx(
                 root["bytes"],
                 root["arquivos"],
                 root["pastas"],
-                root["proprietario"],
+                root["autor"],
             ]
         )
     for column, width in (
@@ -204,7 +204,7 @@ def write_xlsx(
         "Arquivos",
         "Pastas",
         "Modificado",
-        "Proprietário",
+        "Autor",
         "Erro",
     ]
     top.append(headers)
@@ -222,7 +222,7 @@ def write_xlsx(
                 row["arquivos"],
                 row["pastas"],
                 row["modificado"],
-                row["proprietario"],
+                row["autor"],
                 row["erro"],
             ]
         )
