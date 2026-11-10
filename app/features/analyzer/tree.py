@@ -8,7 +8,18 @@ import unicodedata
 from collections import deque
 from typing import Any
 
-from PySide6.QtCore import QModelIndex, QRect, QRectF, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import (
+    QModelIndex,
+    QObject,
+    QRect,
+    QRectF,
+    QRunnable,
+    QSize,
+    Qt,
+    QThreadPool,
+    QTimer,
+    Signal,
+)
 from PySide6.QtGui import (
     QColor,
     QFont,
@@ -29,10 +40,20 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from shiboken6 import isValid
+
 from ...icons import file_icon, icon
 from ...services.model import Node, ScanResult
 from ...theme import get_theme
-from ...utils import copy_to_clipboard, format_datetime, format_number, format_size, open_in_explorer
+from ...utils import (
+    cached_file_owner,
+    copy_to_clipboard,
+    file_owner,
+    format_datetime,
+    format_number,
+    format_size,
+    open_in_explorer,
+)
 
 
 NODE_ROLE = Qt.UserRole + 10
@@ -40,6 +61,31 @@ PCT_ROLE = Qt.UserRole + 11
 SIZE_ROLE = Qt.UserRole + 12
 POPULATED_ROLE = Qt.UserRole + 13
 PLACEHOLDER_ROLE = Qt.UserRole + 14
+
+COL_NAME = 0
+COL_SIZE = 1
+COL_PCT = 2
+COL_ITEMS = 3
+COL_MTIME = 4
+COL_OWNER = 5
+COL_KIND = 6
+COL_PATH = 7
+
+
+class _OwnerSignals(QObject):
+    resolved = Signal(str, str)
+
+
+class _OwnerJob(QRunnable):
+    """Consulta o proprietário fora da thread da interface."""
+
+    def __init__(self, path: str, signals: _OwnerSignals) -> None:
+        super().__init__()
+        self.path = path
+        self.signals = signals
+
+    def run(self) -> None:
+        self.signals.resolved.emit(self.path, file_owner(self.path))
 
 MAX_CHILDREN = 1200
 MAX_RENDERED = 2800
@@ -115,7 +161,7 @@ class FileTree(QTreeWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("FileTree")
-        self.setColumnCount(7)
+        self.setColumnCount(8)
         self.setHeaderLabels(
             [
                 "Nome",
@@ -123,6 +169,7 @@ class FileTree(QTreeWidget):
                 "% do pai",
                 "Itens",
                 "Modificado",
+                "Proprietário",
                 "Tipo",
                 "Caminho completo",
             ]
@@ -145,19 +192,28 @@ class FileTree(QTreeWidget):
         self.itemDoubleClicked.connect(self._on_double_clicked)
         header = self.header()
         header.setStretchLastSection(False)
-        header.setSectionResizeMode(0, QHeaderView.Stretch)
-        for column, width in ((1, 124), (2, 82), (3, 96), (4, 140), (5, 92)):
+        header.setSectionResizeMode(COL_NAME, QHeaderView.Stretch)
+        for column, width in (
+            (COL_SIZE, 116),
+            (COL_PCT, 74),
+            (COL_ITEMS, 88),
+            (COL_MTIME, 132),
+            (COL_KIND, 86),
+        ):
             header.setSectionResizeMode(column, QHeaderView.Fixed)
             self.setColumnWidth(column, width)
-        header.setSectionResizeMode(6, QHeaderView.Interactive)
-        self.setColumnWidth(6, 600)
+        header.setSectionResizeMode(COL_OWNER, QHeaderView.Interactive)
+        self.setColumnWidth(COL_OWNER, 220)
+        header.setSectionResizeMode(COL_PATH, QHeaderView.Interactive)
+        self.setColumnWidth(COL_PATH, 600)
         header.setMinimumSectionSize(64)
         header.setHighlightSections(False)
-        for column in (1, 2, 3, 4):
+        for column in (COL_SIZE, COL_PCT, COL_ITEMS, COL_MTIME):
             self.headerItem().setTextAlignment(column, Qt.AlignRight | Qt.AlignVCenter)
-        self.headerItem().setTextAlignment(6, Qt.AlignLeft | Qt.AlignVCenter)
+        for column in (COL_OWNER, COL_KIND, COL_PATH):
+            self.headerItem().setTextAlignment(column, Qt.AlignLeft | Qt.AlignVCenter)
         self.setTextElideMode(Qt.ElideMiddle)
-        self.setColumnHidden(6, True)
+        self.setColumnHidden(COL_PATH, True)
         self._path_visible = False
         self._path_content_width = 600
         self._size_delegate = SizeBarDelegate(self)
@@ -179,6 +235,11 @@ class FileTree(QTreeWidget):
         self._expand_timer.setSingleShot(True)
         self._expand_timer.setInterval(EXPAND_DEBOUNCE_MS)
         self._expand_timer.timeout.connect(self._expand_step)
+        self._owner_pool = QThreadPool(self)
+        self._owner_pool.setMaxThreadCount(4)
+        self._owner_signals = _OwnerSignals(self)
+        self._owner_signals.resolved.connect(self._owner_resolved)
+        self._owner_pending: dict[str, list[QTreeWidgetItem]] = {}
         get_theme().changed.connect(self._refresh_visuals)
 
     # ------------------------------------------------------------- galhos
@@ -263,12 +324,13 @@ class FileTree(QTreeWidget):
     def _row_text(self, item: QTreeWidgetItem) -> str:
         node = item.data(0, NODE_ROLE)
         columns = [
-            item.text(0),
+            item.text(COL_NAME),
             self._size_text(item),
-            item.text(2),
-            item.text(3),
-            item.text(4),
-            item.text(5),
+            item.text(COL_PCT),
+            item.text(COL_ITEMS),
+            item.text(COL_MTIME),
+            item.text(COL_OWNER),
+            item.text(COL_KIND),
         ]
         if node is not None:
             columns.append(node.path)
@@ -287,7 +349,7 @@ class FileTree(QTreeWidget):
         copy_to_clipboard("\n".join(self._row_text(item) for item in items))
         self.statusMessage.emit(
             f"{len(items)} linha(s) copiada(s): Nome, Tamanho, %, Itens, "
-            "Modificado, Tipo, Caminho."
+            "Modificado, Proprietário, Tipo, Caminho."
         )
 
     def _copy_size(self, item: QTreeWidgetItem) -> None:
@@ -307,12 +369,12 @@ class FileTree(QTreeWidget):
 
     def set_path_visible(self, visible: bool) -> None:
         self._path_visible = bool(visible)
-        self.setColumnHidden(6, not self._path_visible)
+        self.setColumnHidden(COL_PATH, not self._path_visible)
         if self._path_visible:
             self._update_path_content_width()
             self._fit_path_columns()
         else:
-            self.header().setSectionResizeMode(0, QHeaderView.Stretch)
+            self.header().setSectionResizeMode(COL_NAME, QHeaderView.Stretch)
 
     def _update_path_content_width(self) -> None:
         if not self._path_visible:
@@ -322,7 +384,7 @@ class FileTree(QTreeWidget):
         iterator = QTreeWidgetItemIterator(self)
         while iterator.value():
             item = iterator.value()
-            text = item.text(6)
+            text = item.text(COL_PATH)
             if text:
                 width = max(width, metrics.horizontalAdvance(text) + 28)
             iterator += 1
@@ -333,14 +395,16 @@ class FileTree(QTreeWidget):
         if not self._path_visible:
             return
         header = self.header()
-        header.setSectionResizeMode(0, QHeaderView.Interactive)
-        header.setSectionResizeMode(6, QHeaderView.Interactive)
+        header.setSectionResizeMode(COL_NAME, QHeaderView.Interactive)
+        header.setSectionResizeMode(COL_PATH, QHeaderView.Interactive)
         viewport = max(1, self.viewport().width())
-        fixed = sum(self.columnWidth(column) for column in range(1, 6))
+        fixed = sum(
+            self.columnWidth(column) for column in range(COL_SIZE, COL_PATH)
+        )
         path_width = max(600, self._path_content_width)
         name_width = max(280, viewport - fixed - path_width)
-        self.setColumnWidth(0, name_width)
-        self.setColumnWidth(6, path_width)
+        self.setColumnWidth(COL_NAME, name_width)
+        self.setColumnWidth(COL_PATH, path_width)
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
@@ -627,9 +691,43 @@ class FileTree(QTreeWidget):
             f"Arquivos: {format_number(node.files)} · Pastas: {format_number(node.dirs)}",
             f"Modificado: {format_datetime(node.mtime)}",
         ]
+        owner = cached_file_owner(node.path)
+        if owner:
+            tip.append(f"Proprietário: {owner}")
         if node.error:
             tip.append(f"Aviso: {node.error}")
         return "\n".join(tip)
+
+    # ---------------------------------------------------------- proprietário
+    def _queue_owner(self, item: QTreeWidgetItem, node: Node) -> None:
+        owner = cached_file_owner(node.path)
+        if owner is not None:
+            text = owner or "—"
+            item.setText(COL_OWNER, text)
+            item.setToolTip(COL_OWNER, text)
+            return
+        item.setText(COL_OWNER, "…")
+        item.setToolTip(COL_OWNER, "Consultando proprietário…")
+        key = os.path.normcase(node.path)
+        items = self._owner_pending.get(key)
+        if items is None:
+            self._owner_pending[key] = [item]
+            self._owner_pool.start(_OwnerJob(node.path, self._owner_signals))
+        else:
+            items.append(item)
+
+    def _owner_resolved(self, path: str, owner: str) -> None:
+        key = os.path.normcase(path)
+        items = self._owner_pending.pop(key, [])
+        text = owner or "—"
+        for item in items:
+            if not isValid(item):
+                continue
+            item.setText(COL_OWNER, text)
+            item.setToolTip(COL_OWNER, text)
+            node = item.data(COL_NAME, NODE_ROLE)
+            if isinstance(node, Node):
+                item.setToolTip(COL_NAME, self._node_tooltip(node))
 
     # --------------------------------------------------------------- itens
     def _create_item(
@@ -648,6 +746,7 @@ class FileTree(QTreeWidget):
                 f"{pct * 100:.1f}%".replace(".", ","),
                 self._item_count_text(node),
                 format_datetime(node.mtime),
+                "",
                 "Raiz" if is_root else ("Pasta" if node.is_dir else self._type_text(node)),
                 node.path,
             ]
@@ -658,14 +757,15 @@ class FileTree(QTreeWidget):
         item.setData(1, SIZE_ROLE, node.size)
         item.setData(1, PCT_ROLE, pct)
         item.setData(0, POPULATED_ROLE, False)
-        for column in (1, 2, 3, 4):
+        for column in (COL_SIZE, COL_PCT, COL_ITEMS, COL_MTIME):
             item.setTextAlignment(column, Qt.AlignRight | Qt.AlignVCenter)
-        item.setTextAlignment(5, Qt.AlignLeft | Qt.AlignVCenter)
-        item.setTextAlignment(6, Qt.AlignLeft | Qt.AlignVCenter)
+        for column in (COL_OWNER, COL_KIND, COL_PATH):
+            item.setTextAlignment(column, Qt.AlignLeft | Qt.AlignVCenter)
         if node.error:
             item.setForeground(0, QColor(get_theme().color("danger")))
+        self._queue_owner(item, node)
         item.setToolTip(0, self._node_tooltip(node))
-        item.setToolTip(6, node.path)
+        item.setToolTip(COL_PATH, node.path)
         if self._path_visible:
             self._path_content_width = max(
                 self._path_content_width,

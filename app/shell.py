@@ -27,7 +27,6 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
-    QFileDialog,
     QFrame,
     QGraphicsOpacityEffect,
     QHBoxLayout,
@@ -41,6 +40,7 @@ from .config import AppConfig
 from .features.base import BasePage, PageSpec
 from .services.state import AppState
 from .theme import ThemeManager
+from .utils import open_file_dialog
 from .widgets.common import Toast
 from .widgets.dialogs import ProfileDialog
 from .widgets.sidebar import Sidebar
@@ -921,7 +921,7 @@ class MainWindow(QWidget):
             settings._refresh_identity()
 
     def _change_logo(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(
+        path = open_file_dialog(
             self,
             "Escolher logo da empresa",
             str(Path.home()),

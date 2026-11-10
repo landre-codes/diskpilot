@@ -171,6 +171,104 @@ def open_in_explorer(path: str, select: bool = False) -> bool:
         return False
 
 
+def open_file_dialog(
+    parent, title: str, start: str, file_filter: str
+) -> str:
+    """Diálogo de abertura do Qt (não nativo).
+
+    O diálogo nativo do Windows usa o shell COM e pode disparar
+    ``RPC_E_WRONG_THREAD`` depois de automações COM (Excel/pywin32). O
+    diálogo do Qt evita essa dependência e mantém o app estável.
+    """
+    from PySide6.QtWidgets import QDialog, QFileDialog
+
+    dialog = QFileDialog(parent, title, start, file_filter)
+    dialog.setOption(QFileDialog.Option.DontUseNativeDialog, True)
+    dialog.setAcceptMode(QFileDialog.AcceptMode.AcceptOpen)
+    dialog.setFileMode(QFileDialog.FileMode.ExistingFile)
+    path = ""
+    if dialog.exec() == QDialog.DialogCode.Accepted:
+        files = dialog.selectedFiles()
+        path = files[0] if files else ""
+    dialog.deleteLater()
+    return path
+
+
+def save_file_dialog(
+    parent, title: str, start: str, file_filter: str, suffix: str = ""
+) -> str:
+    """Diálogo de salvamento do Qt (não nativo), com sufixo padrão."""
+    from PySide6.QtWidgets import QDialog, QFileDialog
+
+    dialog = QFileDialog(parent, title, start, file_filter)
+    dialog.setOption(QFileDialog.Option.DontUseNativeDialog, True)
+    dialog.setAcceptMode(QFileDialog.AcceptMode.AcceptSave)
+    dialog.setFileMode(QFileDialog.FileMode.AnyFile)
+    if suffix:
+        dialog.setDefaultSuffix(suffix.lstrip("."))
+    path = ""
+    if dialog.exec() == QDialog.DialogCode.Accepted:
+        files = dialog.selectedFiles()
+        path = files[0] if files else ""
+    dialog.deleteLater()
+    return path
+
+
+_owner_cache: dict[str, str] = {}
+_owner_sid_cache: dict[str, str] = {}
+
+
+def cached_file_owner(path: str) -> str | None:
+    """Proprietário já resolvido, ou ``None`` se ainda não foi consultado."""
+    return _owner_cache.get(os.path.normcase(str(path)))
+
+
+def file_owner(path: str) -> str:
+    """Nome do proprietário (dono) do arquivo ou da pasta.
+
+    O Windows não grava “quem criou” na maioria dos arquivos; o campo
+    disponível e verificável é o proprietário do descritor de segurança.
+    """
+    text = str(path)
+    key = os.path.normcase(text)
+    cached = _owner_cache.get(key)
+    if cached is not None:
+        return cached
+    owner = ""
+    if sys.platform.startswith("win"):
+        try:
+            import win32security
+
+            target = text
+            if len(target) >= 248 and not target.startswith("\\\\?\\"):
+                if target.startswith("\\\\"):
+                    target = "\\\\?\\UNC\\" + target[2:]
+                else:
+                    target = "\\\\?\\" + target
+            descriptor = win32security.GetFileSecurity(
+                target, win32security.OWNER_SECURITY_INFORMATION
+            )
+            sid = descriptor.GetSecurityDescriptorOwner()
+            sid_key = win32security.ConvertSidToStringSid(sid)
+            owner = _owner_sid_cache.get(sid_key, "")
+            if not owner:
+                name, domain, _kind = win32security.LookupAccountSid(None, sid)
+                owner = f"{domain}\\{name}" if domain else str(name)
+                if owner:
+                    _owner_sid_cache[sid_key] = owner
+        except Exception:
+            owner = ""
+    else:
+        try:
+            import pwd
+
+            owner = pwd.getpwuid(os.stat(text).st_uid).pw_name
+        except Exception:
+            owner = ""
+    _owner_cache[key] = owner
+    return owner
+
+
 def copy_to_clipboard(text: str) -> None:
     from PySide6.QtGui import QGuiApplication
 

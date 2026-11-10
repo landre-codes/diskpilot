@@ -10,7 +10,6 @@ from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QButtonGroup,
     QDialog,
-    QFileDialog,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -24,7 +23,13 @@ from PySide6.QtWidgets import (
 from .. import APP_NAME, __version__
 from ..icons import avatar_pixmap, icon
 from ..theme import get_theme
-from ..utils import avatar_photo, format_bytes, format_datetime, open_in_explorer
+from ..utils import (
+    avatar_photo,
+    format_bytes,
+    format_datetime,
+    open_file_dialog,
+    open_in_explorer,
+)
 from ..widgets.buttons import ActionButton
 from ..widgets.common import Card, ElidedLabel, IconLabel, PageHeader
 from ..widgets.dialogs import ConfirmDialog, ProfileDialog
@@ -358,7 +363,7 @@ class SettingsPage(BasePage):
         self.user_name.setText(self.state.config.user_name)
 
     def _choose_logo(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(
+        path = open_file_dialog(
             self,
             "Escolher logo da empresa",
             str(Path.home()),

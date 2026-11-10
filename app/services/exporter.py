@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from .. import APP_NAME
-from ..utils import format_bytes, format_datetime
+from ..utils import file_owner, format_bytes, format_datetime
 from .model import Node, ScanResult
 
 
@@ -39,6 +39,7 @@ def item_rows(
                     "arquivos": node.files,
                     "pastas": node.dirs,
                     "modificado": format_datetime(node.mtime),
+                    "proprietario": file_owner(node.path) or "—",
                     "erro": node.error,
                 }
             )
@@ -63,6 +64,7 @@ def summary_payload(result: ScanResult) -> dict[str, Any]:
                 "formatado": format_bytes(root.size),
                 "arquivos": root.files,
                 "pastas": root.dirs,
+                "proprietario": file_owner(root.path) or "—",
             }
             for root in result.roots
         ],
@@ -86,6 +88,7 @@ def write_csv(
                 "arquivos",
                 "pastas",
                 "modificado",
+                "proprietario",
                 "erro",
             ]
         )
@@ -102,6 +105,7 @@ def write_csv(
                     row["arquivos"],
                     row["pastas"],
                     row["modificado"],
+                    row["proprietario"],
                     row["erro"],
                 ]
             )
@@ -153,9 +157,17 @@ def write_xlsx(
     summary.append(["Raízes", ""])
     summary.cell(row=roots_row, column=1).font = Font(bold=True)
     summary.append(
-        ["Caminho", "Nome", "Tamanho", "Bytes", "Arquivos", "Pastas"]
+        [
+            "Caminho",
+            "Nome",
+            "Tamanho",
+            "Bytes",
+            "Arquivos",
+            "Pastas",
+            "Proprietário",
+        ]
     )
-    _style_header(summary, roots_row + 1, 6)
+    _style_header(summary, roots_row + 1, 7)
     for root in payload.get("raizes", []):
         summary.append(
             [
@@ -165,6 +177,7 @@ def write_xlsx(
                 root["bytes"],
                 root["arquivos"],
                 root["pastas"],
+                root["proprietario"],
             ]
         )
     for column, width in (
@@ -174,6 +187,7 @@ def write_xlsx(
         ("D", 16),
         ("E", 12),
         ("F", 12),
+        ("G", 26),
     ):
         summary.column_dimensions[column].width = width
     summary.freeze_panes = "A2"
@@ -190,6 +204,7 @@ def write_xlsx(
         "Arquivos",
         "Pastas",
         "Modificado",
+        "Proprietário",
         "Erro",
     ]
     top.append(headers)
@@ -207,6 +222,7 @@ def write_xlsx(
                 row["arquivos"],
                 row["pastas"],
                 row["modificado"],
+                row["proprietario"],
                 row["erro"],
             ]
         )
@@ -221,7 +237,8 @@ def write_xlsx(
         ("H", 10),
         ("I", 10),
         ("J", 18),
-        ("K", 30),
+        ("K", 26),
+        ("L", 30),
     ):
         top.column_dimensions[column].width = width
     for cell in top["E"][1:]:
@@ -230,7 +247,7 @@ def write_xlsx(
         cell.number_format = '0.00"%"'
     top.freeze_panes = "A2"
     if top.max_row > 1:
-        top.auto_filter.ref = f"A1:K{top.max_row}"
+        top.auto_filter.ref = f"A1:L{top.max_row}"
 
     suggestions = workbook.create_sheet("Sugestões")
     sug_headers = [
@@ -287,18 +304,25 @@ def write_xlsb(
     temp_xlsx = temp_dir / "export.xlsx"
     try:
         write_xlsx(result, dirs, files, str(temp_xlsx))
+        import pythoncom
         import win32com.client as win32
 
-        excel = win32.DispatchEx("Excel.Application")
+        # O Excel é automação COM: inicializar e finalizar na mesma thread
+        # evita RPC_E_WRONG_THREAD em diálogos/exportações seguintes.
+        pythoncom.CoInitialize()
         try:
-            excel.Visible = False
-            excel.DisplayAlerts = False
-            book = excel.Workbooks.Open(str(temp_xlsx))
+            excel = win32.DispatchEx("Excel.Application")
             try:
-                book.SaveAs(str(Path(path).resolve()), FileFormat=50)
+                excel.Visible = False
+                excel.DisplayAlerts = False
+                book = excel.Workbooks.Open(str(temp_xlsx))
+                try:
+                    book.SaveAs(str(Path(path).resolve()), FileFormat=50)
+                finally:
+                    book.Close(False)
             finally:
-                book.Close(False)
+                excel.Quit()
         finally:
-            excel.Quit()
+            pythoncom.CoUninitialize()
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)

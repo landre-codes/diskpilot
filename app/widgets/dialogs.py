@@ -12,7 +12,6 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
     QDialog,
-    QFileDialog,
     QFileSystemModel,
     QFrame,
     QGraphicsDropShadowEffect,
@@ -41,7 +40,15 @@ from ..services.exporter import (
 )
 from ..services.model import ScanResult, top_items
 from ..theme import get_theme
-from ..utils import avatar_photo, format_bytes, normalize_path, open_in_explorer, resolve_network_path
+from ..utils import (
+    avatar_photo,
+    format_bytes,
+    normalize_path,
+    open_file_dialog,
+    open_in_explorer,
+    resolve_network_path,
+    save_file_dialog,
+)
 from .buttons import ActionButton, IconButton, SelectButton
 
 
@@ -636,11 +643,12 @@ class TopItemsDialog(SheetDialog):
             self._export_xlsb()
 
     def _ask_export(self, title: str, prefix: str, extension: str) -> str:
-        path, _ = QFileDialog.getSaveFileName(
+        path = save_file_dialog(
             self,
             f"Exportar {title}",
             default_export_path(prefix, extension),
             f"{title} (*.{extension})",
+            extension,
         )
         if not path:
             return ""
@@ -882,11 +890,12 @@ class ExportDialog(SheetDialog):
         fmt = self.format_btn.current()
         titles = {"csv": "CSV", "xlsx": "XLSX", "xlsb": "XLSB"}
         title = titles.get(fmt, "CSV")
-        path, _ = QFileDialog.getSaveFileName(
+        path = save_file_dialog(
             self,
             f"Exportar {title}",
             default_export_path("analise", fmt),
             f"{title} (*.{fmt})",
+            fmt,
         )
         if not path:
             return
@@ -1199,7 +1208,7 @@ class ProfileDialog(SheetDialog):
         self.avatar.reset_framing()
 
     def _choose_avatar(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(
+        path = open_file_dialog(
             self,
             "Escolher foto do perfil",
             str(Path.home()),
