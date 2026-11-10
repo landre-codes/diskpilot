@@ -50,7 +50,8 @@ O projeto nasceu como um "Everything gerencial e enxuto": em vez de apenas local
   - quantidade de arquivos, data de modificação e tipo;
   - barras proporcionais na coluna de tamanho;
   - limite de itens por pasta para manter a interface responsiva.
-- Busca com **debounce de 260 ms** e limpeza rápida.
+- Busca com **debounce de 260 ms** e limpeza rápida. O campo fica alinhado à esquerda e o contador de resultados ocupa o espaço restante, sem elidir o texto quando há largura suficiente.
+- Estados vazios com descrição responsiva: a largura acompanha o cartão (até 520 px) e a altura mínima é calculada pelo texto, com margens compactas em janelas baixas — a mensagem “Analisando pastas…” não é cortada.
 - Filtros: tudo, pastas, arquivos, arquivos > 100 MB e > 1 GB.
 - Conversor de unidade na tabela: automático, KB, MB, GB ou TB.
 - Ordenação: tamanho (maior/menor), nome (A–Z/Z–A) e mais recentes.

@@ -89,12 +89,12 @@ class AnalyzerPage(BasePage):
         self.search.setMaximumWidth(520)
         self.search.setToolTip("Pesquisar por nome de arquivo ou pasta")
         self.search.searchChanged.connect(self._on_search)
-        search_row.addWidget(self.search, 1)
-        self.count_label = QLabel("")
+        search_row.addWidget(self.search, 4)
+        self.count_label = ElidedLabel("")
         self.count_label.setObjectName("Muted")
-        self.count_label.setFixedWidth(150)
+        self.count_label.setMinimumWidth(220)
         self.count_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        search_row.addWidget(self.count_label)
+        search_row.addWidget(self.count_label, 1)
         tb.addLayout(search_row)
 
         controls_row = QHBoxLayout()
@@ -475,8 +475,7 @@ class AnalyzerPage(BasePage):
         else:
             text = f"{format_number(shown)} itens visíveis"
         self.count_label.setToolTip(text)
-        metrics = self.count_label.fontMetrics()
-        self.count_label.setText(metrics.elidedText(text, Qt.ElideRight, 140))
+        self.count_label.setText(text)
         self._update_empty()
 
     # ----------------------------------------------------------- estado vazio
@@ -484,6 +483,7 @@ class AnalyzerPage(BasePage):
         self.empty.title.setText(title)
         self.empty.description.setText(description)
         self.empty.icon.set_icon_name(icon_name)
+        self.empty.relayout()
         self.stack.setCurrentWidget(self.empty)
 
     def _update_empty(self) -> None:

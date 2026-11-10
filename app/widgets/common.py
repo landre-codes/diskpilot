@@ -291,6 +291,8 @@ class EmptyState(QFrame):
         lay.setContentsMargins(32, 42, 32, 42)
         lay.setSpacing(10)
         lay.setAlignment(Qt.AlignCenter)
+        self._compact: bool | None = None
+        self._description_width = 0
         self.icon = IconLabel(icon_name, 42, "primary")
         lay.addWidget(self.icon, 0, Qt.AlignHCenter)
         self.title = QLabel(title)
@@ -302,12 +304,49 @@ class EmptyState(QFrame):
         self.description.setAlignment(Qt.AlignCenter)
         self.description.setWordWrap(True)
         self.description.setMaximumWidth(520)
+        self.description.setSizePolicy(
+            QSizePolicy.Preferred, QSizePolicy.Minimum
+        )
         lay.addWidget(self.description, 0, Qt.AlignHCenter)
         self.actions = QHBoxLayout()
         self.actions.setSpacing(8)
         self.actions.setAlignment(Qt.AlignCenter)
         lay.addSpacing(4)
         lay.addLayout(self.actions)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._fit_content()
+
+    def _fit_content(self) -> None:
+        """Ajusta a descrição à largura disponível e evita corte vertical."""
+        compact = self.height() < 270
+        if compact != self._compact:
+            self._compact = compact
+            lay = self.layout()
+            if lay is not None:
+                if compact:
+                    lay.setContentsMargins(20, 14, 20, 14)
+                    lay.setSpacing(6)
+                else:
+                    lay.setContentsMargins(32, 42, 32, 42)
+                    lay.setSpacing(10)
+        width = max(180, min(520, self.width() - 64))
+        if width != self._description_width:
+            self._description_width = width
+            self.description.setFixedWidth(width)
+        metrics = self.description.fontMetrics()
+        flags = int(self.description.alignment()) | int(Qt.TextWordWrap)
+        needed = metrics.boundingRect(
+            0, 0, width, 10_000, flags, self.description.text()
+        ).height()
+        if needed > 0:
+            # +2 px cobre o arredondamento de fontes em DPI alto.
+            self.description.setMinimumHeight(needed + 2)
+
+    def relayout(self) -> None:
+        """Recalcula a altura após trocar o texto da descrição."""
+        self._fit_content()
 
     def add_action(self, widget: QWidget) -> None:
         self.actions.addWidget(widget)
