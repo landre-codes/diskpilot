@@ -71,6 +71,26 @@ COL_AUTHOR = 5
 COL_KIND = 6
 COL_PATH = 7
 
+COLUMN_MINIMUMS = {
+    COL_NAME: 280,
+    COL_SIZE: 124,
+    COL_PCT: 90,
+    COL_ITEMS: 100,
+    COL_MTIME: 150,
+    COL_AUTHOR: 200,
+    COL_KIND: 100,
+    COL_PATH: 600,
+}
+COLUMN_WIDTHS = {
+    COL_SIZE: 124,
+    COL_PCT: 90,
+    COL_ITEMS: 100,
+    COL_MTIME: 150,
+    COL_AUTHOR: 220,
+    COL_KIND: 100,
+    COL_PATH: 600,
+}
+
 
 class _AuthorSignals(QObject):
     resolved = Signal(str, str)
@@ -192,21 +212,21 @@ class FileTree(QTreeWidget):
         self.itemDoubleClicked.connect(self._on_double_clicked)
         header = self.header()
         header.setStretchLastSection(False)
-        header.setSectionResizeMode(COL_NAME, QHeaderView.Stretch)
+        header.setSectionResizeMode(COL_NAME, QHeaderView.Interactive)
         for column, width in (
-            (COL_SIZE, 116),
-            (COL_PCT, 74),
-            (COL_ITEMS, 88),
-            (COL_MTIME, 132),
-            (COL_KIND, 86),
+            (COL_SIZE, COLUMN_WIDTHS[COL_SIZE]),
+            (COL_PCT, COLUMN_WIDTHS[COL_PCT]),
+            (COL_ITEMS, COLUMN_WIDTHS[COL_ITEMS]),
+            (COL_MTIME, COLUMN_WIDTHS[COL_MTIME]),
+            (COL_KIND, COLUMN_WIDTHS[COL_KIND]),
         ):
             header.setSectionResizeMode(column, QHeaderView.Fixed)
             self.setColumnWidth(column, width)
         header.setSectionResizeMode(COL_AUTHOR, QHeaderView.Interactive)
-        self.setColumnWidth(COL_AUTHOR, 220)
+        self.setColumnWidth(COL_AUTHOR, COLUMN_WIDTHS[COL_AUTHOR])
         header.setSectionResizeMode(COL_PATH, QHeaderView.Interactive)
-        self.setColumnWidth(COL_PATH, 600)
-        header.setMinimumSectionSize(64)
+        self.setColumnWidth(COL_PATH, COLUMN_WIDTHS[COL_PATH])
+        header.setMinimumSectionSize(90)
         header.setHighlightSections(False)
         for column in (COL_SIZE, COL_PCT, COL_ITEMS, COL_MTIME):
             self.headerItem().setTextAlignment(column, Qt.AlignRight | Qt.AlignVCenter)
@@ -215,7 +235,9 @@ class FileTree(QTreeWidget):
         self.setTextElideMode(Qt.ElideMiddle)
         self.setColumnHidden(COL_PATH, True)
         self._path_visible = False
-        self._path_content_width = 600
+        self._path_content_width = COLUMN_MINIMUMS[COL_PATH]
+        self._fitting_columns = False
+        header.sectionResized.connect(self._on_section_resized)
         self._size_delegate = SizeBarDelegate(self)
         self.setItemDelegateForColumn(1, self._size_delegate)
         self._result: ScanResult | None = None
@@ -372,9 +394,7 @@ class FileTree(QTreeWidget):
         self.setColumnHidden(COL_PATH, not self._path_visible)
         if self._path_visible:
             self._update_path_content_width()
-            self._fit_path_columns()
-        else:
-            self.header().setSectionResizeMode(COL_NAME, QHeaderView.Stretch)
+        self._fit_columns()
 
     def _update_path_content_width(self) -> None:
         if not self._path_visible:
@@ -388,27 +408,48 @@ class FileTree(QTreeWidget):
             if text:
                 width = max(width, metrics.horizontalAdvance(text) + 28)
             iterator += 1
-        self._path_content_width = max(600, width)
+        self._path_content_width = max(COLUMN_MINIMUMS[COL_PATH], width)
 
-    def _fit_path_columns(self) -> None:
-        """Divide o espaço entre Nome e Caminho sem estrangular o Nome."""
-        if not self._path_visible:
-            return
-        header = self.header()
-        header.setSectionResizeMode(COL_NAME, QHeaderView.Interactive)
-        header.setSectionResizeMode(COL_PATH, QHeaderView.Interactive)
+    def _fit_columns(self) -> None:
+        """Distribui a largura restante para Nome, respeitando os mínimos."""
         viewport = max(1, self.viewport().width())
         fixed = sum(
-            self.columnWidth(column) for column in range(COL_SIZE, COL_PATH)
+            self.columnWidth(column)
+            for column in range(COL_SIZE, COL_PATH)
+            if not self.isColumnHidden(column)
         )
-        path_width = max(600, self._path_content_width)
-        name_width = max(280, viewport - fixed - path_width)
-        self.setColumnWidth(COL_NAME, name_width)
-        self.setColumnWidth(COL_PATH, path_width)
+        path_width = 0
+        if self._path_visible:
+            path_width = max(
+                COLUMN_MINIMUMS[COL_PATH],
+                self._path_content_width,
+                self.columnWidth(COL_PATH),
+            )
+        available = viewport - fixed - path_width
+        name_width = max(COLUMN_MINIMUMS[COL_NAME], available)
+        self._fitting_columns = True
+        try:
+            self.setColumnWidth(COL_NAME, name_width)
+            if self._path_visible:
+                self.setColumnWidth(COL_PATH, path_width)
+        finally:
+            self._fitting_columns = False
+
+    def _on_section_resized(self, logical: int, _old: int, new: int) -> None:
+        if self._fitting_columns or self.isColumnHidden(logical):
+            return
+        minimum = COLUMN_MINIMUMS.get(logical, 0)
+        if new >= minimum:
+            return
+        self._fitting_columns = True
+        try:
+            self.setColumnWidth(logical, minimum)
+        finally:
+            self._fitting_columns = False
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
-        self._fit_path_columns()
+        self._fit_columns()
 
     def set_query(self, query: str) -> None:
         self._query = _fold(query.strip())
@@ -537,8 +578,7 @@ class FileTree(QTreeWidget):
         self._building = False
         self.setUpdatesEnabled(True)
         self.viewport().update()
-        if self._path_visible:
-            self._fit_path_columns()
+        self._fit_columns()
         if filtered:
             self.expandAll()
             self.scrollToTop()
@@ -899,8 +939,7 @@ class FileTree(QTreeWidget):
         self._expand_active = None
         self._restore_pending_children(item)
         self._expand_all_children(item)
-        if self._path_visible:
-            self._fit_path_columns()
+        self._fit_columns()
         self.countChanged.emit(self._matches, max(0, self._shown))
         if self._expand_queue:
             self._expand_timer.start(0)
@@ -973,5 +1012,5 @@ class FileTree(QTreeWidget):
             iterator += 1
         if self._path_visible:
             self._update_path_content_width()
-            self._fit_path_columns()
+        self._fit_columns()
         self.viewport().update()

@@ -1,10 +1,10 @@
-# DiskPilot 1.8.1 — pacote de transporte em texto
+# DiskPilot 1.8.2 — pacote de transporte em texto
 
 Esta pasta existe para levar o projeto para um ambiente onde **só é possível
 copiar texto** (sem clone, sem ZIP, sem download de release).
 
 O conteúdo não é o código-fonte legível: é o projeto inteiro compactado
-(`tar.xz`, 81.000 bytes) e codificado em **Base85**, dividido em 4 partes de
+(`tar.xz`, 81.344 bytes) e codificado em **Base85**, dividido em 4 partes de
 texto ASCII. O script `restaurar_diskpilot.py` remonta o arquivo, confere o
 SHA-256 e extrai a pasta `DiskPilot/`.
 
@@ -12,15 +12,15 @@ SHA-256 e extrai a pasta `DiskPilot/`.
 
 | Arquivo | Bytes | SHA-256 (sem espaços/quebras) |
 |---|---|---|
-| `parte1.txt` | 25.574 | `4ede2ea63c48e6c7fc92bfead382185f05b9abe9ed2264a28ee5d2b3719ea25f` |
-| `parte2.txt` | 25.569 | `68b99fcd3821c15873f3b8acbe7b0826e03317fd48104effee8b310b8a1f1597` |
-| `parte3.txt` | 25.579 | `92b5d100fd4d4082b510b63b8133f465ab1e55544afd2aa878e6b9d1a85778ff` |
-| `parte4.txt` | 25.573 | `2d6f9e95150a0c04868c259718d1c6dc910c88209868cf734fe2a122ebe46b5b` |
+| `parte1.txt` | 25.679 | `9bb0a601a722dc51fad5d6e0a23055d7f487b96ec905c8a6b862619d3c49788c` |
+| `parte2.txt` | 25.682 | `1a3e9031b70d067e6b62dbb30200b73a7fb0584b7e417237691cee4d2c198a72` |
+| `parte3.txt` | 25.683 | `5a8f8c4380eede525986d23cba16a6f094f48203f4d4dbdee9d8c31836b5404f` |
+| `parte4.txt` | 25.680 | `fb64c5d426da985718486ecb6c443b882066354c61b2a14e3f819e1f9c48bfe2` |
 
 SHA-256 do `tar.xz` reconstruído (verificado pelo script):
 
 ```text
-6ff83cbf31be5003e41bee76544920e75f2e703b7798b363b3f2e9bc84a711a4
+91361f1e2389f97119ce16372562726a881e2b7966787f0e59359826651aabf6
 ```
 
 ## Como usar
@@ -45,11 +45,15 @@ SHA-256 do `tar.xz` reconstruído (verificado pelo script):
 5. Confirme no `diskpilot.log`:
 
    ```text
-   iniciando DiskPilot 1.8.1
+   iniciando DiskPilot 1.8.2
    ```
 
 ## Novidades desta versão
 
+- **Colunas maiores**: a tabela da análise passou a respeitar mínimos por coluna
+  (Nome 280 px, Tamanho 124, % do pai 90, Itens 100, Modificado 150, Autor 200,
+  Tipo 100 e Caminho completo 600). Em janelas estreitas surge rolagem
+  horizontal em vez de reduzir as colunas abaixo do legível.
 - **Coluna Autor**: a tabela da análise agora mostra o autor gravado nos
   metadados de cada arquivo (campo “Authors” do Windows; funciona para Office,
   PDF e formatos que guardam essa informação). A consulta é feita em segundo
@@ -173,7 +177,7 @@ Grava `diagnostico-diskpilot.txt` com Python, PySide6, versão do Qt, tela,
 py -c "from pathlib import Path; [print(p.name, len(''.join(p.read_text(encoding='ascii').split()))) for p in sorted(Path('.').glob('parte*.txt'))]"
 ```
 
-Esperado: `25313`, `25313`, `25313`, `25311`.
+Esperado: `25420`, `25420`, `25420`, `25420`.
 
 ## Observações
 
@@ -187,14 +191,14 @@ Esperado: `25313`, `25313`, `25313`, `25311`.
   interromper a análise.
 - O código é distribuído sob licença **MIT** (`LICENSE`); as dependências
   mantêm suas licenças — inventário em `THIRD-PARTY.md`.
-- Este pacote é gerado a partir do commit `v1.8.1` deste repositório.
+- Este pacote é gerado a partir do commit `v1.8.2` deste repositório.
 
 ## URL dos arquivos crus
 
 ```text
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.8.1/entrega/parte1.txt
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.8.1/entrega/parte2.txt
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.8.1/entrega/parte3.txt
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.8.1/entrega/parte4.txt
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.8.1/entrega/restaurar_diskpilot.py
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.8.2/entrega/parte1.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.8.2/entrega/parte2.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.8.2/entrega/parte3.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.8.2/entrega/parte4.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.8.2/entrega/restaurar_diskpilot.py
 ```
