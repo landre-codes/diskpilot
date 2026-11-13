@@ -1,4 +1,4 @@
-"""Menu lateral com logo persistente, abas verticais e usuário logado."""
+"""Menu lateral com marca fixa, abas verticais e usuário logado."""
 
 from __future__ import annotations
 
@@ -14,7 +14,6 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPixmap
 from PySide6.QtWidgets import (
-    QMenu,
     QVBoxLayout,
     QWidget,
 )
@@ -37,61 +36,19 @@ COLLAPSED_WIDTH = 80
 
 
 class LogoButton(QWidget):
-    """Marca/logo no topo; clique altera, menu de contexto remove."""
+    """Marca fixa do DiskPilot no topo da barra lateral."""
 
-    clicked = Signal()
-    removeRequested = Signal()
-
-    def __init__(self, config: AppConfig, parent: QWidget | None = None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.config = config
         self._ratio = 1.0
-        self._hover = False
-        self._logo = QPixmap()
         self.setFixedHeight(72)
-        self.setCursor(Qt.PointingHandCursor)
-        self.setToolTip("Clique para alterar o logo da empresa")
-        self.setAttribute(Qt.WA_Hover, True)
-        self.set_logo_path(config.logo_path)
+        self.setToolTip("DiskPilot — gestor de espaço")
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         get_theme().changed.connect(self.update)
-
-    def set_logo_path(self, path: str) -> None:
-        self._logo = QPixmap(path) if path else QPixmap()
-        self.update()
 
     def set_expansion(self, ratio: float) -> None:
         self._ratio = max(0.0, min(1.0, ratio))
         self.update()
-
-    def enterEvent(self, event) -> None:  # noqa: N802
-        self._hover = True
-        self.update()
-        super().enterEvent(event)
-
-    def leaveEvent(self, event) -> None:  # noqa: N802
-        self._hover = False
-        self.update()
-        super().leaveEvent(event)
-
-    def mouseReleaseEvent(self, event) -> None:  # noqa: N802
-        if event.button() == Qt.LeftButton and self.rect().contains(
-            event.position().toPoint()
-        ):
-            self.clicked.emit()
-        super().mouseReleaseEvent(event)
-
-    def contextMenuEvent(self, event) -> None:  # noqa: N802
-        theme = get_theme()
-        menu = QMenu(self)
-        act_change = menu.addAction(icon("image-outline", theme.color("muted"), 16), "Alterar logo…")
-        act_remove = menu.addAction(icon("delete-outline", theme.color("danger"), 16), "Remover logo")
-        act_remove.setEnabled(not self._logo.isNull())
-        chosen = menu.exec(event.globalPos())
-        if chosen == act_change:
-            self.clicked.emit()
-        elif chosen == act_remove:
-            self.removeRequested.emit()
-        menu.deleteLater()
 
     def paintEvent(self, event) -> None:  # noqa: N802
         theme = get_theme()
@@ -100,24 +57,8 @@ class LogoButton(QWidget):
         p.setRenderHint(QPainter.SmoothPixmapTransform)
         w, h = self.width(), self.height()
         p.fillRect(self.rect(), QColor(theme.color("sidebar")))
-        if self._hover:
-            p.setPen(Qt.NoPen)
-            p.setBrush(QColor(theme.color("hover")))
-            p.drawRoundedRect(QRectF(6, 7, w - 12, h - 14), 10, 10)
 
         ratio = self._ratio
-        if not self._logo.isNull():
-            avail_w = max(44, w - 28)
-            avail_h = 46
-            scaled = self._logo.scaled(
-                int(avail_w), avail_h, Qt.KeepAspectRatio, Qt.SmoothTransformation
-            )
-            x = (w - scaled.width()) / 2
-            y = (h - scaled.height()) / 2
-            p.drawPixmap(int(round(x)), int(round(y)), scaled)
-            p.end()
-            return
-
         mark = 40
         x = 14 if ratio < 0.5 else (w - mark) / 2
         x = 14 + ((w - mark) / 2 - 14) * (1 - ratio)
@@ -278,8 +219,6 @@ class UserCard(QWidget):
 class Sidebar(QWidget):
     pageSelected = Signal(str)
     collapsedChanged = Signal(bool)
-    logoRequested = Signal()
-    logoRemoveRequested = Signal()
     userRequested = Signal()
 
     def __init__(
@@ -300,9 +239,7 @@ class Sidebar(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(6, 4, 6, 10)
         lay.setSpacing(4)
-        self.logo = LogoButton(config, self)
-        self.logo.clicked.connect(self.logoRequested)
-        self.logo.removeRequested.connect(self.logoRemoveRequested)
+        self.logo = LogoButton(self)
         lay.addWidget(self.logo)
         lay.addSpacing(8)
 
@@ -400,9 +337,6 @@ class Sidebar(QWidget):
 
     def refresh_user(self) -> None:
         self.user.refresh()
-
-    def refresh_logo(self) -> None:
-        self.logo.set_logo_path(self.config.logo_path)
 
     def set_buttons_enabled(self, enabled: bool) -> None:
         for btn in self._buttons.values():

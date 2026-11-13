@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import QSize, QSignalBlocker, Qt
-from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QButtonGroup,
     QDialog,
@@ -27,7 +25,6 @@ from ..utils import (
     avatar_photo,
     format_bytes,
     format_datetime,
-    open_file_dialog,
     open_in_explorer,
 )
 from ..widgets.buttons import ActionButton
@@ -107,43 +104,9 @@ class SettingsPage(BasePage):
 
         # Identidade ------------------------------------------------------
         identity = Card(
-            "Identidade",
-            "Logo da empresa e perfil exibidos na barra lateral. Os arquivos são copiados para a pasta de configurações.",
+            "Perfil",
+            "Nome e foto exibidos na barra lateral. A imagem é copiada para a pasta de configurações.",
         )
-        identity_row = QHBoxLayout()
-        identity_row.setSpacing(18)
-
-        logo_box = QVBoxLayout()
-        logo_box.setSpacing(7)
-        logo_cap = QLabel("LOGO DA EMPRESA")
-        logo_cap.setObjectName("Eyebrow")
-        logo_box.addWidget(logo_cap)
-        self.logo_frame = QFrame()
-        self.logo_frame.setObjectName("InlineInfo")
-        self.logo_frame.setFixedSize(198, 66)
-        logo_inner = QHBoxLayout(self.logo_frame)
-        logo_inner.setContentsMargins(8, 8, 8, 8)
-        self.logo_preview = QLabel("Sem logo")
-        self.logo_preview.setObjectName("Muted")
-        self.logo_preview.setAlignment(Qt.AlignCenter)
-        logo_inner.addWidget(self.logo_preview)
-        logo_box.addWidget(self.logo_frame)
-        logo_actions = QHBoxLayout()
-        logo_actions.setSpacing(7)
-        logo_choose = ActionButton("Alterar logo", "image-outline", "soft", self, 16)
-        logo_choose.clicked.connect(self._choose_logo)
-        logo_actions.addWidget(logo_choose)
-        logo_remove = ActionButton("Remover", "delete-outline", "danger", self, 15)
-        logo_remove.clicked.connect(self._remove_logo)
-        logo_actions.addWidget(logo_remove)
-        logo_actions.addStretch(1)
-        logo_box.addLayout(logo_actions)
-        identity_row.addLayout(logo_box, 1)
-
-        divider = QFrame()
-        divider.setObjectName("VSep")
-        identity_row.addWidget(divider)
-
         user_box = QVBoxLayout()
         user_box.setSpacing(7)
         user_cap = QLabel("PERFIL DO USUÁRIO")
@@ -165,12 +128,12 @@ class SettingsPage(BasePage):
         user_text.addWidget(self.user_name)
         user_text.addWidget(self.user_hint)
         user_row.addLayout(user_text, 1)
-        user_box.addLayout(user_row)
         edit_profile = ActionButton("Editar perfil", "account-edit-outline", "soft", self, 16)
+        edit_profile.setMaximumWidth(180)
         edit_profile.clicked.connect(self._edit_profile)
-        user_box.addWidget(edit_profile)
-        identity_row.addLayout(user_box, 1)
-        identity.body.addLayout(identity_row)
+        user_row.addWidget(edit_profile, 0, Qt.AlignVCenter)
+        user_box.addLayout(user_row)
+        identity.body.addLayout(user_box)
         body.addWidget(identity)
 
         # Dados da análise ------------------------------------------------
@@ -283,7 +246,7 @@ class SettingsPage(BasePage):
         desc = QLabel(
             "Shell gerencial modular para análise de espaço em disco. "
             "Interface construída com Python, PySide6, qt-material e ícones Material Design. "
-            "O tema, o logo, o perfil e o resumo da última análise são persistidos localmente."
+            "O tema, o perfil e o resumo da última análise são persistidos localmente."
         )
         desc.setWordWrap(True)
         desc.setObjectName("Muted")
@@ -331,20 +294,6 @@ class SettingsPage(BasePage):
     # ------------------------------------------------------------- identidade
     def _refresh_identity(self) -> None:
         theme = get_theme()
-        path = self.state.config.logo_path
-        if path:
-            pm = QPixmap(path)
-            if not pm.isNull():
-                scaled = pm.scaled(178, 48, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                self.logo_preview.setPixmap(scaled)
-                self.logo_preview.setText("")
-            else:
-                self.logo_preview.setPixmap(QPixmap())
-                self.logo_preview.setText("Sem logo")
-        else:
-            self.logo_preview.setPixmap(QPixmap())
-            self.logo_preview.setText("Sem logo")
-
         avatar_path = self.state.config.avatar_path
         if avatar_path:
             focus_x, focus_y, zoom = self.state.config.avatar_framing
@@ -361,31 +310,6 @@ class SettingsPage(BasePage):
             )
         self.avatar_preview.setPixmap(pm)
         self.user_name.setText(self.state.config.user_name)
-
-    def _choose_logo(self) -> None:
-        path = open_file_dialog(
-            self,
-            "Escolher logo da empresa",
-            str(Path.home()),
-            "Imagens (*.png *.jpg *.jpeg *.webp *.svg *.bmp);;Todos os arquivos (*)",
-        )
-        if not path:
-            return
-        try:
-            stored = self.state.config.import_asset(path, "logo")
-            self.state.config.set("logo", stored)
-        except Exception as exc:
-            self.toast(f"Não foi possível salvar o logo: {exc}", "danger")
-            return
-        self._refresh_identity()
-        self.identityChanged.emit()
-        self.toast("Logo atualizado. A alteração já aparece na barra lateral.", "success")
-
-    def _remove_logo(self) -> None:
-        self.state.config.set("logo", "")
-        self._refresh_identity()
-        self.identityChanged.emit()
-        self.toast("Logo removido.", "info")
 
     def _edit_profile(self) -> None:
         dialog = ProfileDialog(self.window(), self.state.config)

@@ -40,7 +40,6 @@ from .config import AppConfig
 from .features.base import BasePage, PageSpec
 from .services.state import AppState
 from .theme import ThemeManager
-from .utils import open_file_dialog
 from .widgets.common import Toast
 from .widgets.dialogs import ProfileDialog
 from .widgets.sidebar import Sidebar
@@ -208,8 +207,6 @@ class MainWindow(QWidget):
         self.title_bar.dragFinished.connect(self._end_drag)
         self.sidebar.pageSelected.connect(self.navigate)
         self.sidebar.collapsedChanged.connect(self._sidebar_collapsed)
-        self.sidebar.logoRequested.connect(self._change_logo)
-        self.sidebar.logoRemoveRequested.connect(self._remove_logo)
         self.sidebar.userRequested.connect(self._edit_profile)
         self.theme.aboutToChange.connect(self._begin_theme_change)
         self.theme.changed.connect(self._theme_changed)
@@ -914,34 +911,10 @@ class MainWindow(QWidget):
 
     # ------------------------------------------------------------- identidade
     def _refresh_identity(self) -> None:
-        self.sidebar.refresh_logo()
         self.sidebar.refresh_user()
         settings = self._pages.get("settings")
         if settings is not None and hasattr(settings, "_refresh_identity"):
             settings._refresh_identity()
-
-    def _change_logo(self) -> None:
-        path = open_file_dialog(
-            self,
-            "Escolher logo da empresa",
-            str(Path.home()),
-            "Imagens (*.png *.jpg *.jpeg *.webp *.svg *.bmp);;Todos os arquivos (*)",
-        )
-        if not path:
-            return
-        try:
-            stored = self.config.import_asset(path, "logo")
-            self.config.set("logo", stored)
-        except Exception as exc:
-            self.show_toast(f"Não foi possível salvar o logo: {exc}", "danger")
-            return
-        self._refresh_identity()
-        self.show_toast("Logo atualizado. O arquivo foi salvo com persistência.", "success")
-
-    def _remove_logo(self) -> None:
-        self.config.set("logo", "")
-        self._refresh_identity()
-        self.show_toast("Logo removido.", "info")
 
     def _edit_profile(self) -> None:
         dialog = ProfileDialog(self, self.config)

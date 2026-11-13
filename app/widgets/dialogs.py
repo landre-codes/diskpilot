@@ -13,12 +13,21 @@ from PySide6.QtCore import (
     QEvent,
     QModelIndex,
     QPoint,
+    QRectF,
     QSize,
     QStandardPaths,
     Qt,
     QTimer,
 )
-from PySide6.QtGui import QColor, QGuiApplication, QIcon, QImageReader, QPixmap
+from PySide6.QtGui import (
+    QColor,
+    QGuiApplication,
+    QIcon,
+    QImageReader,
+    QPainter,
+    QPainterPath,
+    QPixmap,
+)
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -43,7 +52,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..config import AppConfig
-from ..icons import avatar_pixmap, icon, rounded_pixmap
+from ..icons import avatar_pixmap, icon
 from ..services.exporter import (
     default_export_path,
     write_csv,
@@ -1033,6 +1042,32 @@ def _thumbnail_pixmap(path: str, mtime: float, box: int) -> QPixmap:
         return QPixmap()
 
 
+@lru_cache(maxsize=16)
+def _preview_pixmap(path: str, mtime: float, size: int = 210) -> QPixmap:
+    """Prévia arredondada em resolução 2×, sem decodificar a foto inteira."""
+    source = _thumbnail_pixmap(path, mtime, size * 2)
+    if source.isNull():
+        return QPixmap()
+    side = size * 2
+    target = QPixmap(side, side)
+    target.fill(Qt.transparent)
+    scaled = source.scaled(side, side, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+    painter = QPainter(target)
+    painter.setRenderHint(QPainter.Antialiasing)
+    painter.setRenderHint(QPainter.SmoothPixmapTransform)
+    clip = QPainterPath()
+    clip.addRoundedRect(QRectF(0, 0, side, side), 24, 24)
+    painter.setClipPath(clip)
+    painter.drawPixmap(
+        (side - scaled.width()) // 2,
+        (side - scaled.height()) // 2,
+        scaled,
+    )
+    painter.end()
+    target.setDevicePixelRatio(2)
+    return target
+
+
 class ImagePickerDialog(SheetDialog):
     """Seletor de imagens com miniaturas, locais e prévia."""
 
@@ -1426,17 +1461,18 @@ class ImagePickerDialog(SheetDialog):
             self.choose_btn.setEnabled(False)
             return
         self.preview.clear()
-        self.preview.setPixmap(rounded_pixmap(path, 210, 12))
         try:
             stat = Path(path).stat()
+        except OSError:
+            size = QImageReader(path).size()
+            details = f"{size.width()} × {size.height()} px"
+        else:
+            self.preview.setPixmap(_preview_pixmap(path, stat.st_mtime))
             size = _display_dimensions(path, stat.st_mtime)
             details = (
                 f"{size.width()} × {size.height()} px · "
                 f"{format_bytes(stat.st_size)} · {format_datetime(stat.st_mtime)}"
             )
-        except OSError:
-            size = QImageReader(path).size()
-            details = f"{size.width()} × {size.height()} px"
         self.preview_name.setText(Path(path).name)
         self.preview_details.setText(details)
         self.selection_label.setText("Foto selecionada")

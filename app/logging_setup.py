@@ -73,11 +73,24 @@ def crash_file_path(config: AppConfig) -> Path:
 
 
 def log_tail(path: str | Path, max_lines: int = 8000) -> str:
-    """Lê as últimas linhas de um log sem falhar em arquivos grandes."""
+    """Lê as últimas linhas de um log sem carregar o arquivo inteiro."""
     try:
-        with Path(path).open("r", encoding="utf-8", errors="replace") as handle:
-            lines = handle.readlines()
-        return "".join(lines[-max_lines:])
+        target = Path(path)
+        with target.open("rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            position = handle.tell()
+            chunks: list[bytes] = []
+            newlines = 0
+            while position > 0 and newlines <= max_lines:
+                step = min(65_536, position)
+                position -= step
+                handle.seek(position)
+                chunk = handle.read(step)
+                chunks.append(chunk)
+                newlines += chunk.count(b"\n")
+        blob = b"".join(reversed(chunks))
+        lines = blob.decode("utf-8", "replace").splitlines()
+        return "\n".join(lines[-max_lines:])
     except OSError:
         return ""
 

@@ -337,9 +337,9 @@ QCheckBox::indicator:checked {
 }
 
 /* ------------------------------------------------------------ abas */
-QLabel#PageTitle { font-size: 26px; font-weight: 700; letter-spacing: -0.5px; }
+QLabel#PageTitle { color: $text; font-size: 26px; font-weight: 700; letter-spacing: -0.5px; }
 QLabel#PageSubtitle { color: $muted; font-size: 13px; }
-QLabel#SectionTitle { font-size: 15px; font-weight: 600; letter-spacing: 0.1px; }
+QLabel#SectionTitle { color: $text; font-size: 15px; font-weight: 600; letter-spacing: 0.1px; }
 QLabel#Eyebrow {
     color: $primary;
     font-size: 11px;

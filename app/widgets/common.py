@@ -102,7 +102,7 @@ class PageHeader(QWidget):
         self.eyebrow = QLabel(eyebrow.upper())
         self.eyebrow.setObjectName("Eyebrow")
         self.eyebrow.setVisible(bool(eyebrow))
-        self.title = QLabel(title)
+        self.title = ElidedLabel(title)
         self.title.setObjectName("PageTitle")
         self.subtitle = QLabel(subtitle)
         self.subtitle.setObjectName("PageSubtitle")

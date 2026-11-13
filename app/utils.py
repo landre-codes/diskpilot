@@ -171,29 +171,6 @@ def open_in_explorer(path: str, select: bool = False) -> bool:
         return False
 
 
-def open_file_dialog(
-    parent, title: str, start: str, file_filter: str
-) -> str:
-    """Diálogo de abertura do Qt (não nativo).
-
-    O diálogo nativo do Windows usa o shell COM e pode disparar
-    ``RPC_E_WRONG_THREAD`` depois de automações COM (Excel/pywin32). O
-    diálogo do Qt evita essa dependência e mantém o app estável.
-    """
-    from PySide6.QtWidgets import QDialog, QFileDialog
-
-    dialog = QFileDialog(parent, title, start, file_filter)
-    dialog.setOption(QFileDialog.Option.DontUseNativeDialog, True)
-    dialog.setAcceptMode(QFileDialog.AcceptMode.AcceptOpen)
-    dialog.setFileMode(QFileDialog.FileMode.ExistingFile)
-    path = ""
-    if dialog.exec() == QDialog.DialogCode.Accepted:
-        files = dialog.selectedFiles()
-        path = files[0] if files else ""
-    dialog.deleteLater()
-    return path
-
-
 def save_file_dialog(
     parent, title: str, start: str, file_filter: str, suffix: str = ""
 ) -> str:

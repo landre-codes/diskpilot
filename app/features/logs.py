@@ -334,6 +334,8 @@ class LogsPage(BasePage):
 
     # ------------------------------------------------------------- terminal
     def _refresh(self, force: bool = False) -> None:
+        if not force and self.terminal.textCursor().hasSelection():
+            return
         now = time.time()
         if now - self._last_prune > 3600:
             self._last_prune = now
@@ -453,9 +455,12 @@ class LogsPage(BasePage):
 
     def _use_default_dir(self) -> None:
         target = default_log_dir()
+        config = self.state.config
         if os.path.normcase(str(target)) == os.path.normcase(
-            str(active_log_dir(self.state.config))
+            str(active_log_dir(config))
         ):
+            if str(config.get("logging.directory", "") or ""):
+                config.set("logging.directory", "")
             self.toast("Os logs já estão na pasta padrão.", "info")
             return
         self._migrate_to(str(target))

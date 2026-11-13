@@ -25,7 +25,7 @@ O projeto nasceu como um "Everything gerencial e enxuto": em vez de apenas local
 - Ícones Material Design (MDI) via `qtawesome` em botões, campos de busca, seletores, árvore, diálogos e recomendações.
 - Abas verticais com ícones, indicador ativo, tooltip no modo compacto e transição de página com fade.
 - Menu hambúrguer com animação de largura; o estado (expandido/recolhido) é persistido.
-- Logo da empresa no topo da barra lateral, com clique para alterar, menu de contexto para remover e **persistência local**.
+- Marca **fixa** do DiskPilot no topo da barra lateral, parte da identidade visual do produto. Não é configurável.
 - Usuário atual no rodapé da barra lateral, com avatar gerado a partir das iniciais (ou foto importada). Fotos podem ser **arrastadas para reposicionar** e ajustadas com a **roda do mouse (zoom)**; o enquadramento é salvo localmente e aplicado na sidebar, nas configurações e na prévia do perfil.
 - **Seletor de foto próprio**: “Escolher foto” abre um diálogo no mesmo padrão visual do seletor de pastas, com locais (Imagens, Início, Documentos, Downloads, unidades), navegação por caminho, grade de miniaturas, prévia com dimensões/tamanho/data, caminho completo copiável e seleção por duplo clique/Enter. A rotação EXIF é respeitada nas miniaturas e na prévia.
 
@@ -82,7 +82,7 @@ O projeto nasceu como um "Everything gerencial e enxuto": em vez de apenas local
 
 ### Configurações
 - Troca de tema em tempo real e persistência.
-- Alteração do logo da empresa e do perfil (nome e foto), com cópia dos ativos para a pasta de configuração.
+- Alteração do perfil (nome e foto), com cópia da imagem para a pasta de configuração.
 - Resumo do armazenamento, última análise e local da configuração.
 - Limpeza explícita dos resultados armazenados, mantendo as pastas escolhidas.
 - Lista de atalhos de teclado.
@@ -200,12 +200,11 @@ São persistidos:
 - tema atual;
 - geometria/estado da janela;
 - estado do menu lateral;
-- caminho do logo;
 - nome e avatar do usuário;
 - pastas selecionadas;
 - resumo da última análise (tamanhos, contagens, sugestões e data).
 
-Os arquivos de logo/avatar são copiados para `assets/` ao lado do `config.json`. Mover ou apagar a imagem original não quebra o perfil.
+A imagem do avatar é copiada para `assets/` ao lado do `config.json`. Mover ou apagar a imagem original não quebra o perfil; a marca do app é fixa.
 
 ---
 
@@ -236,7 +235,7 @@ diskpilot/
    │  ├─ charts.py              # donut e barras com QPainter
    │  ├─ common.py              # cards, headers, chips, empty state, toast
    │  ├─ dialogs.py             # seletor de pastas, perfil, confirmação
-   │  ├─ sidebar.py             # logo, abas verticais, usuário
+   │  ├─ sidebar.py             # marca fixa, abas verticais, usuário
    │  └─ title_bar.py           # controles da janela
    ├─ services/
    │  ├─ model.py               # Node, ScanResult, Suggestion
@@ -332,7 +331,7 @@ class ClientesPage(BasePage):
 - Os tamanhos são **lógicos** (`st_size`), que é o valor esperado em um gerenciador de arquivos. Arquivos esparsos, comprimidos ou com hard links podem ocupar menos espaço físico do que o valor exibido.
 - A árvore é preguiçosa: os filhos de uma pasta só são criados quando ela é expandida, com limite de 1.200 itens por pasta e busca global limitada para manter a responsividade.
 - As estimativas de limpeza não são destrutivas e podem se sobrepor; os cálculos já evitam contar arquivos de cache duas vezes e mostram "seguro" separado de "revisar".
-- O logo e o avatar são copiados com `shutil`, não vinculados ao arquivo original.
+- O avatar é copiado com `shutil`, não vinculado ao arquivo original.
 - `circular_pixmap` pinta a imagem em coordenadas físicas e só aplica o `devicePixelRatio` no final; aceita `focus_x`, `focus_y` e `zoom`, permitindo o enquadramento ajustável do avatar. A imagem é carregada com `QImageReader.autoTransform`, então a rotação EXIF de fotos de celular é respeitada (antes a foto aparecia girada 90°). As prévias em `QLabel` usam `setScaledContents(True)` para não cortar o canto do pixmap em telas com DPI alto.
 - O perfil salva `user.avatar_focus_x`, `user.avatar_focus_y` e `user.avatar_zoom`. No diálogo de perfil, arraste a foto para reposicionar e use a roda do mouse para ampliar; “Centralizar” volta ao ponto central.
 - A exportação de dados usa `csv` (BOM UTF-8 e separador `;`), `openpyxl` (XLSX com abas de resumo, Top 100 e sugestões) e `pywin32` + Microsoft Excel (XLSB). O XLSB é gerado a partir do XLSX temporário com `FileFormat=50`; se o Excel ou o pywin32 não estiverem disponíveis, o app informa o requisito em vez de falhar silenciosamente.
@@ -358,7 +357,10 @@ class ClientesPage(BasePage):
 - O logging é centralizado em `app/logging_setup.py`: `RotatingFileHandler` de 2 MB com 3 backups em `~/DiskPilot/logs`, retenção de 3 dias (linhas antigas do log ativo e arquivos rotacionados), crash log via `faulthandler`, importação dos logs antigos da pasta de configuração e migração em tempo de execução sem reiniciar. Se a pasta escolhida ficar indisponível, o app usa o diretório padrão e continua registrando.
 - `KeyboardInterrupt` (Ctrl+C no console/IDE) é registrado como interrupção manual em `INFO`, e não como `CRITICAL` com stack trace. O hook de exceções só trata erros reais como críticos.
 - Textos de `QLineEdit`, `QComboBox` e `QAbstractSpinBox` usam o token `input_text`: claro no tema escuro e **azul-escuro** (`#06232b`) no tema claro. A cor também é fixada nos estados `:hover` e `:focus`, e o placeholder usa o token `placeholder` (mais escuro no tema claro), garantindo contraste.
-- Os estados de hover usam os tokens `hover`/`hover_border`, com contraste próprio em cada tema (no claro, `#d8ebef`), em vez de reutilizar `surface_2`/`surface_3`. Isso inclui os hovers desenhados à mão das abas verticais, do logo e do cartão do usuário — antes o `surface_2` ficava quase invisível sobre o `sidebar` no tema claro.
+- Os estados de hover usam os tokens `hover`/`hover_border`, com contraste próprio em cada tema (no claro, `#d8ebef`), em vez de reutilizar `surface_2`/`surface_3`. Isso inclui os hovers desenhados à mão das abas verticais e do cartão do usuário — antes o `surface_2` ficava quase invisível sobre o `sidebar` no tema claro.
+- O título de `PageHeader` usa `ElidedLabel`: em janelas estreitas ele elide em vez de empurrar/cortar os botões de ação do cabeçalho.
+- O seletor de foto usa miniaturas e prévias decodificadas no tamanho de exibição (com cache), em vez de carregar a imagem inteira; a atualização automática do terminal pausa enquanto há texto selecionado para não atrapalhar a cópia.
+- `log_tail` lê o arquivo de trás para frente em blocos, então um crash log grande não precisa ser carregado inteiro na memória.
 - A barra de título é **responsiva e sem moldura**: o título e o slogan usam rótulos que elidem (reticências) em vez de empurrar o layout. O slogan "Gestor de espaço" fica centralizado no meio exato da barra e não intercepta cliques — arraste e duplo clique funcionam em toda a barra.
 
 ---

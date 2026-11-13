@@ -1,8 +1,9 @@
 """Persistência de configurações e ativos do aplicativo.
 
 Tudo fica em um único JSON no diretório de configuração do usuário. Ativos
-importados (logo, avatar) são copiados para ``assets/`` ao lado do arquivo,
-evitando que o app quebre quando o arquivo original for movido.
+importados (avatar) são copiados para ``assets/`` ao lado do arquivo,
+evitando que o app quebre quando o arquivo original for movido. A marca do
+aplicativo é fixa e faz parte da identidade visual.
 """
 
 from __future__ import annotations
@@ -24,7 +25,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "sidebar_collapsed": False,
     "geometry": "",
     "window_state": "normal",
-    "logo": "",
     "user": {
         "name": "",
         "avatar": "",
@@ -109,6 +109,8 @@ class AppConfig:
             # A opção experimental de moldura nativa não existe mais; qualquer
             # resíduo em configurações antigas é descartado na próxima gravação.
             self.data.pop("native_frame", None)
+            # O logo passou a ser fixo (identidade visual do produto).
+            self.data.pop("logo", None)
             # O cargo foi removido do produto; descartamos resíduos de
             # configurações antigas para manter o perfil enxuto.
             if isinstance(self.data.get("user"), dict):
@@ -238,8 +240,3 @@ class AppConfig:
             max(0.0, min(1.0, focus_y)),
             max(1.0, min(4.0, zoom)),
         )
-
-    @property
-    def logo_path(self) -> str:
-        path = str(self.get("logo", "") or "")
-        return path if path and Path(path).exists() else ""
