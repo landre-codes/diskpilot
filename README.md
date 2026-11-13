@@ -40,7 +40,7 @@ O projeto nasceu como um "Everything gerencial e enxuto": em vez de apenas local
 - Seleção de **uma ou várias pastas** pelo seletor próprio (Ctrl+clique), por arrastar e soltar ou por múltiplas adições.
 - O seletor de pastas mostra o **caminho completo** da pasta atual ou da pasta selecionada, com botão de copiar; cada linha também exibe o caminho integral em tooltip, útil para caminhos longos e unidades de rede.
 - Chips das raízes selecionadas, com remoção individual.
-- Varredura em segundo plano com `QThreadPool`, progresso, cancelamento e tolerância a erros de permissão. Logs em `diskpilot.log`/`diskpilot-crash.log` na pasta do projeto e na pasta de configuração.
+- Varredura em segundo plano com `QThreadPool`, progresso, cancelamento e tolerância a erros de permissão. Logs em `~/DiskPilot/logs/diskpilot.log` e `diskpilot-crash.log` por padrão, com pasta configurável pela página **Logs**.
 - Botão **Top 100**: ranking dos 100 maiores diretórios e dos 100 maiores arquivos da análise, com filtro por tamanho (todos, > 100 MB, > 1 GB), tamanho, percentual, caminho completo, cópia do caminho e abertura no Explorer.
 - Coluna **Autor** na árvore: mostra o autor gravado nos metadados do arquivo (o campo “Authors” do Windows — funciona para Office, PDF e outros formatos que guardam essa informação). A consulta roda em segundo plano, com cache por caminho, para não travar a interface; o nome também aparece no tooltip e na linha copiada. Pastas e formatos sem metadados de autor aparecem como `—`.
 - Colunas com mínimos maiores: **Nome** 280 px, **Tamanho** 124, **% do pai** 90, **Itens** 100, **Modificado** 150, **Autor** 200, **Tipo** 100 e **Caminho completo** 600. Quando a janela não comporta todos os mínimos, a tabela usa rolagem horizontal em vez de esmagar o conteúdo.
@@ -72,6 +72,13 @@ O projeto nasceu como um "Everything gerencial e enxuto": em vez de apenas local
 - Arquivos compactados muito grandes e arquivos temporários/backups.
 - Caminhos reais, botão para abrir o local e cópia de todos os caminhos para compartilhar com a equipe.
 - Nenhuma exclusão automática: o texto de cada card explica o risco e o que verificar antes.
+
+### Logs e diagnóstico
+- Página **Logs** com terminal monoespaçado, cores por nível (`INFO`, `WARNING`, `ERROR`) e texto selecionável.
+- Alternância entre o log do aplicativo e o **crash log**, filtro por nível, busca por texto e acompanhamento em tempo real.
+- Botões **Copiar terminal** e **Copiar diagnóstico** (versão, SO, Python, Qt, raízes, última análise e últimas linhas).
+- Pasta padrão `~/DiskPilot/logs`; **Alterar pasta…** migra o log e o crash log atuais sem reiniciar, e **Padrão** volta ao diretório do usuário.
+- Arquivos rotativos de 2 MB com 3 backups; logs antigos da pasta de configuração são importados no primeiro uso do novo padrão.
 
 ### Configurações
 - Troca de tema em tempo real e persistência.
@@ -220,6 +227,7 @@ diskpilot/
    ├─ pages.py                  # registro das páginas padrão
    ├─ shell.py                  # janela sem moldura, navegação, atalhos, drag/drop
    ├─ config.py                 # persistência JSON e importação de ativos
+   ├─ logging_setup.py          # logs rotativos, crash log e migração
    ├─ theme.py                  # paletas, QSS e integração qt-material
    ├─ icons.py                  # cache de ícones MDI e avatares
    ├─ utils.py                  # formatação, Explorer, clipboard
@@ -238,6 +246,7 @@ diskpilot/
    └─ features/
       ├─ base.py                # BasePage e PageSpec
       ├─ dashboard.py
+      ├─ logs.py                # terminal de logs e diagnóstico
       ├─ recommendations.py
       ├─ settings.py
       └─ analyzer/
@@ -346,6 +355,7 @@ class ClientesPage(BasePage):
 - A árvore desenha as **setas de expandir/recolher** e as guias de hierarquia em `drawBranches`, com a cor do tema, porque o QSS de `::branch` desliga o indicador nativo. O clique na seta alterna o nó.
 - A árvore aceita `Ctrl+C` e menu de contexto para copiar **linha(s)** (Nome, Tamanho, %, Itens, Modificado, Autor, Tipo e Caminho, separados por tabulação), **tamanho** ou **caminho**. A seleção múltipla copia todas as linhas escolhidas.
 - O autor é lido pelo Windows Property System (`System.Author`/`PKEY_Author`) em um pool de threads, com cache por caminho; há fallback para `docProps/core.xml` (OOXML) e `/Author` (PDF) quando o Property System não responde. Falhas de rede/permissão e arquivos sem metadados aparecem como `—`.
+- O logging é centralizado em `app/logging_setup.py`: `RotatingFileHandler` de 2 MB com 3 backups em `~/DiskPilot/logs`, crash log via `faulthandler`, importação dos logs antigos da pasta de configuração e migração em tempo de execução sem reiniciar. Se a pasta escolhida ficar indisponível, o app usa o diretório padrão e continua registrando.
 - Textos de `QLineEdit`, `QComboBox` e `QAbstractSpinBox` usam o token `input_text`: claro no tema escuro e **azul-escuro** (`#06232b`) no tema claro. A cor também é fixada nos estados `:hover` e `:focus`, e o placeholder usa o token `placeholder` (mais escuro no tema claro), garantindo contraste.
 - Os estados de hover usam os tokens `hover`/`hover_border`, com contraste próprio em cada tema (no claro, `#d8ebef`), em vez de reutilizar `surface_2`/`surface_3`. Isso inclui os hovers desenhados à mão das abas verticais, do logo e do cartão do usuário — antes o `surface_2` ficava quase invisível sobre o `sidebar` no tema claro.
 - A barra de título é **responsiva e sem moldura**: o título e o slogan usam rótulos que elidem (reticências) em vez de empurrar o layout. O slogan "Gestor de espaço" fica centralizado no meio exato da barra e não intercepta cliques — arraste e duplo clique funcionam em toda a barra.

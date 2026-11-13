@@ -560,6 +560,15 @@ QLabel#ImagePreviewCanvas {
     border-radius: 10px;
     color: $faint;
 }
+QPlainTextEdit#LogTerminal {
+    background: #0a0e12;
+    color: #d6e2e8;
+    border: 1px solid $border_strong;
+    border-radius: 10px;
+    padding: 10px;
+    selection-background-color: #1f6f78;
+    selection-color: #ffffff;
+}
 QListWidget#QuickPlaces { background: transparent; border: none; border-radius: 0px; }
 QListWidget#QuickPlaces::item { min-height: 32px; color: $muted; }
 QListWidget#QuickPlaces::item:hover { background: $hover; color: $text; }

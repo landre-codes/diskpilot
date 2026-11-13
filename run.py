@@ -3,12 +3,9 @@
 from __future__ import annotations
 
 import ctypes
-import faulthandler
 import logging
-import logging.handlers
 import sys
 import traceback
-from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QGuiApplication
@@ -18,57 +15,16 @@ from app import APP_NAME, __version__
 from app.config import AppConfig
 from app.i18n import install_pt_br
 from app.input_guard import CtrlWheelGuard
+from app.logging_setup import configure_logging
 from app.pages import default_pages
 from app.shell import MainWindow
 from app.single_instance import SingleInstanceGuard
 from app.theme import init_theme
 
 
-_CRASH_FILE = None
-
-
 def _configure_logging(config: AppConfig) -> None:
-    global _CRASH_FILE
-    formatter = logging.Formatter(
-        "%(asctime)s %(levelname)s %(name)s: %(message)s"
-    )
-    root = logging.getLogger()
-    root.setLevel(logging.INFO)
-    paths: list[Path] = []
-    for candidate in (
-        config.path.parent / "diskpilot.log",
-        Path(__file__).resolve().parent / "diskpilot.log",
-    ):
-        if candidate not in paths:
-            paths.append(candidate)
-    for log_path in paths:
-        try:
-            handler = logging.handlers.RotatingFileHandler(
-                log_path, maxBytes=1_000_000, backupCount=2, encoding="utf-8"
-            )
-            handler.setFormatter(formatter)
-            root.addHandler(handler)
-        except Exception:
-            continue
-    try:
-        stream = logging.StreamHandler()
-        stream.setFormatter(formatter)
-        root.addHandler(stream)
-    except Exception:
-        pass
-
-    # faulthandler captura abortos nativos e grava o stack Python no crash log.
-    for crash_path in (
-        Path(__file__).resolve().parent / "diskpilot-crash.log",
-        config.path.parent / "diskpilot-crash.log",
-    ):
-        try:
-            _CRASH_FILE = open(crash_path, "a", encoding="utf-8", buffering=1)
-            faulthandler.enable(file=_CRASH_FILE, all_threads=True)
-            break
-        except Exception:
-            _CRASH_FILE = None
-            continue
+    directory = configure_logging(config, stream=True)
+    logging.getLogger("diskpilot").info("logs em %s", directory)
 
 
 def _install_exception_hook() -> None:

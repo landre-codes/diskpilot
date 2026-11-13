@@ -9,6 +9,7 @@ from __future__ import annotations
 from .features.analyzer.page import AnalyzerPage
 from .features.base import PageSpec
 from .features.dashboard import DashboardPage
+from .features.logs import LogsPage
 from .features.recommendations import RecommendationsPage
 from .features.settings import SettingsPage
 
@@ -35,6 +36,13 @@ def default_pages() -> list[PageSpec]:
             "Como liberar espaço com segurança",
             "lightbulb-on-outline",
             RecommendationsPage,
+        ),
+        PageSpec(
+            "logs",
+            "Logs",
+            "Eventos e diagnóstico",
+            "console",
+            LogsPage,
         ),
         PageSpec(
             "settings",

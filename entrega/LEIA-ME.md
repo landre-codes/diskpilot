@@ -1,10 +1,10 @@
-# DiskPilot 1.9.0 — pacote de transporte em texto
+# DiskPilot 1.10.0 — pacote de transporte em texto
 
 Esta pasta existe para levar o projeto para um ambiente onde **só é possível
 copiar texto** (sem clone, sem ZIP, sem download de release).
 
 O conteúdo não é o código-fonte legível: é o projeto inteiro compactado
-(`tar.xz`, 83.752 bytes) e codificado em **Base85**, dividido em 4 partes de
+(`tar.xz`, 88.380 bytes) e codificado em **Base85**, dividido em 4 partes de
 texto ASCII. O script `restaurar_diskpilot.py` remonta o arquivo, confere o
 SHA-256 e extrai a pasta `DiskPilot/`.
 
@@ -12,15 +12,15 @@ SHA-256 e extrai a pasta `DiskPilot/`.
 
 | Arquivo | Bytes | SHA-256 (sem espaços/quebras) |
 |---|---|---|
-| `parte1.txt` | 26.438 | `3673f159531e8b9666cd7c74ea26517a5306a9529d131f2568712d413caa1408` |
-| `parte2.txt` | 26.444 | `9fcfc6039d675321655b62e1f991267f477770a82cfd3679fbad41510b5a40a8` |
-| `parte3.txt` | 26.448 | `a3577ddf8d7c23d0ec131cde5e2a80380642a0f508654a7738ae55f5d7bb200d` |
-| `parte4.txt` | 26.445 | `49c569e3143acb9feb1e1f8cf34fc6ca34653a2caa47449602239c308ad4932b` |
+| `parte1.txt` | 27.902 | `e528db05c98ffc661ff0a5547889e86140bb072df624023a000f6171f05389af` |
+| `parte2.txt` | 27.904 | `35359845474f79d88fd8fbdbf70826055396bfea2d743d6e8439daf23e160798` |
+| `parte3.txt` | 27.907 | `1106961bec9cc2c4a5d68313875b6929b85eb87d4c44699f7c4b11e640219861` |
+| `parte4.txt` | 27.899 | `bf45123ed6420c66dae77479da18ff75af6bd5b549feaffc9d29e7950e4df2a4` |
 
 SHA-256 do `tar.xz` reconstruído (verificado pelo script):
 
 ```text
-af1871d4f5ededcd683cbffe41aed60631cb22563ab99cf71d767528f6d34e7b
+cc8382b56f1ad9376ec49912e829dc2c12c88dc7bdd9e2957775f0f1d6352e63
 ```
 
 ## Como usar
@@ -45,11 +45,21 @@ af1871d4f5ededcd683cbffe41aed60631cb22563ab99cf71d767528f6d34e7b
 5. Confirme no `diskpilot.log`:
 
    ```text
-   iniciando DiskPilot 1.9.0
+   iniciando DiskPilot 1.10.0
    ```
 
 ## Novidades desta versão
 
+- **Página de Logs em estilo terminal**: terminal monoespaçado com cores por
+  nível, filtro por `INFO`/`WARNING`/`ERROR`, busca, alternância entre log do
+  aplicativo e crash log, acompanhamento em tempo real e cópia do conteúdo.
+  “Copiar diagnóstico” reúne versão, SO, Python, Qt, raízes, última análise e
+  as últimas linhas do log.
+- **Logs no diretório do usuário**: por padrão em `~/DiskPilot/logs`, com
+  rotação de 2 MB × 3 e crash log via `faulthandler`. A página permite trocar a
+  pasta (migrando os arquivos atuais sem reiniciar), voltar ao padrão e abrir a
+  pasta. Logs antigos da pasta de configuração são importados automaticamente;
+  se o destino ficar indisponível, o app usa o diretório padrão.
 - **Seletor de foto do perfil**: “Escolher foto” agora abre um diálogo próprio,
   no mesmo padrão visual do seletor de pastas, com locais (Imagens, Início,
   Documentos, Downloads e unidades), navegação por caminho, grade de
@@ -182,7 +192,7 @@ Grava `diagnostico-diskpilot.txt` com Python, PySide6, versão do Qt, tela,
 py -c "from pathlib import Path; [print(p.name, len(''.join(p.read_text(encoding='ascii').split()))) for p in sorted(Path('.').glob('parte*.txt'))]"
 ```
 
-Esperado: `26173`, `26173`, `26173`, `26171`.
+Esperado: `27619`, `27619`, `27619`, `27618`.
 
 ## Observações
 
@@ -196,14 +206,14 @@ Esperado: `26173`, `26173`, `26173`, `26171`.
   interromper a análise.
 - O código é distribuído sob licença **MIT** (`LICENSE`); as dependências
   mantêm suas licenças — inventário em `THIRD-PARTY.md`.
-- Este pacote é gerado a partir do commit `v1.9.0` deste repositório.
+- Este pacote é gerado a partir do commit `v1.10.0` deste repositório.
 
 ## URL dos arquivos crus
 
 ```text
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.9.0/entrega/parte1.txt
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.9.0/entrega/parte2.txt
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.9.0/entrega/parte3.txt
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.9.0/entrega/parte4.txt
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.9.0/entrega/restaurar_diskpilot.py
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.10.0/entrega/parte1.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.10.0/entrega/parte2.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.10.0/entrega/parte3.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.10.0/entrega/parte4.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.10.0/entrega/restaurar_diskpilot.py
 ```

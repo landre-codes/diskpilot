@@ -43,6 +43,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "tree_path": False,
         "size_unit": "auto",
     },
+    "logging": {
+        "directory": "",
+    },
 }
 
 
