@@ -27,6 +27,7 @@ O projeto nasceu como um "Everything gerencial e enxuto": em vez de apenas local
 - Menu hambúrguer com animação de largura; o estado (expandido/recolhido) é persistido.
 - Logo da empresa no topo da barra lateral, com clique para alterar, menu de contexto para remover e **persistência local**.
 - Usuário atual no rodapé da barra lateral, com avatar gerado a partir das iniciais (ou foto importada). Fotos podem ser **arrastadas para reposicionar** e ajustadas com a **roda do mouse (zoom)**; o enquadramento é salvo localmente e aplicado na sidebar, nas configurações e na prévia do perfil.
+- **Seletor de foto próprio**: “Escolher foto” abre um diálogo no mesmo padrão visual do seletor de pastas, com locais (Imagens, Início, Documentos, Downloads, unidades), navegação por caminho, grade de miniaturas, prévia com dimensões/tamanho/data, caminho completo copiável e seleção por duplo clique/Enter. A rotação EXIF é respeitada nas miniaturas e na prévia.
 
 ### Painel
 - Mini-dashboard com espaço total, quantidade de arquivos/pastas, espaço liberável com segurança e valores em revisão.

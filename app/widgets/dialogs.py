@@ -3,11 +3,22 @@
 from __future__ import annotations
 
 import os
+from collections import deque
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QDir, QEvent, QModelIndex, QPoint, QStandardPaths, Qt, QTimer
-from PySide6.QtGui import QColor, QGuiApplication
+from PySide6.QtCore import (
+    QDir,
+    QEvent,
+    QModelIndex,
+    QPoint,
+    QSize,
+    QStandardPaths,
+    Qt,
+    QTimer,
+)
+from PySide6.QtGui import QColor, QGuiApplication, QIcon, QImageReader, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -19,6 +30,7 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QLineEdit,
+    QListView,
     QListWidget,
     QListWidgetItem,
     QMenu,
@@ -31,7 +43,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..config import AppConfig
-from ..icons import avatar_pixmap, icon
+from ..icons import avatar_pixmap, icon, rounded_pixmap
 from ..services.exporter import (
     default_export_path,
     write_csv,
@@ -43,13 +55,14 @@ from ..theme import get_theme
 from ..utils import (
     avatar_photo,
     format_bytes,
+    format_datetime,
     normalize_path,
-    open_file_dialog,
     open_in_explorer,
     resolve_network_path,
     save_file_dialog,
 )
 from .buttons import ActionButton, IconButton, SelectButton
+from .common import ElidedLabel
 
 
 class _DialogHeader(QFrame):
@@ -964,6 +977,500 @@ class ConfirmDialog(SheetDialog):
         self.footer.addWidget(confirm)
 
 
+_AVATAR_EXTENSIONS = {
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".jfif",
+    ".webp",
+    ".bmp",
+    ".gif",
+    ".svg",
+    ".svgz",
+    ".tif",
+    ".tiff",
+}
+_MAX_IMAGE_ITEMS = 4000
+_PLACE_KIND_ROLE = Qt.UserRole + 1
+
+
+def _display_dimensions(path: str, mtime: float) -> QSize:
+    """Dimensões exibidas, trocando eixos quando o EXIF gira a foto."""
+    try:
+        raw = QImageReader(path).size()
+        if not raw.isValid():
+            return QSize()
+        thumb = _thumbnail_pixmap(path, mtime, 112)
+        if thumb.isNull():
+            return raw
+        raw_landscape = raw.width() >= raw.height()
+        thumb_landscape = thumb.width() >= thumb.height()
+        if raw_landscape != thumb_landscape:
+            return QSize(raw.height(), raw.width())
+        return raw
+    except Exception:
+        return QSize()
+
+
+@lru_cache(maxsize=384)
+def _thumbnail_pixmap(path: str, mtime: float, box: int) -> QPixmap:
+    """Miniatura com rotação EXIF e escala preservada, sem carregar tudo."""
+    try:
+        reader = QImageReader(path)
+        reader.setAutoTransform(True)
+        size = reader.size()
+        if not size.isValid() or size.width() <= 0 or size.height() <= 0:
+            return QPixmap()
+        scaled = size.scaled(QSize(box, box), Qt.KeepAspectRatio)
+        if scaled.width() <= 0 or scaled.height() <= 0:
+            return QPixmap()
+        reader.setScaledSize(scaled)
+        image = reader.read()
+        if image.isNull():
+            return QPixmap()
+        return QPixmap.fromImage(image)
+    except Exception:
+        return QPixmap()
+
+
+class ImagePickerDialog(SheetDialog):
+    """Seletor de imagens com miniaturas, locais e prévia."""
+
+    def __init__(self, parent: QWidget | None, start_path: str = "") -> None:
+        super().__init__(
+            parent,
+            "Escolher foto do perfil",
+            "Navegue pelas pastas, confira a prévia e escolha a imagem. "
+            "O enquadramento é ajustado na tela do perfil.",
+            1040,
+            650,
+        )
+        self.selected_path = ""
+        self._current = ""
+        self._initial_file = start_path if start_path and Path(start_path).is_file() else ""
+        self._thumb_box = 112
+        self._thumb_queue: deque[tuple[QListWidgetItem, str, float]] = deque()
+        self._thumb_timer = QTimer(self)
+        self._thumb_timer.setInterval(12)
+        self._thumb_timer.timeout.connect(self._load_thumbnails)
+
+        work = QHBoxLayout()
+        work.setSpacing(14)
+        self.body.addLayout(work, 1)
+
+        # Atalhos ---------------------------------------------------------
+        left = QVBoxLayout()
+        left.setSpacing(6)
+        left_title = QLabel("LOCAIS")
+        left_title.setObjectName("Eyebrow")
+        left.addWidget(left_title)
+        self.places = QListWidget(self)
+        self.places.setObjectName("QuickPlaces")
+        self.places.setFixedWidth(220)
+        self.places.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        left.addWidget(self.places, 1)
+        work.addLayout(left)
+
+        # Navegador e grade ----------------------------------------------
+        right = QVBoxLayout()
+        right.setSpacing(9)
+        nav = QHBoxLayout()
+        nav.setSpacing(6)
+        self.up_btn = IconButton("arrow-up", "Subir um nível", self, 17, 32, "primary")
+        self.up_btn.clicked.connect(self._go_up)
+        nav.addWidget(self.up_btn)
+        self.path_edit = QLineEdit(self)
+        self.path_edit.setPlaceholderText("Caminho da pasta")
+        self._path_action = self.path_edit.addAction(
+            icon("folder-open-outline", get_theme().color("muted"), 16),
+            QLineEdit.LeadingPosition,
+        )
+        self.path_edit.returnPressed.connect(self._go_typed)
+        nav.addWidget(self.path_edit, 1)
+        go = ActionButton("Ir", "arrow-right", "soft", self, 16)
+        go.clicked.connect(self._go_typed)
+        nav.addWidget(go)
+        refresh = IconButton("refresh", "Atualizar pasta", self, 15, 28, "primary")
+        refresh.clicked.connect(self._reload)
+        nav.addWidget(refresh)
+        right.addLayout(nav)
+
+        main = QHBoxLayout()
+        main.setSpacing(12)
+        self.grid = QListWidget(self)
+        self.grid.setObjectName("ImageGrid")
+        self.grid.setViewMode(QListView.IconMode)
+        self.grid.setResizeMode(QListView.Adjust)
+        self.grid.setMovement(QListView.Static)
+        self.grid.setFlow(QListView.LeftToRight)
+        self.grid.setWrapping(True)
+        self.grid.setSpacing(8)
+        self.grid.setUniformItemSizes(True)
+        self.grid.setIconSize(QSize(112, 112))
+        self.grid.setGridSize(QSize(142, 148))
+        self.grid.setWordWrap(False)
+        self.grid.setTextElideMode(Qt.ElideMiddle)
+        self.grid.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.grid.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.grid.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+        self.grid.currentItemChanged.connect(self._update_preview)
+        self.grid.itemActivated.connect(self._activate_item)
+        main.addWidget(self.grid, 1)
+
+        panel = QFrame(self)
+        panel.setObjectName("ImagePreview")
+        panel.setFixedWidth(268)
+        pv = QVBoxLayout(panel)
+        pv.setContentsMargins(14, 14, 14, 14)
+        pv.setSpacing(8)
+        cap = QLabel("PRÉVIA")
+        cap.setObjectName("Eyebrow")
+        pv.addWidget(cap)
+        self.preview = QLabel("Selecione uma foto\npara ver a prévia")
+        self.preview.setObjectName("ImagePreviewCanvas")
+        self.preview.setAlignment(Qt.AlignCenter)
+        self.preview.setWordWrap(True)
+        self.preview.setFixedSize(238, 210)
+        pv.addWidget(self.preview, 0, Qt.AlignHCenter)
+        self.preview_name = ElidedLabel("Nenhuma foto selecionada")
+        self.preview_name.setObjectName("SectionTitle")
+        self.preview_name.setAlignment(Qt.AlignCenter)
+        self.preview_name.setMaximumWidth(238)
+        pv.addWidget(self.preview_name)
+        self.preview_details = QLabel("")
+        self.preview_details.setObjectName("Muted")
+        self.preview_details.setAlignment(Qt.AlignCenter)
+        self.preview_details.setWordWrap(True)
+        pv.addWidget(self.preview_details)
+        pv.addStretch(1)
+        hint = QLabel("Dica: duplo clique ou Enter escolhe a foto.")
+        hint.setObjectName("Faint")
+        hint.setWordWrap(True)
+        pv.addWidget(hint)
+        main.addWidget(panel, 0)
+        right.addLayout(main, 1)
+
+        self.empty_label = QLabel("Nenhuma imagem nesta pasta.")
+        self.empty_label.setObjectName("Muted")
+        self.empty_label.setVisible(False)
+        right.addWidget(self.empty_label)
+
+        self.error = QLabel("")
+        self.error.setObjectName("BadgeDanger")
+        self.error.setWordWrap(True)
+        self.error.setVisible(False)
+        right.addWidget(self.error)
+
+        path_caption = QLabel("CAMINHO COMPLETO")
+        path_caption.setObjectName("Eyebrow")
+        right.addWidget(path_caption)
+        path_row = QHBoxLayout()
+        path_row.setSpacing(6)
+        self.full_path_label = QLabel("")
+        self.full_path_label.setObjectName("PathText")
+        self.full_path_label.setWordWrap(True)
+        self.full_path_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        path_row.addWidget(self.full_path_label, 1)
+        self.copy_path_btn = IconButton(
+            "content-copy", "Copiar caminho completo", self, 15, 28, "primary"
+        )
+        self.copy_path_btn.clicked.connect(self._copy_full_path)
+        path_row.addWidget(self.copy_path_btn, 0, Qt.AlignTop)
+        right.addLayout(path_row)
+        work.addLayout(right, 1)
+
+        self.selection_label = QLabel("Nenhuma foto selecionada")
+        self.selection_label.setObjectName("Muted")
+        self.footer.addWidget(self.selection_label)
+        self.footer.addStretch(1)
+        cancel = ActionButton("Cancelar", "", "ghost", self)
+        cancel.clicked.connect(self.reject)
+        self.footer.addWidget(cancel)
+        self.choose_btn = ActionButton(
+            "Escolher foto", "check-circle-outline", "primary", self
+        )
+        self.choose_btn.setEnabled(False)
+        self.choose_btn.clicked.connect(self._accept_selected)
+        self.footer.addWidget(self.choose_btn)
+
+        self._populate_places()
+        self.places.itemClicked.connect(self._place_clicked)
+        get_theme().changed.connect(self._sync_icons)
+        self._sync_icons()
+
+        start = start_path
+        if start and Path(start).is_file():
+            start = str(Path(start).parent)
+        if not start or not Path(start).is_dir():
+            start = QStandardPaths.writableLocation(
+                QStandardPaths.PicturesLocation
+            )
+        if not start or not Path(start).is_dir():
+            start = str(Path.home())
+        self._navigate(start)
+
+    # ------------------------------------------------------------ localidades
+    def _populate_places(self) -> None:
+        self.places.clear()
+        theme = get_theme()
+        locations = [
+            ("Imagens", QStandardPaths.PicturesLocation, "image"),
+            ("Início", QStandardPaths.HomeLocation, "folder"),
+            ("Área de trabalho", QStandardPaths.DesktopLocation, "folder"),
+            ("Documentos", QStandardPaths.DocumentsLocation, "folder"),
+            ("Downloads", QStandardPaths.DownloadLocation, "folder"),
+        ]
+        seen: set[str] = set()
+        for label, location, kind in locations:
+            path = QStandardPaths.writableLocation(location)
+            if not path or not Path(path).exists():
+                continue
+            key = os.path.normcase(path)
+            if key in seen:
+                continue
+            seen.add(key)
+            item = QListWidgetItem(icon("folder", theme.color("muted"), 16), label)
+            item.setToolTip(path)
+            item.setData(Qt.UserRole, path)
+            item.setData(_PLACE_KIND_ROLE, kind)
+            self.places.addItem(item)
+        for drive in QDir.drives():
+            path = drive.absolutePath()
+            resolved = resolve_network_path(path)
+            key = os.path.normcase(resolved)
+            if key in seen:
+                continue
+            seen.add(key)
+            network = resolved.startswith("\\\\")
+            item = QListWidgetItem(
+                icon(
+                    "server-network" if network else "harddisk",
+                    theme.color("muted"),
+                    16,
+                ),
+                resolved if network else path,
+            )
+            item.setToolTip(resolved if network else path)
+            item.setData(Qt.UserRole, resolved)
+            item.setData(_PLACE_KIND_ROLE, "network" if network else "drive")
+            self.places.addItem(item)
+
+    def _place_clicked(self, item: QListWidgetItem) -> None:
+        path = item.data(Qt.UserRole)
+        if path:
+            self._navigate(str(path))
+
+    def _sync_icons(self, *_args: Any) -> None:
+        theme = get_theme()
+        self._path_action.setIcon(icon("folder-open-outline", theme.color("muted"), 16))
+        for i in range(self.places.count()):
+            item = self.places.item(i)
+            path = str(item.data(Qt.UserRole) or "")
+            kind = str(item.data(_PLACE_KIND_ROLE) or "")
+            if kind == "image":
+                md = "image-multiple-outline"
+            elif kind == "network":
+                md = "server-network"
+            elif kind == "drive":
+                md = "harddisk"
+            else:
+                md = "folder"
+            item.setIcon(icon(md, theme.color("muted"), 16))
+            if os.path.normcase(path) == os.path.normcase(self._current):
+                self.places.setCurrentItem(item)
+
+    # ------------------------------------------------------------- navegação
+    def _navigate(self, path: str) -> None:
+        path = resolve_network_path(normalize_path(path))
+        if not Path(path).exists() or not Path(path).is_dir():
+            self._show_error(f"Pasta não encontrada: {path}")
+            return
+        self._current = path
+        self.path_edit.setText(path)
+        self.path_edit.setToolTip(path)
+        self.up_btn.setEnabled(Path(path).parent != Path(path))
+        self.places.setCurrentItem(None)
+        for i in range(self.places.count()):
+            item = self.places.item(i)
+            if os.path.normcase(str(item.data(Qt.UserRole) or "")) == os.path.normcase(path):
+                self.places.setCurrentItem(item)
+                break
+        self._reload()
+
+    def _go_up(self) -> None:
+        parent = str(Path(self._current).parent)
+        if os.path.normcase(parent) != os.path.normcase(self._current):
+            self._navigate(parent)
+
+    def _go_typed(self) -> None:
+        self._navigate(self.path_edit.text().strip().strip('"'))
+
+    def _reload(self) -> None:
+        if not self._current or not Path(self._current).is_dir():
+            return
+        self._thumb_timer.stop()
+        self._thumb_queue.clear()
+        self.grid.clear()
+        self.selected_path = ""
+        self.error.setVisible(False)
+        self.full_path_label.setText(self._current)
+        self.full_path_label.setToolTip(self._current)
+        theme = get_theme()
+        folder_icon = icon("folder", theme.color("primary"), 96)
+        image_icon = icon("file-image-outline", theme.color("muted"), 96)
+        dirs: list[tuple[str, str]] = []
+        images: list[tuple[str, str, float]] = []
+        error = ""
+        try:
+            with os.scandir(self._current) as iterator:
+                for entry in iterator:
+                    try:
+                        if entry.is_symlink():
+                            continue
+                        if entry.is_dir(follow_symlinks=False):
+                            dirs.append((entry.name, entry.path))
+                        elif entry.is_file(follow_symlinks=False):
+                            suffix = os.path.splitext(entry.name)[1].lower()
+                            if suffix in _AVATAR_EXTENSIONS:
+                                stat = entry.stat(follow_symlinks=False)
+                                images.append((entry.name, entry.path, stat.st_mtime))
+                    except OSError:
+                        continue
+        except OSError as exc:
+            error = str(exc)
+        dirs.sort(key=lambda entry: entry[0].casefold())
+        images.sort(key=lambda entry: entry[0].casefold())
+        truncated = len(images) > _MAX_IMAGE_ITEMS
+        if truncated:
+            images = images[:_MAX_IMAGE_ITEMS]
+        for name, path in dirs:
+            item = QListWidgetItem(folder_icon, name)
+            item.setData(Qt.UserRole, path)
+            item.setData(Qt.UserRole + 2, True)
+            item.setToolTip(path)
+            self.grid.addItem(item)
+        selected_item: QListWidgetItem | None = None
+        for name, path, mtime in images:
+            item = QListWidgetItem(image_icon, name)
+            item.setData(Qt.UserRole, path)
+            item.setData(Qt.UserRole + 2, False)
+            item.setToolTip(path)
+            self.grid.addItem(item)
+            self._thumb_queue.append((item, path, mtime))
+            if self._initial_file and os.path.normcase(path) == os.path.normcase(
+                self._initial_file
+            ):
+                selected_item = item
+        self._initial_file = ""
+        if truncated:
+            self.empty_label.setText(
+                f"Mostrando as primeiras {_MAX_IMAGE_ITEMS} imagens desta pasta."
+            )
+            self.empty_label.setVisible(True)
+        elif not images:
+            self.empty_label.setText("Nenhuma imagem nesta pasta.")
+            self.empty_label.setVisible(True)
+        else:
+            self.empty_label.setVisible(False)
+        if error:
+            self._show_error(f"Não foi possível abrir a pasta: {error}")
+        if selected_item is not None:
+            self.grid.setCurrentItem(selected_item)
+            self.grid.scrollToItem(selected_item)
+        self._update_preview()
+        if self._thumb_queue:
+            self._thumb_timer.start(0)
+
+    def _show_error(self, message: str) -> None:
+        self.error.setText(message)
+        self.error.setVisible(True)
+
+    def _load_thumbnails(self) -> None:
+        for _ in range(6):
+            if not self._thumb_queue:
+                break
+            item, path, mtime = self._thumb_queue.popleft()
+            pixmap = _thumbnail_pixmap(path, mtime, self._thumb_box)
+            if not pixmap.isNull():
+                item.setIcon(QIcon(pixmap))
+        if self._thumb_queue:
+            self._thumb_timer.start(12)
+        else:
+            self._thumb_timer.stop()
+
+    # ------------------------------------------------------------- seleção
+    def _update_preview(self, *_args: Any) -> None:
+        item = self.grid.currentItem()
+        path = str(item.data(Qt.UserRole) or "") if item is not None else ""
+        is_dir = bool(item.data(Qt.UserRole + 2)) if item is not None else False
+        if not item or not path:
+            self.preview.clear()
+            self.preview.setText("Selecione uma foto\npara ver a prévia")
+            self.preview_name.setText("Nenhuma foto selecionada")
+            self.preview_details.setText("")
+            self.selection_label.setText("Nenhuma foto selecionada")
+            self.selected_path = ""
+            self.choose_btn.setEnabled(False)
+            return
+        self.full_path_label.setText(path)
+        self.full_path_label.setToolTip(path)
+        if is_dir:
+            self.preview.clear()
+            self.preview.setPixmap(
+                icon("folder", get_theme().color("muted"), 72).pixmap(72, 72)
+            )
+            self.preview_name.setText(Path(path).name)
+            self.preview_details.setText("Pasta · duplo clique para abrir")
+            self.selection_label.setText("Selecione uma imagem")
+            self.selected_path = ""
+            self.choose_btn.setEnabled(False)
+            return
+        self.preview.clear()
+        self.preview.setPixmap(rounded_pixmap(path, 210, 12))
+        try:
+            stat = Path(path).stat()
+            size = _display_dimensions(path, stat.st_mtime)
+            details = (
+                f"{size.width()} × {size.height()} px · "
+                f"{format_bytes(stat.st_size)} · {format_datetime(stat.st_mtime)}"
+            )
+        except OSError:
+            size = QImageReader(path).size()
+            details = f"{size.width()} × {size.height()} px"
+        self.preview_name.setText(Path(path).name)
+        self.preview_details.setText(details)
+        self.selection_label.setText("Foto selecionada")
+        self.selected_path = path
+        self.choose_btn.setEnabled(True)
+
+    def _activate_item(self, item: QListWidgetItem) -> None:
+        path = str(item.data(Qt.UserRole) or "")
+        if not path:
+            return
+        if bool(item.data(Qt.UserRole + 2)):
+            self._navigate(path)
+            return
+        self.grid.setCurrentItem(item)
+        self._update_preview()
+        self._accept_selected()
+
+    def _accept_selected(self) -> None:
+        if not self.selected_path:
+            return
+        self.accept()
+
+    def _copy_full_path(self) -> None:
+        text = self.full_path_label.text()
+        if not text:
+            return
+        QApplication.clipboard().setText(text)
+        QToolTip.showText(
+            self.copy_path_btn.mapToGlobal(self.copy_path_btn.rect().bottomLeft()),
+            "Caminho copiado.",
+            self.copy_path_btn,
+        )
+
+
 class AvatarEditor(QLabel):
     """Prévia circular com arraste para reposicionar e roda para zoom."""
 
@@ -1208,17 +1715,14 @@ class ProfileDialog(SheetDialog):
         self.avatar.reset_framing()
 
     def _choose_avatar(self) -> None:
-        path = open_file_dialog(
-            self,
-            "Escolher foto do perfil",
-            str(Path.home()),
-            "Imagens (*.png *.jpg *.jpeg *.webp *.bmp *.svg);;Todos os arquivos (*)",
-        )
-        if path:
+        picker = ImagePickerDialog(self, self._picked_avatar or "")
+        if picker.exec() == QDialog.Accepted and picker.selected_path:
+            path = picker.selected_path
             self._picked_avatar = path
             self._remove_avatar = False
             self.avatar.set_photo(path, 0.5, 0.3, 1.0, reset=True)
             self._refresh_avatar()
+        picker.deleteLater()
 
     def _clear_avatar(self) -> None:
         self._picked_avatar = None

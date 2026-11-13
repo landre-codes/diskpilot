@@ -531,6 +531,35 @@ QTreeView#FolderTree {
     border-radius: 10px;
 }
 QTreeView#FolderTree::item { min-height: 30px; }
+QListWidget#ImageGrid {
+    background: $surface;
+    border: 1px solid $border;
+    border-radius: 10px;
+    padding: 8px;
+}
+QListWidget#ImageGrid::item {
+    border: 1px solid transparent;
+    border-radius: 10px;
+    padding: 6px;
+    color: $muted;
+}
+QListWidget#ImageGrid::item:hover { background: $hover; color: $text; }
+QListWidget#ImageGrid::item:selected {
+    background: $primary_soft;
+    border: 1px solid $primary_soft_strong;
+    color: $primary;
+}
+QFrame#ImagePreview {
+    background: $surface;
+    border: 1px solid $border;
+    border-radius: 10px;
+}
+QLabel#ImagePreviewCanvas {
+    background: $surface_2;
+    border: 1px solid $border;
+    border-radius: 10px;
+    color: $faint;
+}
 QListWidget#QuickPlaces { background: transparent; border: none; border-radius: 0px; }
 QListWidget#QuickPlaces::item { min-height: 32px; color: $muted; }
 QListWidget#QuickPlaces::item:hover { background: $hover; color: $text; }
