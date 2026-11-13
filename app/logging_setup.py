@@ -11,7 +11,10 @@ import faulthandler
 import logging
 import logging.handlers
 import os
+import re
 import shutil
+import time
+from datetime import datetime
 from pathlib import Path
 
 from .config import AppConfig
@@ -22,6 +25,8 @@ CRASH_FILENAME = "diskpilot-crash.log"
 DEFAULT_DIR_NAME = ("DiskPilot", "logs")
 MAX_BYTES = 2_000_000
 BACKUP_COUNT = 3
+RETENTION_DAYS = 3
+_LOG_TS_RE = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}),\d+")
 
 _CRASH_FILE = None
 
@@ -111,6 +116,7 @@ def configure_logging(
             path = directory / LOG_FILENAME
             if directory == default_log_dir():
                 _import_legacy_logs(config, directory)
+            _trim_active_log(path)
             handler = logging.handlers.RotatingFileHandler(
                 path,
                 maxBytes=MAX_BYTES,
@@ -147,7 +153,73 @@ def configure_logging(
         root.addHandler(stream_handler)
 
     _enable_crash_log(selected_dir)
+    removed = prune_logs(config)
+    if removed:
+        logging.getLogger("diskpilot").info(
+            "logs com mais de %d dias removidos: %d", RETENTION_DAYS, removed
+        )
     return selected_dir
+
+
+def _trim_active_log(path: Path) -> None:
+    """Remove do log ativo as linhas mais antigas que a retenção."""
+    if not path.exists():
+        return
+    cutoff = time.time() - RETENTION_DAYS * 86_400
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as handle:
+            lines = handle.readlines()
+    except OSError:
+        return
+    kept: list[str] = []
+    keep_block = False
+    for line in lines:
+        match = _LOG_TS_RE.match(line)
+        if match:
+            try:
+                when = datetime.strptime(
+                    match.group(1), "%Y-%m-%d %H:%M:%S"
+                ).timestamp()
+            except ValueError:
+                when = cutoff
+            keep_block = when >= cutoff
+        if keep_block:
+            kept.append(line)
+    if len(kept) == len(lines):
+        return
+    temp = path.with_name(path.name + ".trim")
+    try:
+        temp.write_text("".join(kept), encoding="utf-8")
+        os.replace(temp, path)
+    except OSError:
+        try:
+            temp.unlink()
+        except OSError:
+            pass
+
+
+def prune_logs(config: AppConfig) -> int:
+    """Remove arquivos de log mais antigos que a retenção (3 dias)."""
+    directory = active_log_dir(config)
+    active = {
+        os.path.normcase(str(active_log_file(config))),
+        os.path.normcase(str(directory / CRASH_FILENAME)),
+    }
+    cutoff = time.time() - RETENTION_DAYS * 86_400
+    removed = 0
+    for pattern in (LOG_FILENAME + "*", CRASH_FILENAME + "*"):
+        for path in directory.glob(pattern):
+            if not path.is_file():
+                continue
+            if os.path.normcase(str(path)) in active:
+                continue
+            try:
+                if path.stat().st_mtime < cutoff:
+                    path.unlink()
+                    removed += 1
+            except OSError:
+                continue
+    return removed
 
 
 def _import_legacy_logs(config: AppConfig, destination: Path) -> None:
@@ -175,6 +247,13 @@ def _enable_crash_log(directory: Path) -> Path | None:
     path = directory / CRASH_FILENAME
     try:
         directory.mkdir(parents=True, exist_ok=True)
+        if path.exists():
+            try:
+                age = time.time() - path.stat().st_mtime
+                if age > RETENTION_DAYS * 86_400:
+                    path.write_text("", encoding="utf-8")
+            except OSError:
+                pass
         handle = open(path, "a", encoding="utf-8", buffering=1)
         faulthandler.enable(file=handle, all_threads=True)
     except Exception:

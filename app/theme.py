@@ -561,8 +561,8 @@ QLabel#ImagePreviewCanvas {
     color: $faint;
 }
 QPlainTextEdit#LogTerminal {
-    background: #0a0e12;
-    color: #d6e2e8;
+    background: #080c0f;
+    color: #7ee787;
     border: 1px solid $border_strong;
     border-radius: 10px;
     padding: 10px;

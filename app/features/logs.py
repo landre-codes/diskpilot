@@ -6,6 +6,7 @@ import os
 import platform
 import re
 import sys
+import time
 from pathlib import Path
 
 from PySide6.QtCore import QTimer, Qt, qVersion
@@ -35,6 +36,7 @@ from ..logging_setup import (
     default_log_dir,
     log_tail,
     migrate_logs,
+    prune_logs,
 )
 from ..utils import copy_to_clipboard, format_bytes, format_datetime, open_in_explorer
 from ..widgets.buttons import ActionButton, IconButton, SearchField, SelectButton
@@ -45,6 +47,42 @@ from .base import BasePage
 
 _RECORD_RE = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}")
 _LEVEL_RE = re.compile(r"\b(ERROR|CRITICAL|WARNING|WARN|INFO|DEBUG)\b")
+_ISO_PREFIX_RE = re.compile(
+    r"^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})(?:,\d+)?\s+(.*)$"
+)
+_LEVEL_ICONS = {
+    "INFO": "ℹ",
+    "WARNING": "⚠",
+    "WARN": "⚠",
+    "ERROR": "✖",
+    "CRITICAL": "✖",
+    "DEBUG": "·",
+}
+
+
+def _display_line(line: str, crash: bool = False) -> str:
+    """Formata a linha para o terminal sem alterar o arquivo original."""
+    if crash:
+        if line.startswith("Windows fatal exception"):
+            return "✖ " + line
+        if line.startswith("Thread 0x") or line.startswith("Current thread"):
+            return "▸ " + line
+        return "  " + line
+    match = _ISO_PREFIX_RE.match(line)
+    if not match:
+        return "  " + line
+    date = (
+        f"{match.group(3)}/{match.group(2)}/{match.group(1)} "
+        f"{match.group(4)}:{match.group(5)}:{match.group(6)}"
+    )
+    rest = match.group(7)
+    level = rest.split(" ", 1)[0]
+    icon = _LEVEL_ICONS.get(level, " ")
+    return f"{icon} {date} {rest}"
+
+
+def _display_text(text: str, crash: bool = False) -> str:
+    return "\n".join(_display_line(line, crash) for line in text.splitlines())
 
 
 class _TerminalHighlighter(QSyntaxHighlighter):
@@ -56,7 +94,7 @@ class _TerminalHighlighter(QSyntaxHighlighter):
         for names, color in (
             (("ERROR", "CRITICAL"), "#ff7b72"),
             (("WARNING", "WARN"), "#e3b341"),
-            (("INFO",), "#56d4dd"),
+            (("INFO",), "#7ee787"),
             (("DEBUG",), "#8b949e"),
         ):
             fmt = QTextCharFormat()
@@ -64,11 +102,21 @@ class _TerminalHighlighter(QSyntaxHighlighter):
             fmt.setFontWeight(QFont.Bold)
             for name in names:
                 self._formats[name] = fmt
+        self._icons = {
+            "✖": self._formats["ERROR"],
+            "⚠": self._formats["WARNING"],
+            "ℹ": self._formats["INFO"],
+            "·": self._formats["DEBUG"],
+        }
 
     def highlightBlock(self, text: str) -> None:  # noqa: N802
-        if text.startswith("Windows fatal exception"):
+        if "Windows fatal exception" in text:
             self.setFormat(0, len(text), self._formats["ERROR"])
             return
+        if text:
+            fmt = self._icons.get(text[0])
+            if fmt is not None:
+                self.setFormat(0, 1, fmt)
         for match in _LEVEL_RE.finditer(text):
             fmt = self._formats.get(match.group(1))
             if fmt is not None:
@@ -84,6 +132,7 @@ class LogsPage(BasePage):
     def __init__(self, state, parent=None) -> None:
         super().__init__(state, parent)
         self._last_signature: tuple[str, float, int] | None = None
+        self._last_prune = 0.0
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(14)
@@ -134,8 +183,9 @@ class LogsPage(BasePage):
         root.addWidget(path_card)
 
         hint = QLabel(
-            "Arquivos rotativos (2 MB × 3). A troca de pasta move o log e o "
-            "crash log atuais. Os logs contêm caminhos completos: revise antes de compartilhar."
+            "Arquivos rotativos (2 MB × 3) com retenção de 3 dias. A troca de "
+            "pasta move o log e o crash log atuais. Datas no formato dd/mm/aaaa. "
+            "Os logs contêm caminhos completos: revise antes de compartilhar."
         )
         hint.setObjectName("Faint")
         hint.setWordWrap(True)
@@ -248,7 +298,12 @@ class LogsPage(BasePage):
         if crash:
             if not query:
                 return lines
-            return [line for line in lines if query in line.casefold()]
+            return [
+                line
+                for line in lines
+                if query in line.casefold()
+                or query in _display_line(line, True).casefold()
+            ]
         level = self.level_btn.current()
         blocks: list[list[str]] = []
         current: list[str] = []
@@ -270,13 +325,19 @@ class LogsPage(BasePage):
             if not self._level_matches(block[0], level):
                 continue
             text = "\n".join(block)
-            if query and query not in text.casefold():
-                continue
+            if query:
+                displayed = "\n".join(_display_line(line) for line in block)
+                if query not in text.casefold() and query not in displayed.casefold():
+                    continue
             result.extend(block)
         return result
 
     # ------------------------------------------------------------- terminal
     def _refresh(self, force: bool = False) -> None:
+        now = time.time()
+        if now - self._last_prune > 3600:
+            self._last_prune = now
+            prune_logs(self.state.config)
         path = self._current_path()
         crash = self.file_btn.current() == "crash"
         try:
@@ -294,9 +355,10 @@ class LogsPage(BasePage):
         raw = log_tail(path, 8000)
         lines = raw.splitlines()
         shown = self._filter_lines(lines, crash)
+        displayed = [_display_line(line, crash) for line in shown]
         bar = self.terminal.verticalScrollBar()
         at_bottom = bar.value() >= max(0, bar.maximum() - 4)
-        self.terminal.setPlainText("\n".join(shown))
+        self.terminal.setPlainText("\n".join(displayed))
         if at_bottom or force:
             bar.setValue(bar.maximum())
 
@@ -356,6 +418,9 @@ class LogsPage(BasePage):
             )
         else:
             scan = "(nenhuma análise nesta sessão)"
+        tail = _display_text(
+            log_tail(path, 200), self.file_btn.current() == "crash"
+        ).rstrip()
         lines = [
             f"{APP_NAME} — diagnóstico",
             f"Versão: {__version__}",
@@ -370,7 +435,7 @@ class LogsPage(BasePage):
             f"Última análise: {scan}",
             "",
             f"--- últimas linhas ({path.name}) ---",
-            log_tail(path, 200).rstrip(),
+            tail,
         ]
         copy_to_clipboard("\n".join(lines))
         self.toast("Diagnóstico copiado com ambiente e últimas linhas.", "success")

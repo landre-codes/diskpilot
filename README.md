@@ -74,11 +74,11 @@ O projeto nasceu como um "Everything gerencial e enxuto": em vez de apenas local
 - Nenhuma exclusão automática: o texto de cada card explica o risco e o que verificar antes.
 
 ### Logs e diagnóstico
-- Página **Logs** com terminal monoespaçado, cores por nível (`INFO`, `WARNING`, `ERROR`) e texto selecionável.
-- Alternância entre o log do aplicativo e o **crash log**, filtro por nível, busca por texto e acompanhamento em tempo real.
+- Página **Logs** com terminal monoespaçado em **verde**, ícones por nível (`ℹ` INFO, `⚠` WARNING, `✖` ERROR), datas no formato **dd/mm/aaaa HH:MM:SS** e texto selecionável.
+- Alternância entre o log do aplicativo e o **crash log**, filtro por nível, busca por texto (inclusive pela data brasileira) e acompanhamento em tempo real.
 - Botões **Copiar terminal** e **Copiar diagnóstico** (versão, SO, Python, Qt, raízes, última análise e últimas linhas).
 - Pasta padrão `~/DiskPilot/logs`; **Alterar pasta…** migra o log e o crash log atuais sem reiniciar, e **Padrão** volta ao diretório do usuário.
-- Arquivos rotativos de 2 MB com 3 backups; logs antigos da pasta de configuração são importados no primeiro uso do novo padrão.
+- Arquivos rotativos de 2 MB com 3 backups e **retenção máxima de 3 dias** no conteúdo e nos backups; logs antigos da pasta de configuração são importados no primeiro uso do novo padrão.
 
 ### Configurações
 - Troca de tema em tempo real e persistência.
@@ -355,7 +355,8 @@ class ClientesPage(BasePage):
 - A árvore desenha as **setas de expandir/recolher** e as guias de hierarquia em `drawBranches`, com a cor do tema, porque o QSS de `::branch` desliga o indicador nativo. O clique na seta alterna o nó.
 - A árvore aceita `Ctrl+C` e menu de contexto para copiar **linha(s)** (Nome, Tamanho, %, Itens, Modificado, Autor, Tipo e Caminho, separados por tabulação), **tamanho** ou **caminho**. A seleção múltipla copia todas as linhas escolhidas.
 - O autor é lido pelo Windows Property System (`System.Author`/`PKEY_Author`) em um pool de threads, com cache por caminho; há fallback para `docProps/core.xml` (OOXML) e `/Author` (PDF) quando o Property System não responde. Falhas de rede/permissão e arquivos sem metadados aparecem como `—`.
-- O logging é centralizado em `app/logging_setup.py`: `RotatingFileHandler` de 2 MB com 3 backups em `~/DiskPilot/logs`, crash log via `faulthandler`, importação dos logs antigos da pasta de configuração e migração em tempo de execução sem reiniciar. Se a pasta escolhida ficar indisponível, o app usa o diretório padrão e continua registrando.
+- O logging é centralizado em `app/logging_setup.py`: `RotatingFileHandler` de 2 MB com 3 backups em `~/DiskPilot/logs`, retenção de 3 dias (linhas antigas do log ativo e arquivos rotacionados), crash log via `faulthandler`, importação dos logs antigos da pasta de configuração e migração em tempo de execução sem reiniciar. Se a pasta escolhida ficar indisponível, o app usa o diretório padrão e continua registrando.
+- `KeyboardInterrupt` (Ctrl+C no console/IDE) é registrado como interrupção manual em `INFO`, e não como `CRITICAL` com stack trace. O hook de exceções só trata erros reais como críticos.
 - Textos de `QLineEdit`, `QComboBox` e `QAbstractSpinBox` usam o token `input_text`: claro no tema escuro e **azul-escuro** (`#06232b`) no tema claro. A cor também é fixada nos estados `:hover` e `:focus`, e o placeholder usa o token `placeholder` (mais escuro no tema claro), garantindo contraste.
 - Os estados de hover usam os tokens `hover`/`hover_border`, com contraste próprio em cada tema (no claro, `#d8ebef`), em vez de reutilizar `surface_2`/`surface_3`. Isso inclui os hovers desenhados à mão das abas verticais, do logo e do cartão do usuário — antes o `surface_2` ficava quase invisível sobre o `sidebar` no tema claro.
 - A barra de título é **responsiva e sem moldura**: o título e o slogan usam rótulos que elidem (reticências) em vez de empurrar o layout. O slogan "Gestor de espaço" fica centralizado no meio exato da barra e não intercepta cliques — arraste e duplo clique funcionam em toda a barra.

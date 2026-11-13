@@ -29,7 +29,13 @@ def _configure_logging(config: AppConfig) -> None:
 
 def _install_exception_hook() -> None:
     def hook(exc_type, exc_value, exc_tb):
-        logging.critical("exceção não tratada", exc_info=(exc_type, exc_value, exc_tb))
+        logger = logging.getLogger("diskpilot")
+        if issubclass(exc_type, KeyboardInterrupt):
+            logger.info("interrupção manual (Ctrl+C) recebida")
+            return
+        logger.critical(
+            "exceção não tratada", exc_info=(exc_type, exc_value, exc_tb)
+        )
         traceback.print_exception(exc_type, exc_value, exc_tb)
 
     sys.excepthook = hook
