@@ -261,6 +261,7 @@ class FolderPickerDialog(SheetDialog):
         right.addLayout(nav)
 
         self.model = QFileSystemModel(self)
+        self.model.setOption(QFileSystemModel.Option.DontWatchForChanges, True)
         self.model.setFilter(
             QDir.AllDirs | QDir.NoDotAndDotDot | QDir.Drives | QDir.Hidden
         )
@@ -328,14 +329,28 @@ class FolderPickerDialog(SheetDialog):
         self.add_btn.clicked.connect(self.accept)
         self.footer.addWidget(self.add_btn)
 
-        self._populate_places()
         self.places.itemClicked.connect(self._place_clicked)
-        self._navigate(self._current)
         self.tree.selectionModel().selectionChanged.connect(self._update_selection_label)
         get_theme().changed.connect(self._sync_icons)
         self._sync_icons()
+        self.path_edit.setText(self._current)
+        self.path_edit.setToolTip(self._current)
+        self.up_btn.setEnabled(False)
+        self.selection_label.setText("Carregando pastas…")
+        # A janela aparece primeiro; a enumeração de unidades e a primeira
+        # navegação podem tocar a rede e não devem atrasar o diálogo.
+        QTimer.singleShot(0, self._initial_load)
 
     # ------------------------------------------------------------ localidades
+    def _initial_load(self) -> None:
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            self._populate_places()
+            self._navigate(self._current)
+        finally:
+            QApplication.restoreOverrideCursor()
+        self._sync_icons()
+
     def _populate_places(self) -> None:
         self.places.clear()
         theme = get_theme()
@@ -367,7 +382,7 @@ class FolderPickerDialog(SheetDialog):
                 self.places.addItem(item)
         for drive in QDir.drives():
             path = drive.absolutePath()
-            resolved = resolve_network_path(path)
+            resolved = resolve_network_path(path, verify=False)
             key = os.path.normcase(resolved)
             if key in seen:
                 continue
@@ -1412,7 +1427,7 @@ class ImagePickerDialog(SheetDialog):
             self.places.addItem(item)
         for drive in QDir.drives():
             path = drive.absolutePath()
-            resolved = resolve_network_path(path)
+            resolved = resolve_network_path(path, verify=False)
             key = os.path.normcase(resolved)
             if key in seen:
                 continue

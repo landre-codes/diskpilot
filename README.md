@@ -70,6 +70,7 @@ O projeto nasceu como um "Everything gerencial e enxuto": em vez de apenas local
 - Arquivos grandes sem alteração há mais de um ano.
 - Possíveis duplicatas por **nome + tamanho**, sem ler o conteúdo dos arquivos. Os mais pesados aparecem primeiro, o que já permite liberar espaço com uma revisão manual.
 - A página de recomendações reutiliza os cards já montados ao navegar; não refaz a análise nem consulta o disco para decidir ícones. Isso evita travamentos em caminhos de rede.
+- “Adicionar pastas” abre o diálogo imediatamente: a enumeração de unidades e a primeira navegação rodam depois do `show` (com cursor de espera). Unidades mapeadas são resolvidas sem `os.path.isdir` no UNC e o `QFileSystemModel` não usa watchers nativos, reduzindo o atraso em shares de rede.
 - Arquivos compactados muito grandes e arquivos temporários/backups.
 - Caminhos reais, botão para abrir o local e cópia de todos os caminhos para compartilhar com a equipe.
 - Nenhuma exclusão automática: o texto de cada card explica o risco e o que verificar antes.
@@ -362,6 +363,7 @@ class ClientesPage(BasePage):
 - Os estados de hover usam os tokens `hover`/`hover_border`, com contraste próprio em cada tema (no claro, `#d8ebef`), em vez de reutilizar `surface_2`/`surface_3`. Isso inclui os hovers desenhados à mão das abas verticais e do cartão do usuário — antes o `surface_2` ficava quase invisível sobre o `sidebar` no tema claro.
 - O título de `PageHeader` usa `ElidedLabel`: em janelas estreitas ele elide em vez de empurrar/cortar os botões de ação do cabeçalho.
 - A página de recomendações não refaz a análise ao ser aberta: os cards são atualizados pelos sinais de varredura e a criação não faz `os.path.isdir` por caminho. Antes, cada navegação recriava os cards e consultava até 60 caminhos por sugestão, o que congelava a UI em shares de rede.
+- O seletor de pastas usa `QFileSystemModel` com `DontWatchForChanges` e adia `_populate_places`/`_navigate` para depois do `show`; a janela aparece antes de qualquer varredura de unidade. A resolução de UNC para a lista de locais não verifica `isdir`, então unidades de rede desconectadas não bloqueiam a abertura.
 - O seletor de foto usa miniaturas e prévias decodificadas no tamanho de exibição (com cache), em vez de carregar a imagem inteira; a atualização automática do terminal pausa enquanto há texto selecionado para não atrapalhar a cópia.
 - `log_tail` lê o arquivo de trás para frente em blocos, então um crash log grande não precisa ser carregado inteiro na memória.
 - A barra de título é **responsiva e sem moldura**: o título e o slogan usam rótulos que elidem (reticências) em vez de empurrar o layout. O slogan "Gestor de espaço" fica centralizado no meio exato da barra e não intercepta cliques — arraste e duplo clique funcionam em toda a barra.

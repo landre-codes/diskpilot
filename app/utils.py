@@ -89,8 +89,12 @@ def normalize_path(path: str) -> str:
     return os.path.abspath(os.path.expanduser(os.path.normpath(path)))
 
 
-def resolve_network_path(path: str) -> str:
-    """Converte uma unidade mapeada (W:\\...) no caminho UNC equivalente."""
+def resolve_network_path(path: str, verify: bool = True) -> str:
+    """Converte uma unidade mapeada (W:\\...) no caminho UNC equivalente.
+
+    ``verify=False`` evita o ``isdir`` no UNC, útil ao montar listas de
+    unidades onde uma verificação de rede bloquearia a abertura do diálogo.
+    """
     text = str(path)
     if len(text) < 2 or text[1] != ":":
         return text
@@ -107,7 +111,7 @@ def resolve_network_path(path: str) -> str:
         unc = device.rstrip("\\/")
         suffix = text[2:].lstrip("\\/")
         candidate = f"{unc}\\{suffix}" if suffix else unc
-        if os.path.isdir(candidate):
+        if not verify or os.path.isdir(candidate):
             return candidate
     except Exception:
         pass

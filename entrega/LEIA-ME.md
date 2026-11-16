@@ -1,10 +1,10 @@
-# DiskPilot 1.13.2 — pacote de transporte em texto
+# DiskPilot 1.13.3 — pacote de transporte em texto
 
 Esta pasta existe para levar o projeto para um ambiente onde **só é possível
 copiar texto** (sem clone, sem ZIP, sem download de release).
 
 O conteúdo não é o código-fonte legível: é o projeto inteiro compactado
-(`tar.xz`, 90.616 bytes) e codificado em **Base85**, dividido em 4 partes de
+(`tar.xz`, 91.000 bytes) e codificado em **Base85**, dividido em 4 partes de
 texto ASCII. O script `restaurar_diskpilot.py` remonta o arquivo, confere o
 SHA-256 e extrai a pasta `DiskPilot/`.
 
@@ -12,15 +12,15 @@ SHA-256 e extrai a pasta `DiskPilot/`.
 
 | Arquivo | Bytes | SHA-256 (sem espaços/quebras) |
 |---|---|---|
-| `parte1.txt` | 28.613 | `4a38c0b4090b0160a10ebbbe7559acb0cbe89885b80b0f39e8e603c8c520d2ae` |
-| `parte2.txt` | 28.608 | `26d9a98da9a3c7183694982531e307290cae11a7ceecc2d49f288daab550aa95` |
-| `parte3.txt` | 28.618 | `9027dcf167ffc22ed8d0bda71646ef13a55133a3754e116dab276cdc3a573e29` |
-| `parte4.txt` | 28.608 | `e05fad3492f1520117220118705237ddf720d6d777082b8796c74eed65b40400` |
+| `parte1.txt` | 28.729 | `635fc7d907c3b425e983f22fbe14e1b94bafc0aee52a0187da0b615bcbeef4b7` |
+| `parte2.txt` | 28.729 | `f6be6282b01b5f643c6de076916a709954aa155083d4d9d1ebd7ea95f8fc256d` |
+| `parte3.txt` | 28.729 | `d74b3abde5405d9227e2e86b03e4209f6b05a7f67b48697037a4326d97884d14` |
+| `parte4.txt` | 28.722 | `fc42ff9dbb38b5fe0b82ec7577cf541a3962751e0903747caa9553a1317774c4` |
 
 SHA-256 do `tar.xz` reconstruído (verificado pelo script):
 
 ```text
-19e737f9eef77a9d363801fcbb82e237b1e583d58471b660f71a11ade47a5733
+154b4918b2f8ef6a57b06f15b85e25d6e6c772b6799e2275e42c68a94f75f102
 ```
 
 ## Como usar
@@ -45,11 +45,16 @@ SHA-256 do `tar.xz` reconstruído (verificado pelo script):
 5. Confirme no `diskpilot.log`:
 
    ```text
-   iniciando DiskPilot 1.13.2
+   iniciando DiskPilot 1.13.3
    ```
 
 ## Novidades desta versão
 
+- **“Adicionar pastas” abre imediatamente**: a enumeração de unidades e a
+  primeira navegação são adiadas para depois da janela aparecer, com cursor de
+  espera. A resolução de unidades mapeadas para UNC não faz `isdir` na rede e o
+  `QFileSystemModel` não usa watchers nativos. O diálogo deixa de ficar vários
+  segundos invisível antes de responder.
 - **Navegação para Recomendações sem travamento**: a página não refaz a
   análise ao abrir. Os cards já são atualizados pelos sinais da varredura, e a
   montagem não consulta mais `os.path.isdir` para cada caminho. Antes, cada
@@ -222,7 +227,7 @@ Grava `diagnostico-diskpilot.txt` com Python, PySide6, versão do Qt, tela,
 py -c "from pathlib import Path; [print(p.name, len(''.join(p.read_text(encoding='ascii').split()))) for p in sorted(Path('.').glob('parte*.txt'))]"
 ```
 
-Esperado: `28318`, `28318`, `28318`, `28316`.
+Esperado: `28438`, `28438`, `28438`, `28436`.
 
 ## Observações
 
@@ -238,14 +243,14 @@ Esperado: `28318`, `28318`, `28318`, `28316`.
   interromper a análise.
 - O código é distribuído sob licença **MIT** (`LICENSE`); as dependências
   mantêm suas licenças — inventário em `THIRD-PARTY.md`.
-- Este pacote é gerado a partir do commit `v1.13.2` deste repositório.
+- Este pacote é gerado a partir do commit `v1.13.3` deste repositório.
 
 ## URL dos arquivos crus
 
 ```text
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.13.2/entrega/parte1.txt
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.13.2/entrega/parte2.txt
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.13.2/entrega/parte3.txt
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.13.2/entrega/parte4.txt
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.13.2/entrega/restaurar_diskpilot.py
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.13.3/entrega/parte1.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.13.3/entrega/parte2.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.13.3/entrega/parte3.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.13.3/entrega/parte4.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.13.3/entrega/restaurar_diskpilot.py
 ```
