@@ -9,8 +9,8 @@ from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import (
+    QAbstractListModel,
     QDir,
-    QEvent,
     QModelIndex,
     QObject,
     QPoint,
@@ -36,7 +36,6 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
     QDialog,
-    QFileSystemModel,
     QFrame,
     QGraphicsDropShadowEffect,
     QHBoxLayout,
@@ -47,7 +46,6 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QToolTip,
-    QTreeView,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -195,8 +193,84 @@ class SheetDialog(QDialog):
         self.activateWindow()
 
 
+class _FolderModel(QAbstractListModel):
+    """Modelo leve: o QListView desenha só as linhas visíveis."""
+
+    def __init__(self, parent: QObject | None = None) -> None:
+        super().__init__(parent)
+        self._entries: list[tuple[str, str]] = []
+        self._icon = QIcon()
+
+    def set_entries(self, entries: list[tuple[str, str]]) -> None:
+        self.beginResetModel()
+        self._entries = list(entries)
+        self.endResetModel()
+
+    def set_icon(self, value: QIcon) -> None:
+        self._icon = value
+        if self._entries:
+            self.dataChanged.emit(
+                self.index(0, 0),
+                self.index(len(self._entries) - 1, 0),
+                [Qt.DecorationRole],
+            )
+
+    def path_at(self, row: int) -> str:
+        if 0 <= row < len(self._entries):
+            return self._entries[row][1]
+        return ""
+
+    def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:  # noqa: N802
+        return 0 if parent.isValid() else len(self._entries)
+
+    def data(self, index: QModelIndex, role: int = Qt.DisplayRole):
+        if not index.isValid() or index.row() >= len(self._entries):
+            return None
+        name, path = self._entries[index.row()]
+        if role == Qt.DisplayRole:
+            return name
+        if role == Qt.DecorationRole:
+            return self._icon
+        if role in (Qt.ToolTipRole, Qt.UserRole):
+            return path
+        return None
+
+
+class _FolderScanSignals(QObject):
+    loaded = Signal(int, list, str)
+
+
+class _FolderScanTask(QRunnable):
+    """Lista as subpastas fora da thread da interface."""
+
+    def __init__(
+        self, path: str, generation: int, signals: _FolderScanSignals
+    ) -> None:
+        super().__init__()
+        self.setAutoDelete(True)
+        self.path = path
+        self.generation = generation
+        self.signals = signals
+
+    def run(self) -> None:
+        entries: list[tuple[str, str]] = []
+        error = ""
+        try:
+            with os.scandir(self.path) as iterator:
+                for entry in iterator:
+                    try:
+                        if entry.is_dir():
+                            entries.append((entry.name, entry.path))
+                    except OSError:
+                        continue
+        except OSError as exc:
+            error = str(exc)
+        entries.sort(key=lambda item: item[0].casefold())
+        self.signals.loaded.emit(self.generation, entries, error)
+
+
 class FolderPickerDialog(SheetDialog):
-    """Seleção de uma ou várias pastas com navegação e atalhos."""
+    """Seleção de uma ou várias pastas, com lista carregada em segundo plano."""
 
     def __init__(
         self,
@@ -222,6 +296,13 @@ class FolderPickerDialog(SheetDialog):
         )
         if not self._current or not Path(self._current).exists():
             self._current = str(Path.home())
+        self._loading = False
+        self._folder_generation = 0
+        self._folder_model = _FolderModel(self)
+        self._folder_signals = _FolderScanSignals(self)
+        self._folder_signals.loaded.connect(self._folder_loaded)
+        self._folder_pool = QThreadPool(self)
+        self._folder_pool.setMaxThreadCount(2)
 
         work = QHBoxLayout()
         work.setSpacing(14)
@@ -260,30 +341,24 @@ class FolderPickerDialog(SheetDialog):
         nav.addWidget(go)
         right.addLayout(nav)
 
-        self.model = QFileSystemModel(self)
-        self.model.setOption(QFileSystemModel.Option.DontWatchForChanges, True)
-        self.model.setFilter(
-            QDir.AllDirs | QDir.NoDotAndDotDot | QDir.Drives | QDir.Hidden
-        )
-        self.model.setRootPath(QDir.rootPath())
-        self.tree = QTreeView(self)
-        self.tree.setObjectName("FolderTree")
-        self.tree.setModel(self.model)
-        self.tree.setHeaderHidden(True)
-        self.tree.setRootIsDecorated(False)
-        self.tree.setUniformRowHeights(True)
-        self.tree.setSelectionMode(
+        self.folder_list = QListView(self)
+        self.folder_list.setObjectName("FolderList")
+        self.folder_list.setModel(self._folder_model)
+        self.folder_list.setIconSize(QSize(18, 18))
+        self.folder_list.setUniformItemSizes(True)
+        self.folder_list.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+        self.folder_list.setSelectionMode(
             QAbstractItemView.SingleSelection
             if self._single
             else QAbstractItemView.ExtendedSelection
         )
-        self.tree.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.tree.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        for column in (1, 2, 3):
-            self.tree.setColumnHidden(column, True)
-        self.tree.setColumnWidth(0, 560)
-        self.tree.doubleClicked.connect(self._enter_index)
-        right.addWidget(self.tree, 1)
+        self.folder_list.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.folder_list.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.folder_list.doubleClicked.connect(self._enter_index)
+        self.folder_list.selectionModel().selectionChanged.connect(
+            self._update_selection_label
+        )
+        right.addWidget(self.folder_list, 1)
         self.full_path_caption = QLabel("CAMINHO COMPLETO")
         self.full_path_caption.setObjectName("Eyebrow")
         right.addWidget(self.full_path_caption)
@@ -301,7 +376,6 @@ class FolderPickerDialog(SheetDialog):
         self.copy_path_btn.clicked.connect(self._copy_full_path)
         path_row.addWidget(self.copy_path_btn, 0, Qt.AlignTop)
         right.addLayout(path_row)
-        self.tree.viewport().installEventFilter(self)
         hint = QLabel(
             "Dica: duplo clique abre uma pasta · use a pasta atual ou selecione uma subpasta"
             if single
@@ -330,9 +404,10 @@ class FolderPickerDialog(SheetDialog):
         self.footer.addWidget(self.add_btn)
 
         self.places.itemClicked.connect(self._place_clicked)
-        self.tree.selectionModel().selectionChanged.connect(self._update_selection_label)
         get_theme().changed.connect(self._sync_icons)
+        get_theme().changed.connect(self._refresh_folder_icon)
         self._sync_icons()
+        self._refresh_folder_icon()
         self.path_edit.setText(self._current)
         self.path_edit.setToolTip(self._current)
         self.up_btn.setEnabled(False)
@@ -422,32 +497,55 @@ class FolderPickerDialog(SheetDialog):
                 self.places.setCurrentItem(item)
 
     # ------------------------------------------------------------- navegação
-    def eventFilter(self, obj, event) -> bool:  # noqa: N802
-        if obj is self.tree.viewport() and event.type() == QEvent.ToolTip:
-            index = self.tree.indexAt(event.pos())
-            if index.isValid():
-                path = self.model.filePath(index)
-                if path:
-                    QToolTip.showText(event.globalPos(), path, self.tree)
-                    return True
-        return super().eventFilter(obj, event)
-
     def _navigate(self, path: str) -> None:
         path = resolve_network_path(normalize_path(path))
-        if not Path(path).exists() or not Path(path).is_dir():
+        if not path:
             return
         self._current = path
+        self._current_only = False
         self.path_edit.setText(path)
         self.path_edit.setToolTip(path)
         if hasattr(self, "add_current_btn"):
             self.add_current_btn.setToolTip(f"Adicionar a pasta exibida: {path}")
-        index = self.model.index(path)
-        if index.isValid():
-            self.tree.setRootIndex(index)
-            self.tree.clearSelection()
-            self._update_selection_label()
-        self._update_full_path()
         self.up_btn.setEnabled(Path(path).parent != Path(path))
+        self._sync_icons()
+        self._update_full_path()
+        self._start_list_load(path)
+
+    def _refresh_folder_icon(self, *_args: Any) -> None:
+        self._folder_model.set_icon(
+            icon("folder", get_theme().color("primary"), 18)
+        )
+
+    def _start_list_load(self, path: str) -> None:
+        self._folder_generation += 1
+        generation = self._folder_generation
+        self._loading = True
+        self._folder_model.set_entries([])
+        self.selection_label.setText("Carregando pastas…")
+        self.add_btn.setEnabled(False)
+        self._folder_pool.start(
+            _FolderScanTask(path, generation, self._folder_signals)
+        )
+
+    def _folder_loaded(
+        self, generation: int, entries: list, error: str
+    ) -> None:
+        if generation != self._folder_generation:
+            return
+        self._loading = False
+        if error:
+            self.selection_label.setText("Sem acesso a esta pasta")
+            self.selection_label.setToolTip(error)
+            return
+        self.selection_label.setToolTip("")
+        self._folder_model.set_entries(list(entries))
+        if not entries:
+            self.selection_label.setText("Nenhuma subpasta")
+            self.add_btn.setEnabled(False)
+            self._update_full_path()
+            return
+        self._update_selection_label()
 
     def _go_up(self) -> None:
         parent = str(Path(self._current).parent)
@@ -458,21 +556,20 @@ class FolderPickerDialog(SheetDialog):
         self._navigate(self.path_edit.text().strip().strip('"'))
 
     def _enter_index(self, index: QModelIndex) -> None:
-        path = self.model.filePath(index)
-        if Path(path).is_dir():
+        path = self._folder_model.path_at(index.row())
+        if path:
             self._navigate(path)
 
     # ------------------------------------------------------------- seleção
     def _selected_rows(self) -> list[str]:
-        model = self.tree.selectionModel()
-        if model is None:
+        selection = self.folder_list.selectionModel()
+        if selection is None:
             return []
-        paths: list[str] = []
-        for index in model.selectedRows(0):
-            path = self.model.filePath(index)
-            if Path(path).is_dir():
-                paths.append(normalize_path(path))
-        return paths
+        return [
+            normalize_path(self._folder_model.path_at(index.row()))
+            for index in selection.selectedRows()
+            if self._folder_model.path_at(index.row())
+        ]
 
     def selected_paths(self) -> list[str]:
         if self._current_only:
@@ -519,6 +616,10 @@ class FolderPickerDialog(SheetDialog):
         )
 
     def _update_selection_label(self, *_args: Any) -> None:
+        if self._loading:
+            self.selection_label.setText("Carregando pastas…")
+            self.add_btn.setEnabled(False)
+            return
         count = len(self._selected_rows())
         if self._single:
             self.selection_label.setText(

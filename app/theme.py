@@ -531,6 +531,23 @@ QTreeView#FolderTree {
     border-radius: 10px;
 }
 QTreeView#FolderTree::item { min-height: 30px; }
+QListView#FolderList {
+    background: $surface;
+    border: 1px solid $border;
+    border-radius: 10px;
+    padding: 6px;
+}
+QListView#FolderList::item {
+    min-height: 28px;
+    border-radius: 6px;
+    color: $muted;
+    padding-left: 6px;
+}
+QListView#FolderList::item:hover { background: $hover; color: $text; }
+QListView#FolderList::item:selected {
+    background: $primary_soft;
+    color: $primary;
+}
 QListWidget#ImageGrid {
     background: $surface;
     border: 1px solid $border;
