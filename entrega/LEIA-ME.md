@@ -1,10 +1,10 @@
-# DiskPilot 1.12.0 — pacote de transporte em texto
+# DiskPilot 1.13.0 — pacote de transporte em texto
 
 Esta pasta existe para levar o projeto para um ambiente onde **só é possível
 copiar texto** (sem clone, sem ZIP, sem download de release).
 
 O conteúdo não é o código-fonte legível: é o projeto inteiro compactado
-(`tar.xz`, 89.160 bytes) e codificado em **Base85**, dividido em 4 partes de
+(`tar.xz`, 91.088 bytes) e codificado em **Base85**, dividido em 4 partes de
 texto ASCII. O script `restaurar_diskpilot.py` remonta o arquivo, confere o
 SHA-256 e extrai a pasta `DiskPilot/`.
 
@@ -12,15 +12,15 @@ SHA-256 e extrai a pasta `DiskPilot/`.
 
 | Arquivo | Bytes | SHA-256 (sem espaços/quebras) |
 |---|---|---|
-| `parte1.txt` | 28.156 | `3a664fc0fdd1d6818dfad979e9c1a99dbd82d91a0fd0e906500fb83fe83b9b00` |
-| `parte2.txt` | 28.157 | `f0915b5e071ef6def70b777c3a747d83364e22ca30ac0a79be76c815c9f36486` |
-| `parte3.txt` | 28.147 | `f5f15d4558fb3032bbf56ce1386895771017f79e8823dabc7794f03992497820` |
-| `parte4.txt` | 28.149 | `310d48e3e578826790cf0b3d3815485a7f6377397409e70a888d28f316bce7be` |
+| `parte1.txt` | 28.757 | `a53ab58e7e5de947a037ebbf3de0dbe8c47a5c7942d0200062565771de631bc7` |
+| `parte2.txt` | 28.758 | `e444c2ceb8c8018989edb236507351564c36ab566e8eb364c055ae0ca346a019` |
+| `parte3.txt` | 28.759 | `d62a9fa2f09b1eb63321e78f6c1ee9e4533dd0904f93b3d358086517e22a4b68` |
+| `parte4.txt` | 28.757 | `dbe6e1f14dcb9fb86150825214c350c82ce8ddd99b0d60c3705a8ba389c89afa` |
 
 SHA-256 do `tar.xz` reconstruído (verificado pelo script):
 
 ```text
-a01c2788d95986623a0c9bf4989a90f81cdcc4f2581cbffb090dd10f361d8c9d
+5dc772991591e1e3013ffdcf9a2b8a7d9ecdae1eaa36b2ea5d6b2c55320dab47
 ```
 
 ## Como usar
@@ -45,11 +45,20 @@ a01c2788d95986623a0c9bf4989a90f81cdcc4f2581cbffb090dd10f361d8c9d
 5. Confirme no `diskpilot.log`:
 
    ```text
-   iniciando DiskPilot 1.12.0
+   iniciando DiskPilot 1.13.0
    ```
 
 ## Novidades desta versão
 
+- **Duplicatas confirmadas por hash em paralelo**: nome e tamanho continuam
+  como pré-filtro, mas os candidatos são confirmados por **BLAKE2b** em até 8
+  workers. A sugestão passa a listar apenas conteúdo idêntico, com cota de 400
+  arquivos/8 GB por análise para preservar o tempo de varredura.
+- **Exportação repensada**: a janela agora tem formato, **pasta de destino
+  editável**, nome do arquivo e prévia do caminho. “Escolher pasta…” usa o
+  seletor próprio no mesmo padrão do seletor de fotos e substitui o
+  `QFileDialog` que aparecia sem botões/caminho. A gravação roda em segundo
+  plano e há confirmação de substituição.
 - **Identidade visual fixa**: a logo do DiskPilot não pode mais ser alterada ou
   removida. O clique, o menu de contexto, a seção de logo nas configurações e a
   persistência de `logo` no JSON foram retirados; a marca no topo da barra
@@ -207,12 +216,14 @@ Grava `diagnostico-diskpilot.txt` com Python, PySide6, versão do Qt, tela,
 py -c "from pathlib import Path; [print(p.name, len(''.join(p.read_text(encoding='ascii').split()))) for p in sorted(Path('.').glob('parte*.txt'))]"
 ```
 
-Esperado: `27863`, `27863`, `27863`, `27861`.
+Esperado: `28465`, `28465`, `28465`, `28465`.
 
 ## Observações
 
 - Nenhum arquivo ou pasta é apagado pelo DiskPilot; ele é somente leitura.
 - O pacote não inclui `.venv`, `dist`, caches ou logs.
+- `polars` não foi incluído: o escopo atual exporta o Top 100 (200 linhas + sugestões), onde ele só adicionaria peso; para uma futura exportação da árvore completa, Polars/Parquet são candidatos naturais.
+- A exportação não usa `QFileDialog`: pasta e nome são editáveis na própria janela, e “Escolher pasta…” reutiliza o seletor de pastas do DiskPilot.
 - As dependências `qt-material`, `qtawesome`, `openpyxl` e `pywin32` são
   instaladas por `pip`; `PySide6` já precisa existir no ambiente. O XLSB exige
   Microsoft Excel instalado. A coluna **Autor** usa o Property System do
@@ -221,14 +232,14 @@ Esperado: `27863`, `27863`, `27863`, `27861`.
   interromper a análise.
 - O código é distribuído sob licença **MIT** (`LICENSE`); as dependências
   mantêm suas licenças — inventário em `THIRD-PARTY.md`.
-- Este pacote é gerado a partir do commit `v1.12.0` deste repositório.
+- Este pacote é gerado a partir do commit `v1.13.0` deste repositório.
 
 ## URL dos arquivos crus
 
 ```text
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.12.0/entrega/parte1.txt
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.12.0/entrega/parte2.txt
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.12.0/entrega/parte3.txt
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.12.0/entrega/parte4.txt
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.12.0/entrega/restaurar_diskpilot.py
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.13.0/entrega/parte1.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.13.0/entrega/parte2.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.13.0/entrega/parte3.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.13.0/entrega/parte4.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.13.0/entrega/restaurar_diskpilot.py
 ```

@@ -12,12 +12,16 @@ from PySide6.QtCore import (
     QDir,
     QEvent,
     QModelIndex,
+    QObject,
     QPoint,
     QRectF,
+    QRunnable,
     QSize,
     QStandardPaths,
     Qt,
+    QThreadPool,
     QTimer,
+    Signal,
 )
 from PySide6.QtGui import (
     QColor,
@@ -42,7 +46,6 @@ from PySide6.QtWidgets import (
     QListView,
     QListWidget,
     QListWidgetItem,
-    QMenu,
     QToolTip,
     QTreeView,
     QTreeWidget,
@@ -54,6 +57,7 @@ from PySide6.QtWidgets import (
 from ..config import AppConfig
 from ..icons import avatar_pixmap, icon
 from ..services.exporter import (
+    default_export_dir,
     default_export_path,
     write_csv,
     write_xlsb,
@@ -68,7 +72,6 @@ from ..utils import (
     normalize_path,
     open_in_explorer,
     resolve_network_path,
-    save_file_dialog,
 )
 from .buttons import ActionButton, IconButton, SelectButton
 from .common import ElidedLabel
@@ -195,15 +198,25 @@ class SheetDialog(QDialog):
 class FolderPickerDialog(SheetDialog):
     """Seleção de uma ou várias pastas com navegação e atalhos."""
 
-    def __init__(self, parent: QWidget | None, start_path: str = "") -> None:
-        super().__init__(
-            parent,
-            "Adicionar pastas",
-            "Escolha uma ou mais pastas na lista ou clique em “Adicionar esta pasta”. A análise é somente leitura.",
-            920,
-            610,
-        )
+    def __init__(
+        self,
+        parent: QWidget | None,
+        start_path: str = "",
+        *,
+        title: str = "Adicionar pastas",
+        subtitle: str = (
+            "Escolha uma ou mais pastas na lista ou clique em “Adicionar esta "
+            "pasta”. A análise é somente leitura."
+        ),
+        single: bool = False,
+        accept_label: str = "Adicionar",
+        current_label: str = "Adicionar esta pasta",
+    ) -> None:
+        super().__init__(parent, title, subtitle, 920, 610)
         self._current_only = False
+        self._single = single
+        self._accept_label = accept_label
+        self._current_label = current_label
         self._current = start_path or QStandardPaths.writableLocation(
             QStandardPaths.HomeLocation
         )
@@ -258,7 +271,11 @@ class FolderPickerDialog(SheetDialog):
         self.tree.setHeaderHidden(True)
         self.tree.setRootIsDecorated(False)
         self.tree.setUniformRowHeights(True)
-        self.tree.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.tree.setSelectionMode(
+            QAbstractItemView.SingleSelection
+            if self._single
+            else QAbstractItemView.ExtendedSelection
+        )
         self.tree.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.tree.setEditTriggers(QAbstractItemView.NoEditTriggers)
         for column in (1, 2, 3):
@@ -285,15 +302,18 @@ class FolderPickerDialog(SheetDialog):
         right.addLayout(path_row)
         self.tree.viewport().installEventFilter(self)
         hint = QLabel(
-            "Dica: use Ctrl+clique para marcar várias pastas · duplo clique abre uma pasta"
+            "Dica: duplo clique abre uma pasta · use a pasta atual ou selecione uma subpasta"
+            if single
+            else "Dica: use Ctrl+clique para marcar várias pastas · duplo clique abre uma pasta"
         )
         hint.setObjectName("Faint")
+        hint.setWordWrap(True)
         right.addWidget(hint)
         work.addLayout(right, 1)
 
         self.body.addStretch(0)
         self.add_current_btn = ActionButton(
-            "Adicionar esta pasta", "folder-plus-outline", "soft", self, 16
+            current_label, "folder-plus-outline", "soft", self, 16
         )
         self.add_current_btn.clicked.connect(self._accept_current)
         self.footer.addWidget(self.add_current_btn)
@@ -304,7 +324,7 @@ class FolderPickerDialog(SheetDialog):
         cancel = ActionButton("Cancelar", "", "ghost", self)
         cancel.clicked.connect(self.reject)
         self.footer.addWidget(cancel)
-        self.add_btn = ActionButton("Adicionar", "folder-plus-outline", "primary", self)
+        self.add_btn = ActionButton(accept_label, "folder-plus-outline", "primary", self)
         self.add_btn.clicked.connect(self.accept)
         self.footer.addWidget(self.add_btn)
 
@@ -485,6 +505,14 @@ class FolderPickerDialog(SheetDialog):
 
     def _update_selection_label(self, *_args: Any) -> None:
         count = len(self._selected_rows())
+        if self._single:
+            self.selection_label.setText(
+                "1 selecionada" if count else "Pasta atual"
+            )
+            self.add_btn.setText(self._accept_label)
+            self.add_btn.setEnabled(count > 0)
+            self._update_full_path()
+            return
         if count:
             self.selection_label.setText(
                 f"{count} pasta{'s' if count != 1 else ''} selecionada{'s' if count != 1 else ''}"
@@ -639,112 +667,18 @@ class TopItemsDialog(SheetDialog):
     def _export_menu(self) -> None:
         if self.scan_result is None:
             return
-        theme = get_theme()
-        menu = QMenu(self.export_btn)
-        csv_action = menu.addAction(
-            icon("file-delimited", theme.color("muted"), 16),
-            "CSV — Top 100 (Excel/LibreOffice)",
-        )
-        xlsx_action = menu.addAction(
-            icon("file-excel", theme.color("muted"), 16),
-            "XLSX — pasta de trabalho do Excel",
-        )
-        xlsb_action = menu.addAction(
-            icon("microsoft-excel", theme.color("muted"), 16),
-            "XLSB — binário do Excel",
-        )
-        chosen = menu.exec(
-            self.export_btn.mapToGlobal(QPoint(0, self.export_btn.height() + 5))
-        )
-        menu.deleteLater()
-        if chosen is csv_action:
-            self._export_csv()
-        elif chosen is xlsx_action:
-            self._export_xlsx()
-        elif chosen is xlsb_action:
-            self._export_xlsb()
-
-    def _ask_export(self, title: str, prefix: str, extension: str) -> str:
-        path = save_file_dialog(
-            self,
-            f"Exportar {title}",
-            default_export_path(prefix, extension),
-            f"{title} (*.{extension})",
-            extension,
-        )
-        if not path:
-            return ""
-        if not path.lower().endswith(f".{extension}"):
-            path += f".{extension}"
-        return path
-
-    def _export_error(self, message: str) -> None:
-        self.status_label.setText("Falha ao exportar.")
-        self.status_label.setToolTip(message)
-
-    def _export_csv(self) -> None:
-        if self.scan_result is None:
-            return
-        path = self._ask_export("CSV", "top100", "csv")
-        if not path:
-            return
-        QApplication.setOverrideCursor(Qt.WaitCursor)
+        dialog = ExportDialog(self, self.scan_result)
         try:
-            write_csv(self.scan_result, self._dirs, self._files, path)
-        except Exception as exc:
-            self._export_error(str(exc))
-            return
+            if (
+                dialog.exec() == QDialog.DialogCode.Accepted
+                and dialog.exported_path
+            ):
+                self.status_label.setText(
+                    f"Exportado: {Path(dialog.exported_path).name}"
+                )
+                self.status_label.setToolTip(dialog.exported_path)
         finally:
-            QApplication.restoreOverrideCursor()
-        self.status_label.setText(f"Exportado: {Path(path).name}")
-        self.status_label.setToolTip(path)
-
-    def _export_xlsx(self) -> None:
-        if self.scan_result is None:
-            return
-        path = self._ask_export("XLSX", "top100", "xlsx")
-        if not path:
-            return
-        QApplication.setOverrideCursor(Qt.WaitCursor)
-        try:
-            write_xlsx(self.scan_result, self._dirs, self._files, path)
-        except ImportError:
-            self._export_error(
-                "XLSX requer openpyxl. Instale com: py -m pip install openpyxl"
-            )
-            return
-        except Exception as exc:
-            self._export_error(str(exc))
-            return
-        finally:
-            QApplication.restoreOverrideCursor()
-        self.status_label.setText(f"Exportado: {Path(path).name}")
-        self.status_label.setToolTip(path)
-
-    def _export_xlsb(self) -> None:
-        if self.scan_result is None:
-            return
-        path = self._ask_export("XLSB", "top100", "xlsb")
-        if not path:
-            return
-        QApplication.setOverrideCursor(Qt.WaitCursor)
-        try:
-            write_xlsb(self.scan_result, self._dirs, self._files, path)
-        except ImportError:
-            self._export_error(
-                "XLSB requer openpyxl e pywin32. "
-                "Instale com: py -m pip install openpyxl pywin32"
-            )
-            return
-        except Exception as exc:
-            self._export_error(
-                f"{exc} — XLSB requer Microsoft Excel instalado."
-            )
-            return
-        finally:
-            QApplication.restoreOverrideCursor()
-        self.status_label.setText(f"Exportado: {Path(path).name}")
-        self.status_label.setToolTip(path)
+            dialog.deleteLater()
 
     def _show_kind(self, key: str) -> None:
         self._kind = "files" if key == "files" else "dirs"
@@ -845,6 +779,54 @@ class TopItemsDialog(SheetDialog):
             open_in_explorer(path)
 
 
+class _ExportSignals(QObject):
+    finished = Signal(str)
+    failed = Signal(str)
+
+
+class _ExportTask(QRunnable):
+    """Grava a exportação fora da thread da interface."""
+
+    def __init__(
+        self,
+        fmt: str,
+        result: ScanResult,
+        dirs: list,
+        files: list,
+        path: str,
+        signals: _ExportSignals,
+    ) -> None:
+        super().__init__()
+        self.setAutoDelete(True)
+        self.fmt = fmt
+        self.result = result
+        self.dirs = dirs
+        self.files = files
+        self.path = path
+        self.signals = signals
+
+    def run(self) -> None:
+        try:
+            if self.fmt == "csv":
+                write_csv(self.result, self.dirs, self.files, self.path)
+            elif self.fmt == "xlsx":
+                write_xlsx(self.result, self.dirs, self.files, self.path)
+            else:
+                write_xlsb(self.result, self.dirs, self.files, self.path)
+        except ImportError as exc:
+            self.signals.failed.emit(
+                f"Dependência ausente: {exc}. "
+                "Instale com: py -m pip install openpyxl pywin32"
+            )
+        except Exception as exc:  # pragma: no cover - borda de I/O/Excel
+            message = str(exc) or exc.__class__.__name__
+            if self.fmt == "xlsb":
+                message += " — XLSB requer Microsoft Excel instalado."
+            self.signals.failed.emit(message)
+        else:
+            self.signals.finished.emit(self.path)
+
+
 class ExportDialog(SheetDialog):
     """Janela de exportação da análise em CSV, XLSX ou XLSB."""
 
@@ -852,13 +834,21 @@ class ExportDialog(SheetDialog):
         super().__init__(
             parent,
             "Exportar dados",
-            "Escolha o formato e confirme o local do arquivo.",
-            560,
-            340,
+            "Escolha o formato, a pasta de destino e o nome do arquivo.",
+            620,
+            520,
         )
         self.scan_result = result
         self._dirs, self._files = top_items(result, 100)
         self.exported_path = ""
+        self._fmt = "csv"
+        self._exporting = False
+        self._task: _ExportTask | None = None
+        self._signals = _ExportSignals(self)
+        self._signals.finished.connect(self._export_finished)
+        self._signals.failed.connect(self._export_failed)
+        self._pool = QThreadPool(self)
+        self._pool.setMaxThreadCount(1)
 
         format_row = QHBoxLayout()
         format_row.setSpacing(10)
@@ -875,6 +865,7 @@ class ExportDialog(SheetDialog):
             ],
             "csv",
         )
+        self.format_btn.changed.connect(self._format_changed)
         format_row.addWidget(self.format_btn)
         format_row.addStretch(1)
         self.body.addLayout(format_row)
@@ -886,9 +877,41 @@ class ExportDialog(SheetDialog):
         summary.setObjectName("Muted")
         summary.setWordWrap(True)
         self.body.addWidget(summary)
+
+        folder_cap = QLabel("PASTA DE DESTINO")
+        folder_cap.setObjectName("Eyebrow")
+        self.body.addWidget(folder_cap)
+        folder_row = QHBoxLayout()
+        folder_row.setSpacing(8)
+        self.folder_edit = QLineEdit(default_export_dir(), self)
+        self.folder_edit.setPlaceholderText("Caminho da pasta de destino")
+        self.folder_edit.textChanged.connect(self._update_target)
+        folder_row.addWidget(self.folder_edit, 1)
+        choose_folder = ActionButton(
+            "Escolher pasta…", "folder-open-outline", "soft", self, 16
+        )
+        choose_folder.clicked.connect(self._choose_folder)
+        folder_row.addWidget(choose_folder)
+        self.body.addLayout(folder_row)
+
+        name_cap = QLabel("NOME DO ARQUIVO")
+        name_cap.setObjectName("Eyebrow")
+        self.body.addWidget(name_cap)
+        default_name = Path(default_export_path("analise", "csv")).name
+        self.name_edit = QLineEdit(default_name, self)
+        self.name_edit.setPlaceholderText("Nome do arquivo")
+        self.name_edit.textChanged.connect(self._update_target)
+        self.body.addWidget(self.name_edit)
+
+        self.target_label = QLabel("")
+        self.target_label.setObjectName("PathText")
+        self.target_label.setWordWrap(True)
+        self.target_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.body.addWidget(self.target_label)
+
         note = QLabel(
-            "CSV: tabela do Top 100. XLSX: abas Resumo, Top 100 e Sugestões. "
-            "XLSB: requer Microsoft Excel e pywin32 instalados."
+            "A gravação ocorre em segundo plano. CSV: Top 100; XLSX: abas "
+            "Resumo, Top 100 e Sugestões; XLSB requer Microsoft Excel e pywin32."
         )
         note.setObjectName("Faint")
         note.setWordWrap(True)
@@ -898,54 +921,172 @@ class ExportDialog(SheetDialog):
         self.error.setWordWrap(True)
         self.error.setVisible(False)
         self.body.addWidget(self.error)
+        self.status = QLabel("")
+        self.status.setObjectName("Muted")
+        self.status.setWordWrap(True)
+        self.body.addWidget(self.status)
         self.body.addStretch(1)
 
-        cancel = ActionButton("Cancelar", "", "ghost", self)
-        cancel.clicked.connect(self.reject)
+        self.cancel_btn = ActionButton("Cancelar", "", "ghost", self)
+        self.cancel_btn.clicked.connect(self.reject)
         self.footer.addStretch(1)
-        self.footer.addWidget(cancel)
-        export = ActionButton("Exportar", "export-variant", "primary", self)
-        export.clicked.connect(self._export)
-        self.footer.addWidget(export)
+        self.footer.addWidget(self.cancel_btn)
+        self.export_btn = ActionButton("Exportar", "export-variant", "primary", self)
+        self.export_btn.clicked.connect(self._export)
+        self.footer.addWidget(self.export_btn)
+        self._update_target()
+
+    def _format_changed(self, fmt: str) -> None:
+        self._fmt = fmt
+        name = self.name_edit.text().strip()
+        if not name:
+            name = Path(default_export_path("analise", fmt)).name
+        path = Path(name)
+        if path.suffix.lower() in {".csv", ".xlsx", ".xlsb"}:
+            name = path.with_suffix(f".{fmt}").name
+        else:
+            name = f"{name}.{fmt}"
+        self.name_edit.setText(name)
+        self._update_target()
+
+    def _update_target(self, *_args: Any) -> None:
+        folder = self.folder_edit.text().strip()
+        name = self.name_edit.text().strip()
+        if folder and name:
+            try:
+                expanded = os.path.expandvars(os.path.expanduser(folder))
+                target = str(Path(expanded) / name)
+            except Exception:
+                target = f"{folder}\\{name}"
+        else:
+            target = ""
+        self.target_label.setText(target)
+        self.target_label.setToolTip(target)
+
+    def _choose_folder(self) -> None:
+        start = self.folder_edit.text().strip() or default_export_dir()
+        dialog = FolderPickerDialog(
+            self,
+            start,
+            title="Pasta de destino",
+            subtitle="Escolha onde o arquivo exportado será salvo.",
+            single=True,
+            accept_label="Usar pasta",
+            current_label="Usar esta pasta",
+        )
+        try:
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                paths = dialog.selected_paths()
+                if paths:
+                    self.folder_edit.setText(paths[0])
+        finally:
+            dialog.deleteLater()
+
+    def _validated_path(self) -> Path | None:
+        folder_text = self.folder_edit.text().strip().strip('"')
+        name = self.name_edit.text().strip().strip('"')
+        if not folder_text:
+            self._show_error("Informe a pasta de destino.")
+            return None
+        if not name:
+            self._show_error("Informe o nome do arquivo.")
+            return None
+        if name in {".", ".."}:
+            self._show_error("Escolha um nome de arquivo válido.")
+            return None
+        if any(char in name for char in '<>:"/\\|?*'):
+            self._show_error("O nome do arquivo contém caracteres inválidos.")
+            return None
+        if name.endswith((" ", ".")):
+            self._show_error("O nome do arquivo não pode terminar com espaço ou ponto.")
+            return None
+        stem = Path(name).stem.upper()
+        reserved = {"CON", "PRN", "AUX", "NUL"}
+        reserved.update({f"COM{i}" for i in range(1, 10)})
+        reserved.update({f"LPT{i}" for i in range(1, 10)})
+        if stem in reserved:
+            self._show_error("Este nome é reservado pelo Windows.")
+            return None
+        name_path = Path(name)
+        if name_path.suffix.lower() in {".csv", ".xlsx", ".xlsb"}:
+            if name_path.suffix.lower() != f".{self._fmt}":
+                name = name_path.with_suffix(f".{self._fmt}").name
+        elif not name.lower().endswith(f".{self._fmt}"):
+            name += f".{self._fmt}"
+        try:
+            folder = Path(os.path.expandvars(os.path.expanduser(folder_text)))
+            folder.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            self._show_error(f"Não foi possível usar a pasta: {exc}")
+            return None
+        if not folder.is_dir():
+            self._show_error("O destino não é uma pasta válida.")
+            return None
+        return folder / name
+
+    def _show_error(self, message: str) -> None:
+        self.error.setText(message)
+        self.error.setVisible(True)
 
     def _export(self) -> None:
-        fmt = self.format_btn.current()
-        titles = {"csv": "CSV", "xlsx": "XLSX", "xlsb": "XLSB"}
-        title = titles.get(fmt, "CSV")
-        path = save_file_dialog(
-            self,
-            f"Exportar {title}",
-            default_export_path("analise", fmt),
-            f"{title} (*.{fmt})",
-            fmt,
-        )
-        if not path:
+        if self._exporting:
             return
-        if not path.lower().endswith(f".{fmt}"):
-            path += f".{fmt}"
-        QApplication.setOverrideCursor(Qt.WaitCursor)
-        try:
-            if fmt == "csv":
-                write_csv(self.scan_result, self._dirs, self._files, path)
-            elif fmt == "xlsx":
-                write_xlsx(self.scan_result, self._dirs, self._files, path)
-            else:
-                write_xlsb(self.scan_result, self._dirs, self._files, path)
-        except ImportError:
-            self.error.setText(
-                "Dependência ausente. Instale com: "
-                "py -m pip install openpyxl pywin32"
+        path = self._validated_path()
+        if path is None:
+            return
+        self.error.setVisible(False)
+        if path.exists():
+            confirm = ConfirmDialog(
+                self,
+                "Substituir arquivo",
+                f"O arquivo já existe:\n{path}\n\nDeseja substituí-lo?",
+                "Substituir",
+                danger=True,
             )
-            self.error.setVisible(True)
-            return
-        except Exception as exc:
-            self.error.setText(str(exc))
-            self.error.setVisible(True)
-            return
-        finally:
-            QApplication.restoreOverrideCursor()
+            try:
+                if confirm.exec() != QDialog.DialogCode.Accepted:
+                    return
+            finally:
+                confirm.deleteLater()
+        self._exporting = True
+        self.export_btn.setEnabled(False)
+        self.cancel_btn.setEnabled(False)
+        self.status.setText(f"Exportando em segundo plano: {path}")
+        task = _ExportTask(
+            self.format_btn.current(),
+            self.scan_result,
+            self._dirs,
+            self._files,
+            str(path),
+            self._signals,
+        )
+        self._task = task
+        self._pool.start(task)
+
+    def _export_finished(self, path: str) -> None:
+        self._exporting = False
+        self._task = None
         self.exported_path = path
         self.accept()
+
+    def _export_failed(self, message: str) -> None:
+        self._exporting = False
+        self._task = None
+        self.status.setText("")
+        self.export_btn.setEnabled(True)
+        self.cancel_btn.setEnabled(True)
+        self._show_error(message)
+
+    def reject(self) -> None:
+        if self._exporting:
+            return
+        super().reject()
+
+    def closeEvent(self, event) -> None:  # noqa: N802
+        if self._exporting:
+            event.ignore()
+            return
+        super().closeEvent(event)
 
 
 class ConfirmDialog(SheetDialog):

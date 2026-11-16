@@ -10,13 +10,22 @@ from pathlib import Path
 from typing import Any
 
 from .. import APP_NAME
-from ..utils import file_author, format_bytes, format_datetime
+from ..utils import file_author_fast, format_bytes, format_datetime
 from .model import Node, ScanResult
+
+
+def default_export_dir() -> str:
+    home = Path.home()
+    for name in ("Downloads", "Documents", "Documentos"):
+        candidate = home / name
+        if candidate.is_dir():
+            return str(candidate)
+    return str(home)
 
 
 def default_export_path(prefix: str, extension: str) -> str:
     stamp = datetime.now().strftime("%Y%m%d-%H%M")
-    return str(Path.home() / f"DiskPilot-{prefix}-{stamp}.{extension}")
+    return str(Path(default_export_dir()) / f"DiskPilot-{prefix}-{stamp}.{extension}")
 
 
 def item_rows(
@@ -39,7 +48,7 @@ def item_rows(
                     "arquivos": node.files,
                     "pastas": node.dirs,
                     "modificado": format_datetime(node.mtime),
-                    "autor": file_author(node.path) or "—",
+                    "autor": file_author_fast(node.path) or "—",
                     "erro": node.error,
                 }
             )
@@ -64,7 +73,7 @@ def summary_payload(result: ScanResult) -> dict[str, Any]:
                 "formatado": format_bytes(root.size),
                 "arquivos": root.files,
                 "pastas": root.dirs,
-                "autor": file_author(root.path) or "—",
+                "autor": file_author_fast(root.path) or "—",
             }
             for root in result.roots
         ],

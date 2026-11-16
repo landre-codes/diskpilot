@@ -6,7 +6,7 @@ O projeto nasceu como um "Everything gerencial e enxuto": em vez de apenas local
 
 > Princípio importante: o aplicativo **não apaga arquivos automaticamente**. As recomendações apenas indicam caminhos, explicam o risco e oferecem atalhos para inspeção no Explorer.
 
-> **Aviso de responsabilidade:** o DiskPilot é uma ferramenta de leitura e estimativa. Tamanhos são lógicos e podem diferir do espaço físico; varreduras extensas podem ser parciais; duplicatas são comparadas por nome/tamanho, não por conteúdo. A decisão de remover, mover ou compartilhar dados é integralmente do usuário e da equipe.
+> **Aviso de responsabilidade:** o DiskPilot é uma ferramenta de leitura e estimativa. Tamanhos são lógicos e podem diferir do espaço físico; varreduras extensas podem ser parciais; duplicatas são pré-filtradas por nome/tamanho e confirmadas por hash BLAKE2b quando o arquivo é legível. A decisão de remover, mover ou compartilhar dados é integralmente do usuário e da equipe.
 
 ---
 
@@ -46,8 +46,8 @@ O projeto nasceu como um "Everything gerencial e enxuto": em vez de apenas local
 - Colunas com mínimos maiores: **Nome** 280 px, **Tamanho** 124, **% do pai** 90, **Itens** 100, **Modificado** 150, **Autor** 200, **Tipo** 100 e **Caminho completo** 600. Quando a janela não comporta todos os mínimos, a tabela usa rolagem horizontal em vez de esmagar o conteúdo.
 - Coluna opcional **Caminho completo** na árvore, ativada pelo checkbox na barra de ferramentas e persistida na configuração. A coluna cresce até o caminho mais longo exibido (sem reticências), mantém **Nome** com no mínimo 280 px e usa rolagem horizontal em janelas estreitas. O caminho do item selecionado também aparece inteiro em um rodapé selecionável.
 - Os chips das raízes e a tabela do **Top 100** também exibem o caminho completo; no Top 100 a coluna de caminho cresce até o conteúdo e há um rodapé com o caminho da linha selecionada.
-- **Exportação de dados** pelo botão **Exportar** no cabeçalho da análise (ou pelo Top 100): janela com seleção de formato e destino. CSV para Excel/LibreOffice, XLSX com abas Resumo, Top 100 e Sugestões, e XLSB binário (requer Microsoft Excel instalado). A coluna **Autor** também é incluída nos arquivos exportados.
-- Os diálogos de abrir/salvar arquivo usam a implementação do Qt (não a nativa do Windows) e a automação do XLSB inicializa/finaliza o COM na mesma thread; isso evita o `RPC_E_WRONG_THREAD` que podia fechar o app ao cancelar uma exportação.
+- **Exportação de dados** pelo botão **Exportar** no cabeçalho da análise (ou pelo Top 100): janela com seleção de formato, **pasta de destino editável**, nome do arquivo e prévia do caminho. A pasta é escolhida pelo seletor próprio (mesmo padrão dos Locais do seletor de fotos), sem `QFileDialog`. CSV para Excel/LibreOffice, XLSX com abas Resumo, Top 100 e Sugestões, e XLSB binário (requer Microsoft Excel instalado). A coluna **Autor** também é incluída nos arquivos exportados.
+- A gravação da exportação roda em uma **thread separada** (QThreadPool): a janela permanece responsiva e o XLSB inicializa/finaliza o COM na mesma thread, evitando o `RPC_E_WRONG_THREAD` que podia fechar o app ao cancelar uma exportação.
 - Árvore aninhada carregada sob demanda, com:
   - tamanho de cada pasta (soma recursiva) e de cada arquivo;
   - percentual em relação ao pai;
@@ -68,7 +68,7 @@ O projeto nasceu como um "Everything gerencial e enxuto": em vez de apenas local
 - Caches regeneráveis (`node_modules`, `__pycache__`, `.next`, `.pytest_cache`, etc.), classificados como **seguros**.
 - Artefatos de build e ambientes virtuais (`build`, `dist`, `target`, `.venv`, ...), classificados para **revisão**.
 - Arquivos grandes sem alteração há mais de um ano.
-- Possíveis duplicatas por nome + tamanho (com aviso de que o conteúdo não foi comparado).
+- Duplicatas confirmadas por **hash BLAKE2b** em paralelo (nome + tamanho são usados como pré-filtro; grupos grandes são limitados por uma cota de 8 GB/400 arquivos por análise).
 - Arquivos compactados muito grandes e arquivos temporários/backups.
 - Caminhos reais, botão para abrir o local e cópia de todos os caminhos para compartilhar com a equipe.
 - Nenhuma exclusão automática: o texto de cada card explica o risco e o que verificar antes.
@@ -334,7 +334,8 @@ class ClientesPage(BasePage):
 - O avatar é copiado com `shutil`, não vinculado ao arquivo original.
 - `circular_pixmap` pinta a imagem em coordenadas físicas e só aplica o `devicePixelRatio` no final; aceita `focus_x`, `focus_y` e `zoom`, permitindo o enquadramento ajustável do avatar. A imagem é carregada com `QImageReader.autoTransform`, então a rotação EXIF de fotos de celular é respeitada (antes a foto aparecia girada 90°). As prévias em `QLabel` usam `setScaledContents(True)` para não cortar o canto do pixmap em telas com DPI alto.
 - O perfil salva `user.avatar_focus_x`, `user.avatar_focus_y` e `user.avatar_zoom`. No diálogo de perfil, arraste a foto para reposicionar e use a roda do mouse para ampliar; “Centralizar” volta ao ponto central.
-- A exportação de dados usa `csv` (BOM UTF-8 e separador `;`), `openpyxl` (XLSX com abas de resumo, Top 100 e sugestões) e `pywin32` + Microsoft Excel (XLSB). O XLSB é gerado a partir do XLSX temporário com `FileFormat=50`; se o Excel ou o pywin32 não estiverem disponíveis, o app informa o requisito em vez de falhar silenciosamente.
+- A exportação de dados usa `csv` (BOM UTF-8 e separador `;`), `openpyxl` (XLSX com abas de resumo, Top 100 e sugestões) e `pywin32` + Microsoft Excel (XLSB). O XLSB é gerado a partir do XLSX temporário com `FileFormat=50`; se o Excel ou o pywin32 não estiverem disponíveis, o app informa o requisito em vez de falhar silenciosamente. A gravação ocorre em `QThreadPool` e o destino é escolhido por um diálogo próprio, com pasta e nome editáveis.
+- **Polars não foi adicionado**: o escopo atual exporta o Top 100 (200 linhas) e sugestões; uma dependência Rust/pesada não traria ganho. Para exportar a árvore inteira, Polars/Parquet seriam uma opção futura.
 - O `sidebar.py` detecta se `icons.py` aceita o parâmetro `dpr` (adicionado na 1.3.4) e chama `avatar_pixmap`/`circular_pixmap` com ou sem ele. Assim, uma atualização parcial de arquivos não quebra o avatar com `TypeError`.
 - O seletor de pastas mostra unidades mapeadas pelo **caminho UNC** (`\\servidor\compartilhamento`) em vez da letra (`W:\`), e navega pelos nomes das pastas de rede quando o compartilhamento está acessível.
 - O seletor de pastas usa `QFileSystemModel` e exibe o caminho completo do item atual/selecionado em um rótulo selecionável (com cópia), além de tooltip por linha. O caminho não é abreviado, o que ajuda em compartilhamentos de rede.
@@ -368,7 +369,7 @@ class ClientesPage(BasePage):
 ## Limitações e próximos passos
 
 - Não há exclusão em massa; isso é intencional por segurança.
-- Duplicatas são detectadas por nome + tamanho; uma evolução natural é comparar hashes em segundo plano.
+- Duplicatas são pré-filtradas por nome + tamanho e confirmadas por hash BLAKE2b em até 8 workers; arquivos sem permissão de leitura não são confirmados. O hashing é limitado a 400 arquivos/8 GB por análise para não transformar a varredura em uma leitura completa do disco.
 - O redimensionamento nativo por `WM_NCHITTEST` é específico do Windows; o fallback manual cobre outras plataformas.
 - Para volumes muito grandes (milhões de itens), considere persistir a árvore em SQLite ou manter uma indexação incremental.
 - O shell pode receber novas páginas sem alterações na janela principal.

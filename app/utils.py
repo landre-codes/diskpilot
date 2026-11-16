@@ -171,26 +171,6 @@ def open_in_explorer(path: str, select: bool = False) -> bool:
         return False
 
 
-def save_file_dialog(
-    parent, title: str, start: str, file_filter: str, suffix: str = ""
-) -> str:
-    """Diálogo de salvamento do Qt (não nativo), com sufixo padrão."""
-    from PySide6.QtWidgets import QDialog, QFileDialog
-
-    dialog = QFileDialog(parent, title, start, file_filter)
-    dialog.setOption(QFileDialog.Option.DontUseNativeDialog, True)
-    dialog.setAcceptMode(QFileDialog.AcceptMode.AcceptSave)
-    dialog.setFileMode(QFileDialog.FileMode.AnyFile)
-    if suffix:
-        dialog.setDefaultSuffix(suffix.lstrip("."))
-    path = ""
-    if dialog.exec() == QDialog.DialogCode.Accepted:
-        files = dialog.selectedFiles()
-        path = files[0] if files else ""
-    dialog.deleteLater()
-    return path
-
-
 _author_cache: dict[str, str] = {}
 _OOXML_EXT = {
     ".docx",
@@ -256,6 +236,18 @@ def _property_author(text: str) -> str:
         authors = [str(item).strip() for item in value if str(item).strip()]
         return "; ".join(authors)
     return str(value).strip() if value else ""
+
+
+def file_author_fast(path: str) -> str:
+    """Autor para exportação: cache ou metadados OOXML/PDF, sem bloquear.
+
+    A consulta ao Property System do Windows pode carregar handlers na
+    primeira chamada de uma thread; em exportações isso atrasaria a gravação.
+    """
+    cached = cached_file_author(path)
+    if cached is not None:
+        return cached
+    return _embedded_author(str(path))
 
 
 def _embedded_author(text: str) -> str:
