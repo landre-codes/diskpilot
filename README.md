@@ -69,6 +69,7 @@ O projeto nasceu como um "Everything gerencial e enxuto": em vez de apenas local
 - Artefatos de build e ambientes virtuais (`build`, `dist`, `target`, `.venv`, ...), classificados para **revisão**.
 - Arquivos grandes sem alteração há mais de um ano.
 - Possíveis duplicatas por **nome + tamanho**, sem ler o conteúdo dos arquivos. Os mais pesados aparecem primeiro, o que já permite liberar espaço com uma revisão manual.
+- A página de recomendações reutiliza os cards já montados ao navegar; não refaz a análise nem consulta o disco para decidir ícones. Isso evita travamentos em caminhos de rede.
 - Arquivos compactados muito grandes e arquivos temporários/backups.
 - Caminhos reais, botão para abrir o local e cópia de todos os caminhos para compartilhar com a equipe.
 - Nenhuma exclusão automática: o texto de cada card explica o risco e o que verificar antes.
@@ -360,6 +361,7 @@ class ClientesPage(BasePage):
 - Textos de `QLineEdit`, `QComboBox` e `QAbstractSpinBox` usam o token `input_text`: claro no tema escuro e **azul-escuro** (`#06232b`) no tema claro. A cor também é fixada nos estados `:hover` e `:focus`, e o placeholder usa o token `placeholder` (mais escuro no tema claro), garantindo contraste.
 - Os estados de hover usam os tokens `hover`/`hover_border`, com contraste próprio em cada tema (no claro, `#d8ebef`), em vez de reutilizar `surface_2`/`surface_3`. Isso inclui os hovers desenhados à mão das abas verticais e do cartão do usuário — antes o `surface_2` ficava quase invisível sobre o `sidebar` no tema claro.
 - O título de `PageHeader` usa `ElidedLabel`: em janelas estreitas ele elide em vez de empurrar/cortar os botões de ação do cabeçalho.
+- A página de recomendações não refaz a análise ao ser aberta: os cards são atualizados pelos sinais de varredura e a criação não faz `os.path.isdir` por caminho. Antes, cada navegação recriava os cards e consultava até 60 caminhos por sugestão, o que congelava a UI em shares de rede.
 - O seletor de foto usa miniaturas e prévias decodificadas no tamanho de exibição (com cache), em vez de carregar a imagem inteira; a atualização automática do terminal pausa enquanto há texto selecionado para não atrapalhar a cópia.
 - `log_tail` lê o arquivo de trás para frente em blocos, então um crash log grande não precisa ser carregado inteiro na memória.
 - A barra de título é **responsiva e sem moldura**: o título e o slogan usam rótulos que elidem (reticências) em vez de empurrar o layout. O slogan "Gestor de espaço" fica centralizado no meio exato da barra e não intercepta cliques — arraste e duplo clique funcionam em toda a barra.

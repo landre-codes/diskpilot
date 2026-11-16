@@ -129,8 +129,11 @@ class SuggestionCard(QFrame):
             tree.setMaximumHeight(min(214, max(94, len(suggestion.paths) * 34 + 16)))
             theme = get_theme()
             paths_width = 0
+            paths_are_dirs = suggestion.key in {"caches", "build"}
             for path in suggestion.paths:
-                is_dir = os.path.isdir(path)
+                # Sem I/O aqui: em caminhos de rede, verificar cada item
+                # congelava a interface ao abrir esta página.
+                is_dir = paths_are_dirs
                 item = QTreeWidgetItem([path])
                 item.setData(0, Qt.UserRole, path)
                 item.setToolTip(0, path)
@@ -332,9 +335,6 @@ class RecommendationsPage(BasePage):
     def _on_scan_started(self) -> None:
         self.rescan_btn.setEnabled(False)
         self.header.subtitle.setText("Recalculando recomendações…")
-
-    def on_show(self) -> None:
-        self._rebuild()
 
     def _clear_cards(self) -> None:
         self._cards.clear()
