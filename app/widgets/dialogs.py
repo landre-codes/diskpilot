@@ -806,8 +806,6 @@ class _ExportTask(QRunnable):
         self,
         fmt: str,
         result: ScanResult,
-        dirs: list,
-        files: list,
         path: str,
         signals: _ExportSignals,
     ) -> None:
@@ -815,19 +813,18 @@ class _ExportTask(QRunnable):
         self.setAutoDelete(True)
         self.fmt = fmt
         self.result = result
-        self.dirs = dirs
-        self.files = files
         self.path = path
         self.signals = signals
 
     def run(self) -> None:
         try:
+            dirs, files = top_items(self.result, 100)
             if self.fmt == "csv":
-                write_csv(self.result, self.dirs, self.files, self.path)
+                write_csv(self.result, dirs, files, self.path)
             elif self.fmt == "xlsx":
-                write_xlsx(self.result, self.dirs, self.files, self.path)
+                write_xlsx(self.result, dirs, files, self.path)
             else:
-                write_xlsb(self.result, self.dirs, self.files, self.path)
+                write_xlsb(self.result, dirs, files, self.path)
         except ImportError as exc:
             self.signals.failed.emit(
                 f"Dependência ausente: {exc}. "
@@ -854,7 +851,6 @@ class ExportDialog(SheetDialog):
             520,
         )
         self.scan_result = result
-        self._dirs, self._files = top_items(result, 100)
         self.exported_path = ""
         self._fmt = "csv"
         self._exporting = False
@@ -1070,8 +1066,6 @@ class ExportDialog(SheetDialog):
         task = _ExportTask(
             self.format_btn.current(),
             self.scan_result,
-            self._dirs,
-            self._files,
             str(path),
             self._signals,
         )
