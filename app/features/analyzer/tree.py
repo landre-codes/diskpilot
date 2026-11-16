@@ -259,7 +259,7 @@ class FileTree(QTreeWidget):
         self._expand_timer.timeout.connect(self._expand_step)
         self._author_pool = QThreadPool(self)
         self._author_pool.setMaxThreadCount(4)
-        self._author_signals = _AuthorSignals(self)
+        self._author_signals = _AuthorSignals()
         self._author_signals.resolved.connect(self._author_resolved)
         self._author_pending: dict[str, list[QTreeWidgetItem]] = {}
         get_theme().changed.connect(self._refresh_visuals)

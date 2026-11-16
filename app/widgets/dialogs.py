@@ -297,9 +297,12 @@ class FolderPickerDialog(SheetDialog):
         if not self._current or not Path(self._current).exists():
             self._current = str(Path.home())
         self._loading = False
+        self._current_valid = False
         self._folder_generation = 0
         self._folder_model = _FolderModel(self)
-        self._folder_signals = _FolderScanSignals(self)
+        # Sem parent: o QRunnable segura a referência e pode terminar depois
+        # que o diálogo for fechado sem emitir em um QObject já destruído.
+        self._folder_signals = _FolderScanSignals()
         self._folder_signals.loaded.connect(self._folder_loaded)
         self._folder_pool = QThreadPool(self)
         self._folder_pool.setMaxThreadCount(2)
@@ -316,6 +319,7 @@ class FolderPickerDialog(SheetDialog):
         left.addWidget(left_title)
         self.places = QListWidget(self)
         self.places.setObjectName("QuickPlaces")
+        self.places.setAccessibleName("Locais")
         self.places.setFixedWidth(230)
         left.addWidget(self.places, 1)
         work.addLayout(left)
@@ -330,6 +334,7 @@ class FolderPickerDialog(SheetDialog):
         nav.addWidget(self.up_btn)
         self.path_edit = QLineEdit(self)
         self.path_edit.setPlaceholderText("Caminho da pasta")
+        self.path_edit.setAccessibleName("Caminho da pasta")
         self._path_action = self.path_edit.addAction(
             icon("folder-open-outline", get_theme().color("muted"), 16),
             QLineEdit.LeadingPosition,
@@ -343,6 +348,7 @@ class FolderPickerDialog(SheetDialog):
 
         self.folder_list = QListView(self)
         self.folder_list.setObjectName("FolderList")
+        self.folder_list.setAccessibleName("Subpastas")
         self.folder_list.setModel(self._folder_model)
         self.folder_list.setIconSize(QSize(18, 18))
         self.folder_list.setUniformItemSizes(True)
@@ -354,7 +360,9 @@ class FolderPickerDialog(SheetDialog):
         )
         self.folder_list.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.folder_list.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.folder_list.doubleClicked.connect(self._enter_index)
+        # ``activated`` cobre duplo clique e Enter sem disparar a navegação
+        # duas vezes (doubleClicked + activated) no Windows.
+        self.folder_list.activated.connect(self._enter_index)
         self.folder_list.selectionModel().selectionChanged.connect(
             self._update_selection_label
         )
@@ -521,6 +529,7 @@ class FolderPickerDialog(SheetDialog):
         self._folder_generation += 1
         generation = self._folder_generation
         self._loading = True
+        self._current_valid = False
         self._folder_model.set_entries([])
         self.selection_label.setText("Carregando pastas…")
         self.add_btn.setEnabled(False)
@@ -535,9 +544,11 @@ class FolderPickerDialog(SheetDialog):
             return
         self._loading = False
         if error:
+            self._current_valid = False
             self.selection_label.setText("Sem acesso a esta pasta")
             self.selection_label.setToolTip(error)
             return
+        self._current_valid = True
         self.selection_label.setToolTip("")
         self._folder_model.set_entries(list(entries))
         if not entries:
@@ -585,6 +596,9 @@ class FolderPickerDialog(SheetDialog):
         return unique
 
     def _accept_current(self) -> None:
+        if not self._current_valid and not os.path.isdir(self._current):
+            self.selection_label.setText("Pasta atual inválida ou inacessível")
+            return
         self._current_only = True
         self.accept()
 
@@ -956,7 +970,7 @@ class ExportDialog(SheetDialog):
         self._fmt = "csv"
         self._exporting = False
         self._task: _ExportTask | None = None
-        self._signals = _ExportSignals(self)
+        self._signals = _ExportSignals()
         self._signals.finished.connect(self._export_finished)
         self._signals.failed.connect(self._export_failed)
         self._pool = QThreadPool(self)
@@ -997,6 +1011,7 @@ class ExportDialog(SheetDialog):
         folder_row.setSpacing(8)
         self.folder_edit = QLineEdit(default_export_dir(), self)
         self.folder_edit.setPlaceholderText("Caminho da pasta de destino")
+        self.folder_edit.setAccessibleName("Pasta de destino")
         self.folder_edit.textChanged.connect(self._update_target)
         folder_row.addWidget(self.folder_edit, 1)
         choose_folder = ActionButton(
@@ -1012,6 +1027,7 @@ class ExportDialog(SheetDialog):
         default_name = Path(default_export_path("analise", "csv")).name
         self.name_edit = QLineEdit(default_name, self)
         self.name_edit.setPlaceholderText("Nome do arquivo")
+        self.name_edit.setAccessibleName("Nome do arquivo")
         self.name_edit.textChanged.connect(self._update_target)
         self.body.addWidget(self.name_edit)
 
@@ -1367,6 +1383,7 @@ class ImagePickerDialog(SheetDialog):
         nav.addWidget(self.up_btn)
         self.path_edit = QLineEdit(self)
         self.path_edit.setPlaceholderText("Caminho da pasta")
+        self.path_edit.setAccessibleName("Caminho da pasta")
         self._path_action = self.path_edit.addAction(
             icon("folder-open-outline", get_theme().color("muted"), 16),
             QLineEdit.LeadingPosition,

@@ -525,12 +525,6 @@ QFrame#DialogFooter {
     border: none;
     border-top: 1px solid $border;
 }
-QTreeView#FolderTree {
-    background: $surface;
-    border: 1px solid $border;
-    border-radius: 10px;
-}
-QTreeView#FolderTree::item { min-height: 30px; }
 QListView#FolderList {
     background: $surface;
     border: 1px solid $border;

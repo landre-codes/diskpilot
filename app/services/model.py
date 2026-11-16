@@ -106,15 +106,20 @@ def top_items(
 ) -> tuple[list[Node], list[Node]]:
     """Os maiores diretórios e arquivos, em ordem decrescente de tamanho.
 
-    Percorre a árvore uma vez por categoria; ``heapq.nlargest`` mantém apenas
-    os ``limit`` maiores, sem ordenar todos os nós.
+    Uma única travessia mantém dois heaps com os ``limit`` maiores de cada
+    categoria, sem ordenar a árvore inteira.
     """
-    nodes = all_nodes(result)
-    dirs = heapq.nlargest(
-        limit, (node for node in nodes if node.is_dir), key=lambda n: (n.size, n.path)
-    )
-    nodes = all_nodes(result)
-    files = heapq.nlargest(
-        limit, (node for node in nodes if not node.is_dir), key=lambda n: (n.size, n.path)
-    )
+    if limit <= 0:
+        return [], []
+    dir_heap: list[tuple[int, str, Node]] = []
+    file_heap: list[tuple[int, str, Node]] = []
+    for node in all_nodes(result):
+        heap = dir_heap if node.is_dir else file_heap
+        item = (node.size, node.path, node)
+        if len(heap) < limit:
+            heapq.heappush(heap, item)
+        elif item > heap[0]:
+            heapq.heapreplace(heap, item)
+    dirs = [item[2] for item in sorted(dir_heap, reverse=True)]
+    files = [item[2] for item in sorted(file_heap, reverse=True)]
     return dirs, files

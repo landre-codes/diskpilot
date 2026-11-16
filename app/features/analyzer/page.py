@@ -305,15 +305,15 @@ class AnalyzerPage(BasePage):
         dialog = FolderPickerDialog(self.window(), start)
         result = dialog.exec()
         paths = dialog.selected_paths() if result == QDialog.Accepted else []
-        # O seletor usa QFileSystemModel e watchers nativos. Deixamos ele ser
-        # destruído antes de iniciar a varredura; iniciar a varredura
-        # imediatamente após o exec podia derrubar a aplicação no Windows.
+        # Deixamos o diálogo ser destruído antes de iniciar a varredura;
+        # iniciar imediatamente após o exec podia derrubar a aplicação no
+        # Windows em versões antigas do seletor.
         dialog.deleteLater()
         if result != QDialog.Accepted:
             return
         if not paths:
             return
-        added = self.state.add_roots(paths, autoscan=False)
+        added = self.state.add_roots(paths, autoscan=False, trusted=True)
         if not added:
             self.toast("Essas pastas já estão na análise.", "info")
             return

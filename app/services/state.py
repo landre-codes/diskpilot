@@ -95,7 +95,12 @@ class AppState(QObject):
         self._closing = False
 
     # --------------------------------------------------------------- raízes
-    def add_roots(self, paths: list[str], autoscan: bool = True) -> list[str]:
+    def add_roots(
+        self,
+        paths: list[str],
+        autoscan: bool = True,
+        trusted: bool = False,
+    ) -> list[str]:
         added: list[str] = []
         existing = {path_key(p) for p in self.roots}
         for raw in paths:
@@ -104,7 +109,7 @@ class AppState(QObject):
                 path = resolve_network_path(path)
             except Exception:
                 continue
-            if not os.path.isdir(path):
+            if not trusted and not os.path.isdir(path):
                 continue
             key = path_key(path)
             if key in existing:

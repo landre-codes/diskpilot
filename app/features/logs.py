@@ -234,6 +234,7 @@ class LogsPage(BasePage):
 
         self.terminal = QPlainTextEdit(self)
         self.terminal.setObjectName("LogTerminal")
+        self.terminal.setAccessibleName("Terminal de logs")
         self.terminal.setReadOnly(True)
         self.terminal.setUndoRedoEnabled(False)
         self.terminal.setLineWrapMode(QPlainTextEdit.NoWrap)

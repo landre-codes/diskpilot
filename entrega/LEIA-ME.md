@@ -1,10 +1,10 @@
-# DiskPilot 1.13.5 — pacote de transporte em texto
+# DiskPilot 1.14.0 — pacote de transporte em texto
 
 Esta pasta existe para levar o projeto para um ambiente onde **só é possível
 copiar texto** (sem clone, sem ZIP, sem download de release).
 
 O conteúdo não é o código-fonte legível: é o projeto inteiro compactado
-(`tar.xz`, 91.504 bytes) e codificado em **Base85**, dividido em 4 partes de
+(`tar.xz`, 92.024 bytes) e codificado em **Base85**, dividido em 4 partes de
 texto ASCII. O script `restaurar_diskpilot.py` remonta o arquivo, confere o
 SHA-256 e extrai a pasta `DiskPilot/`.
 
@@ -12,15 +12,15 @@ SHA-256 e extrai a pasta `DiskPilot/`.
 
 | Arquivo | Bytes | SHA-256 (sem espaços/quebras) |
 |---|---|---|
-| `parte1.txt` | 28.888 | `09e454591c177b1c7bcf2efb5578d72b91cd1344d7ad821c162d7b2b50bef0c4` |
-| `parte2.txt` | 28.891 | `a34c4ef1aacab9c5e01d7101a0f9aff140ffb184d6b17295bd08fe20a9871fd4` |
-| `parte3.txt` | 28.893 | `f294f81641b4165cfee4480d95cee08a9fc20d7f39e5e4d04bd26d30e54fd14a` |
-| `parte4.txt` | 28.882 | `a8d074098cb4747838223a6acca0bf2f86b07fcecb77cc1a7c36ca96e8075c79` |
+| `parte1.txt` | 29.056 | `9d61676096549bfc1c7fe8a1ef1b7172b1358b525e871bf2c39e9e61b9d7caef` |
+| `parte2.txt` | 29.050 | `0c471915e7695994d2f5c9724d1cfb35dba2c370ca47c00b151a6afd3389493e` |
+| `parte3.txt` | 29.044 | `41999332bc8ad7275b2b2cef97bca387a1edf80ab1204e1c6f20247a67a31549` |
+| `parte4.txt` | 29.043 | `6e0746ff77fc64784792bdf334132107c3a36f9308f18b6c1d1245eeb04b601f` |
 
 SHA-256 do `tar.xz` reconstruído (verificado pelo script):
 
 ```text
-4faeb367a934195478b1e44dfe2cb620f6d27f0d7696abd53c6caeb8bf11dec4
+0145cb769b29485937a0dbfb7c681e658982756ca75bede1908d9d4cab03c05f
 ```
 
 ## Como usar
@@ -45,11 +45,18 @@ SHA-256 do `tar.xz` reconstruído (verificado pelo script):
 5. Confirme no `diskpilot.log`:
 
    ```text
-   iniciando DiskPilot 1.13.5
+   iniciando DiskPilot 1.14.0
    ```
 
 ## Novidades desta versão
 
+- **Auditoria de engenharia/UX**: Top 100 em uma única travessia com dois heaps;
+  adição de pastas sem `isdir` extra para caminhos já validados pelo seletor;
+  navegação por Enter na lista de pastas; nomes acessíveis em listas/campos; e
+  limpeza de QSS/comentários obsoletos do antigo `QTreeView`.
+- **Ciclo de vida de threads**: sinais de autor, enumeração de pastas e
+  exportação não são mais filhos dos widgets; um worker pode terminar após o
+  fechamento da janela sem emitir em um QObject destruído.
 - **Seletor de pastas fluido**: `QFileSystemModel` e `QTreeView` foram
   substituídos por um `QListView` com `QAbstractListModel`; as subpastas são
   enumeradas em segundo plano com `os.scandir` e não há criação de widget nem
@@ -63,7 +70,8 @@ SHA-256 do `tar.xz` reconstruído (verificado pelo script):
   primeira navegação são adiadas para depois da janela aparecer, com cursor de
   espera. A resolução de unidades mapeadas para UNC não faz `isdir` na rede e o
   `QFileSystemModel` não usa watchers nativos. O diálogo deixa de ficar vários
-  segundos invisível antes de responder.
+  segundos invisível antes de responder. (Na 1.13.5 esse modelo foi substituído
+  por `QListView` + `QAbstractListModel` com carga em segundo plano.)
 - **Navegação para Recomendações sem travamento**: a página não refaz a
   análise ao abrir. Os cards já são atualizados pelos sinais da varredura, e a
   montagem não consulta mais `os.path.isdir` para cada caminho. Antes, cada
@@ -236,7 +244,7 @@ Grava `diagnostico-diskpilot.txt` com Python, PySide6, versão do Qt, tela,
 py -c "from pathlib import Path; [print(p.name, len(''.join(p.read_text(encoding='ascii').split()))) for p in sorted(Path('.').glob('parte*.txt'))]"
 ```
 
-Esperado: `28595`, `28595`, `28595`, `28595`.
+Esperado: `28758`, `28758`, `28758`, `28756`.
 
 ## Observações
 
@@ -252,14 +260,14 @@ Esperado: `28595`, `28595`, `28595`, `28595`.
   interromper a análise.
 - O código é distribuído sob licença **MIT** (`LICENSE`); as dependências
   mantêm suas licenças — inventário em `THIRD-PARTY.md`.
-- Este pacote é gerado a partir do commit `v1.13.5` deste repositório.
+- Este pacote é gerado a partir do commit `v1.14.0` deste repositório.
 
 ## URL dos arquivos crus
 
 ```text
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.13.5/entrega/parte1.txt
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.13.5/entrega/parte2.txt
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.13.5/entrega/parte3.txt
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.13.5/entrega/parte4.txt
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.13.5/entrega/restaurar_diskpilot.py
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.14.0/entrega/parte1.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.14.0/entrega/parte2.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.14.0/entrega/parte3.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.14.0/entrega/parte4.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.14.0/entrega/restaurar_diskpilot.py
 ```
