@@ -30,6 +30,7 @@ from PySide6.QtGui import (
     QImageReader,
     QPainter,
     QPainterPath,
+    QPen,
     QPixmap,
 )
 from PySide6.QtWidgets import (
@@ -45,6 +46,7 @@ from PySide6.QtWidgets import (
     QListView,
     QListWidget,
     QListWidgetItem,
+    QScrollArea,
     QToolTip,
     QTreeWidget,
     QTreeWidgetItem,
@@ -122,6 +124,57 @@ class _DialogHeader(QFrame):
         super().mouseReleaseEvent(event)
 
 
+class _ResizeGrip(QWidget):
+    """Alça de redimensionamento desenhada sem depender do QStyle."""
+
+    def __init__(self, parent: QWidget) -> None:
+        super().__init__(parent)
+        self.setFixedSize(16, 16)
+        self.setCursor(Qt.SizeFDiagCursor)
+        self.setToolTip("Arraste para redimensionar")
+        self._start = QPoint()
+        self._size = QSize()
+        self._resizing = False
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        color = QColor(get_theme().color("muted"))
+        color.setAlpha(190)
+        painter.setPen(QPen(color, 1.2))
+        width = self.width()
+        height = self.height()
+        for offset in (4, 9, 14):
+            painter.drawLine(
+                width - offset, height - 2, width - 2, height - offset
+            )
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802
+        if event.button() == Qt.LeftButton:
+            self._resizing = True
+            self._start = event.globalPosition().toPoint()
+            self._size = self.window().size()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802
+        if self._resizing and event.buttons() & Qt.LeftButton:
+            delta = event.globalPosition().toPoint() - self._start
+            window = self.window()
+            window.resize(
+                max(window.minimumWidth(), self._size.width() + delta.x()),
+                max(window.minimumHeight(), self._size.height() + delta.y()),
+            )
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+        self._resizing = False
+        super().mouseReleaseEvent(event)
+
+
 class SheetDialog(QDialog):
     """Modal sem moldura do sistema, com card, sombra e arraste."""
 
@@ -132,6 +185,8 @@ class SheetDialog(QDialog):
         subtitle: str = "",
         width: int = 860,
         height: int = 600,
+        min_width: int = 480,
+        min_height: int = 320,
     ) -> None:
         super().__init__(parent)
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
@@ -142,9 +197,10 @@ class SheetDialog(QDialog):
         available = screen.availableGeometry() if screen is not None else None
         max_w = available.width() - 60 if available is not None else 1200
         max_h = available.height() - 60 if available is not None else 800
-        self._width = max(420, min(width, max_w))
-        self._height = max(260, min(height, max_h))
-        self.setFixedSize(self._width + 36, self._height + 36)
+        self._width = max(260, min(width, max_w))
+        self._height = max(220, min(height, max_h))
+        self.setMinimumSize(min(min_width, max_w), min(min_height, max_h))
+        self.resize(self._width + 36, self._height + 36)
         outer = QVBoxLayout(self)
         outer.setContentsMargins(18, 18, 18, 18)
         self.card = QFrame(self)
@@ -160,10 +216,16 @@ class SheetDialog(QDialog):
         root.setSpacing(0)
         self.header = _DialogHeader(title, subtitle, self)
         root.addWidget(self.header)
-        self.body = QVBoxLayout()
+        self.body_host = QWidget(self.card)
+        self.body = QVBoxLayout(self.body_host)
         self.body.setContentsMargins(20, 16, 20, 16)
         self.body.setSpacing(12)
-        root.addLayout(self.body, 1)
+        self.body_scroll = QScrollArea(self.card)
+        self.body_scroll.setWidgetResizable(True)
+        self.body_scroll.setFrameShape(QFrame.NoFrame)
+        self.body_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.body_scroll.setWidget(self.body_host)
+        root.addWidget(self.body_scroll, 1)
         self.footer = QHBoxLayout()
         self.footer.setContentsMargins(20, 12, 20, 14)
         self.footer.setSpacing(8)
@@ -172,6 +234,16 @@ class SheetDialog(QDialog):
         foot.setLayout(self.footer)
         root.addWidget(foot)
         self._footer_frame = foot
+        self._resize_grip = _ResizeGrip(self)
+        self._resize_grip.move(self.width() - 34, self.height() - 34)
+        self._resize_grip.raise_()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        grip = getattr(self, "_resize_grip", None)
+        if grip is not None:
+            grip.move(self.width() - 34, self.height() - 34)
+            grip.raise_()
 
     def showEvent(self, event) -> None:  # noqa: N802
         super().showEvent(event)
@@ -286,7 +358,15 @@ class FolderPickerDialog(SheetDialog):
         accept_label: str = "Adicionar",
         current_label: str = "Adicionar esta pasta",
     ) -> None:
-        super().__init__(parent, title, subtitle, 920, 610)
+        super().__init__(
+            parent,
+            title,
+            subtitle,
+            920,
+            610,
+            min_width=840,
+            min_height=520,
+        )
         self._current_only = False
         self._single = single
         self._accept_label = accept_label
@@ -398,6 +478,7 @@ class FolderPickerDialog(SheetDialog):
         self.add_current_btn = ActionButton(
             current_label, "folder-plus-outline", "soft", self, 16
         )
+        self.add_current_btn.setMinimumWidth(170)
         self.add_current_btn.clicked.connect(self._accept_current)
         self.footer.addWidget(self.add_current_btn)
         self.selection_label = QLabel("Nenhuma pasta selecionada")
@@ -654,6 +735,27 @@ class FolderPickerDialog(SheetDialog):
         self._update_full_path()
 
 
+class _TopItemsSignals(QObject):
+    loaded = Signal(list, list)
+    failed = Signal(str)
+
+
+class _TopItemsTask(QRunnable):
+    def __init__(self, result: ScanResult, signals: _TopItemsSignals) -> None:
+        super().__init__()
+        self.setAutoDelete(True)
+        self.result = result
+        self.signals = signals
+
+    def run(self) -> None:
+        try:
+            dirs, files = top_items(self.result, 100)
+        except Exception as exc:  # pragma: no cover - borda
+            self.signals.failed.emit(str(exc))
+        else:
+            self.signals.loaded.emit(dirs, files)
+
+
 class TopItemsDialog(SheetDialog):
     """Ranking dos maiores diretórios e arquivos da última análise."""
 
@@ -664,18 +766,21 @@ class TopItemsDialog(SheetDialog):
             "Os 100 diretórios e os 100 arquivos que mais ocupam espaço.",
             1080,
             680,
+            min_width=760,
+            min_height=480,
         )
         self.scan_result = result
         self._kind = "dirs"
         self._size_filter = "all"
         self._selected_path = ""
-        QApplication.setOverrideCursor(Qt.WaitCursor)
-        try:
-            self._dirs, self._files = (
-                top_items(result, 100) if result is not None else ([], [])
-            )
-        finally:
-            QApplication.restoreOverrideCursor()
+        self._dirs: list = []
+        self._files: list = []
+        self._loading = result is not None
+        self._top_signals = _TopItemsSignals()
+        self._top_signals.loaded.connect(self._ranking_loaded)
+        self._top_signals.failed.connect(self._ranking_failed)
+        self._top_pool = QThreadPool(self)
+        self._top_pool.setMaxThreadCount(1)
         self._total = max(1, result.total_size if result is not None else 0)
 
         selector_row = QHBoxLayout()
@@ -683,7 +788,7 @@ class TopItemsDialog(SheetDialog):
         selector_caption = QLabel("Mostrar")
         selector_caption.setObjectName("Muted")
         selector_row.addWidget(selector_caption)
-        self.kind_btn = SelectButton("folder", "Diretórios (100)", self)
+        self.kind_btn = SelectButton("folder", "Diretórios (0)", self)
         self.kind_btn.setMinimumWidth(190)
         self.kind_btn.setMaximumWidth(240)
         self.kind_btn.set_options(
@@ -693,6 +798,7 @@ class TopItemsDialog(SheetDialog):
             ],
             "dirs",
         )
+        self.kind_btn.setEnabled(not self._loading)
         self.kind_btn.changed.connect(self._show_kind)
         selector_row.addWidget(self.kind_btn)
         size_caption = QLabel("Tamanho")
@@ -709,10 +815,13 @@ class TopItemsDialog(SheetDialog):
             ],
             "all",
         )
+        self.size_btn.setEnabled(not self._loading)
         self.size_btn.changed.connect(self._show_size)
         selector_row.addWidget(self.size_btn)
         selector_row.addStretch(1)
-        self.summary = QLabel("")
+        self.summary = QLabel(
+            "Carregando ranking…" if self._loading else ""
+        )
         self.summary.setObjectName("Muted")
         selector_row.addWidget(self.summary)
         self.body.addLayout(selector_row)
@@ -789,6 +898,8 @@ class TopItemsDialog(SheetDialog):
         self._populate()
         self._update_actions()
         self.export_btn.setEnabled(result is not None)
+        if result is not None:
+            self._top_pool.start(_TopItemsTask(result, self._top_signals))
 
     def showEvent(self, event) -> None:  # noqa: N802
         super().showEvent(event)
@@ -810,13 +921,39 @@ class TopItemsDialog(SheetDialog):
         finally:
             dialog.deleteLater()
 
+    def _ranking_loaded(self, dirs: list, files: list) -> None:
+        self._dirs = list(dirs)
+        self._files = list(files)
+        self._loading = False
+        self.kind_btn.setEnabled(True)
+        self.size_btn.setEnabled(True)
+        self.kind_btn.set_options(
+            [
+                ("dirs", f"Diretórios ({len(self._dirs)})", "folder"),
+                ("files", f"Arquivos ({len(self._files)})", "file-outline"),
+            ],
+            self._kind,
+        )
+        self._populate()
+        self._update_actions()
+
+    def _ranking_failed(self, message: str) -> None:
+        self._loading = False
+        self.summary.setText("Falha ao carregar o ranking")
+        self.status_label.setText(message)
+        self.status_label.setToolTip(message)
+
     def _show_kind(self, key: str) -> None:
+        if self._loading:
+            return
         self._kind = "files" if key == "files" else "dirs"
         self._selected_path = ""
         self._populate()
         self._update_actions()
 
     def _show_size(self, key: str) -> None:
+        if self._loading:
+            return
         self._size_filter = key if key in {"large100", "large1g"} else "all"
         self._selected_path = ""
         self._populate()
@@ -833,6 +970,10 @@ class TopItemsDialog(SheetDialog):
         return [node for node in nodes if node.size >= threshold]
 
     def _populate(self) -> None:
+        if self._loading:
+            self.tree.clear()
+            self.summary.setText("Carregando ranking…")
+            return
         nodes = self._filtered_nodes()
         self.tree.clear()
         self.tree.setUpdatesEnabled(False)
@@ -964,6 +1105,8 @@ class ExportDialog(SheetDialog):
             "Escolha o formato, a pasta de destino e o nome do arquivo.",
             620,
             520,
+            min_width=600,
+            min_height=420,
         )
         self.scan_result = result
         self.exported_path = ""
@@ -1226,7 +1369,15 @@ class ConfirmDialog(SheetDialog):
         confirm_text: str = "Confirmar",
         danger: bool = True,
     ) -> None:
-        super().__init__(parent, title, "Esta ação não pode ser desfeita.", 470, 260)
+        super().__init__(
+            parent,
+            title,
+            "Esta ação não pode ser desfeita.",
+            470,
+            260,
+            min_width=420,
+            min_height=240,
+        )
         from .common import IconLabel
 
         content = QHBoxLayout()
@@ -1335,6 +1486,50 @@ def _preview_pixmap(path: str, mtime: float, size: int = 210) -> QPixmap:
     return target
 
 
+class _ImageScanSignals(QObject):
+    loaded = Signal(int, list, list, str)
+
+
+class _ImageScanTask(QRunnable):
+    """Lista pastas e imagens fora da thread da interface."""
+
+    def __init__(
+        self, path: str, generation: int, signals: _ImageScanSignals
+    ) -> None:
+        super().__init__()
+        self.setAutoDelete(True)
+        self.path = path
+        self.generation = generation
+        self.signals = signals
+
+    def run(self) -> None:
+        dirs: list[tuple[str, str]] = []
+        images: list[tuple[str, str, float]] = []
+        error = ""
+        try:
+            with os.scandir(self.path) as iterator:
+                for entry in iterator:
+                    try:
+                        if entry.is_symlink():
+                            continue
+                        if entry.is_dir(follow_symlinks=False):
+                            dirs.append((entry.name, entry.path))
+                        elif entry.is_file(follow_symlinks=False):
+                            suffix = os.path.splitext(entry.name)[1].lower()
+                            if suffix in _AVATAR_EXTENSIONS:
+                                stat = entry.stat(follow_symlinks=False)
+                                images.append(
+                                    (entry.name, entry.path, stat.st_mtime)
+                                )
+                    except OSError:
+                        continue
+        except OSError as exc:
+            error = str(exc)
+        dirs.sort(key=lambda entry: entry[0].casefold())
+        images.sort(key=lambda entry: entry[0].casefold())
+        self.signals.loaded.emit(self.generation, dirs, images, error)
+
+
 class ImagePickerDialog(SheetDialog):
     """Seletor de imagens com miniaturas, locais e prévia."""
 
@@ -1346,6 +1541,8 @@ class ImagePickerDialog(SheetDialog):
             "O enquadramento é ajustado na tela do perfil.",
             1040,
             650,
+            min_width=760,
+            min_height=520,
         )
         self.selected_path = ""
         self._current = ""
@@ -1355,6 +1552,21 @@ class ImagePickerDialog(SheetDialog):
         self._thumb_timer = QTimer(self)
         self._thumb_timer.setInterval(12)
         self._thumb_timer.timeout.connect(self._load_thumbnails)
+        self._loading = False
+        self._image_generation = 0
+        self._grid_generation = 0
+        self._image_count = 0
+        self._initial_item: QListWidgetItem | None = None
+        self._truncated = False
+        self._pending_grid: list[tuple[str, str, bool, float]] = []
+        self._pending_pos = 0
+        self._grid_timer = QTimer(self)
+        self._grid_timer.setInterval(0)
+        self._grid_timer.timeout.connect(self._add_grid_batch)
+        self._image_signals = _ImageScanSignals()
+        self._image_signals.loaded.connect(self._images_loaded)
+        self._image_pool = QThreadPool(self)
+        self._image_pool.setMaxThreadCount(2)
 
         work = QHBoxLayout()
         work.setSpacing(14)
@@ -1585,8 +1797,7 @@ class ImagePickerDialog(SheetDialog):
     # ------------------------------------------------------------- navegação
     def _navigate(self, path: str) -> None:
         path = resolve_network_path(normalize_path(path))
-        if not Path(path).exists() or not Path(path).is_dir():
-            self._show_error(f"Pasta não encontrada: {path}")
+        if not path:
             return
         self._current = path
         self.path_edit.setText(path)
@@ -1598,7 +1809,7 @@ class ImagePickerDialog(SheetDialog):
             if os.path.normcase(str(item.data(Qt.UserRole) or "")) == os.path.normcase(path):
                 self.places.setCurrentItem(item)
                 break
-        self._reload()
+        self._start_image_load(path)
 
     def _go_up(self) -> None:
         parent = str(Path(self._current).parent)
@@ -1609,77 +1820,102 @@ class ImagePickerDialog(SheetDialog):
         self._navigate(self.path_edit.text().strip().strip('"'))
 
     def _reload(self) -> None:
-        if not self._current or not Path(self._current).is_dir():
-            return
+        if self._current:
+            self._start_image_load(self._current)
+
+    def _start_image_load(self, path: str) -> None:
+        self._image_generation += 1
+        generation = self._image_generation
+        self._grid_generation = generation
+        self._loading = True
         self._thumb_timer.stop()
         self._thumb_queue.clear()
+        self._grid_timer.stop()
+        self._pending_grid = []
+        self._pending_pos = 0
+        self._image_count = 0
+        self._initial_item = None
+        self._truncated = False
         self.grid.clear()
         self.selected_path = ""
         self.error.setVisible(False)
-        self.full_path_label.setText(self._current)
-        self.full_path_label.setToolTip(self._current)
-        theme = get_theme()
-        folder_icon = icon("folder", theme.color("primary"), 96)
-        image_icon = icon("file-image-outline", theme.color("muted"), 96)
-        dirs: list[tuple[str, str]] = []
-        images: list[tuple[str, str, float]] = []
-        error = ""
-        try:
-            with os.scandir(self._current) as iterator:
-                for entry in iterator:
-                    try:
-                        if entry.is_symlink():
-                            continue
-                        if entry.is_dir(follow_symlinks=False):
-                            dirs.append((entry.name, entry.path))
-                        elif entry.is_file(follow_symlinks=False):
-                            suffix = os.path.splitext(entry.name)[1].lower()
-                            if suffix in _AVATAR_EXTENSIONS:
-                                stat = entry.stat(follow_symlinks=False)
-                                images.append((entry.name, entry.path, stat.st_mtime))
-                    except OSError:
-                        continue
-        except OSError as exc:
-            error = str(exc)
-        dirs.sort(key=lambda entry: entry[0].casefold())
-        images.sort(key=lambda entry: entry[0].casefold())
+        self.choose_btn.setEnabled(False)
+        self.empty_label.setText("Carregando imagens…")
+        self.empty_label.setVisible(True)
+        self.full_path_label.setText(path)
+        self.full_path_label.setToolTip(path)
+        self._update_preview()
+        self._image_pool.start(
+            _ImageScanTask(path, generation, self._image_signals)
+        )
+
+    def _images_loaded(
+        self, generation: int, dirs: list, images: list, error: str
+    ) -> None:
+        if generation != self._image_generation:
+            return
+        self._loading = False
+        if error:
+            self.empty_label.setText("Não foi possível abrir esta pasta.")
+            self._show_error(f"Não foi possível abrir a pasta: {error}")
+            return
         truncated = len(images) > _MAX_IMAGE_ITEMS
         if truncated:
             images = images[:_MAX_IMAGE_ITEMS]
-        for name, path in dirs:
-            item = QListWidgetItem(folder_icon, name)
+        self._truncated = truncated
+        self._image_count = len(images)
+        self._pending_grid = [
+            (name, path, True, 0.0) for name, path in dirs
+        ] + [(name, path, False, mtime) for name, path, mtime in images]
+        self._pending_pos = 0
+        if not self._pending_grid:
+            self.empty_label.setText("Nenhuma imagem nesta pasta.")
+            self.empty_label.setVisible(True)
+            self._update_preview()
+            return
+        self._add_grid_batch()
+
+    def _add_grid_batch(self) -> None:
+        if self._grid_generation != self._image_generation:
+            self._grid_timer.stop()
+            return
+        end = min(self._pending_pos + 120, len(self._pending_grid))
+        theme = get_theme()
+        folder_icon = icon("folder", theme.color("primary"), 96)
+        image_icon = icon("file-image-outline", theme.color("muted"), 96)
+        for name, path, is_dir, mtime in self._pending_grid[
+            self._pending_pos:end
+        ]:
+            item = QListWidgetItem(folder_icon if is_dir else image_icon, name)
             item.setData(Qt.UserRole, path)
-            item.setData(Qt.UserRole + 2, True)
+            item.setData(Qt.UserRole + 2, is_dir)
             item.setToolTip(path)
             self.grid.addItem(item)
-        selected_item: QListWidgetItem | None = None
-        for name, path, mtime in images:
-            item = QListWidgetItem(image_icon, name)
-            item.setData(Qt.UserRole, path)
-            item.setData(Qt.UserRole + 2, False)
-            item.setToolTip(path)
-            self.grid.addItem(item)
-            self._thumb_queue.append((item, path, mtime))
-            if self._initial_file and os.path.normcase(path) == os.path.normcase(
-                self._initial_file
-            ):
-                selected_item = item
+            if not is_dir:
+                self._thumb_queue.append((item, path, mtime))
+                if self._initial_file and os.path.normcase(path) == os.path.normcase(
+                    self._initial_file
+                ):
+                    self._initial_item = item
+        self._pending_pos = end
+        if self._pending_pos < len(self._pending_grid):
+            self._grid_timer.start(0)
+            return
+        self._grid_timer.stop()
         self._initial_file = ""
-        if truncated:
+        if self._truncated:
             self.empty_label.setText(
                 f"Mostrando as primeiras {_MAX_IMAGE_ITEMS} imagens desta pasta."
             )
             self.empty_label.setVisible(True)
-        elif not images:
+        elif not self._image_count:
             self.empty_label.setText("Nenhuma imagem nesta pasta.")
             self.empty_label.setVisible(True)
         else:
             self.empty_label.setVisible(False)
-        if error:
-            self._show_error(f"Não foi possível abrir a pasta: {error}")
-        if selected_item is not None:
-            self.grid.setCurrentItem(selected_item)
-            self.grid.scrollToItem(selected_item)
+        if self._initial_item is not None:
+            self.grid.setCurrentItem(self._initial_item)
+            self.grid.scrollToItem(self._initial_item)
         self._update_preview()
         if self._thumb_queue:
             self._thumb_timer.start(0)
@@ -1916,6 +2152,8 @@ class ProfileDialog(SheetDialog):
             "Ajuste o nome e o enquadramento da foto exibida no menu lateral.",
             580,
             470,
+            min_width=520,
+            min_height=400,
         )
         self.config = config
         self._picked_avatar: str | None = None

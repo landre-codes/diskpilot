@@ -27,7 +27,8 @@ O projeto nasceu como um "Everything gerencial e enxuto": em vez de apenas local
 - Menu hambúrguer com animação de largura; o estado (expandido/recolhido) é persistido.
 - Marca **fixa** do DiskPilot no topo da barra lateral, parte da identidade visual do produto. Não é configurável.
 - Usuário atual no rodapé da barra lateral, com avatar gerado a partir das iniciais (ou foto importada). Fotos podem ser **arrastadas para reposicionar** e ajustadas com a **roda do mouse (zoom)**; o enquadramento é salvo localmente e aplicado na sidebar, nas configurações e na prévia do perfil.
-- **Seletor de foto próprio**: “Escolher foto” abre um diálogo no mesmo padrão visual do seletor de pastas, com locais (Imagens, Início, Documentos, Downloads, unidades), navegação por caminho, grade de miniaturas, prévia com dimensões/tamanho/data, caminho completo copiável e seleção por duplo clique/Enter. A rotação EXIF é respeitada nas miniaturas e na prévia.
+- **Seletor de foto próprio**: “Escolher foto” abre um diálogo no mesmo padrão visual do seletor de pastas, com locais (Imagens, Início, Documentos, Downloads, unidades), navegação por caminho, grade de miniaturas, prévia com dimensões/tamanho/data, caminho completo copiável e seleção por duplo clique/Enter. A rotação EXIF é respeitada nas miniaturas e na prévia. A pasta é enumerada em segundo plano e a grade é preenchida em lotes, então o diálogo abre mesmo com dezenas de milhares de imagens.
+- **Diálogos redimensionáveis e roláveis**: as janelas sem moldura (perfil, exportação, Top 100, seletores e confirmação) usam uma área de rolagem no corpo, tamanho mínimo confortável e uma alça própria no canto inferior direito. O conteúdo deixa de ser cortado em telas com DPI alto e o aviso `Unable to set geometry` deixa de aparecer.
 
 ### Painel
 - Mini-dashboard com espaço total, quantidade de arquivos/pastas, espaço liberável com segurança e valores em revisão.
@@ -40,14 +41,14 @@ O projeto nasceu como um "Everything gerencial e enxuto": em vez de apenas local
 - Seleção de **uma ou várias pastas** pelo seletor próprio (Ctrl+clique), por arrastar e soltar ou por múltiplas adições.
 - O seletor de pastas mostra o **caminho completo** da pasta atual ou da pasta selecionada, com botão de copiar; cada linha também exibe o caminho integral em tooltip, útil para caminhos longos e unidades de rede.
 - Chips das raízes selecionadas, com remoção individual.
-- Varredura em segundo plano com `QThreadPool`, progresso, cancelamento e tolerância a erros de permissão. Logs em `~/DiskPilot/logs/diskpilot.log` e `diskpilot-crash.log` por padrão, com pasta configurável pela página **Logs**.
-- Botão **Top 100**: ranking dos 100 maiores diretórios e dos 100 maiores arquivos da análise, com filtro por tamanho (todos, > 100 MB, > 1 GB), tamanho, percentual, caminho completo, cópia do caminho e abertura no Explorer.
+- Varredura em segundo plano com `QThreadPool`, progresso agregado, cancelamento e tolerância a erros de permissão. Várias raízes são varridas em paralelo (até 4 workers) com um limite compartilhado de 1,5 milhão de entradas; o progresso combina arquivos, pastas e bytes das raízes ativas. Logs em `~/DiskPilot/logs/diskpilot.log` e `diskpilot-crash.log` por padrão, com pasta configurável pela página **Logs**.
+- Botão **Top 100**: ranking dos 100 maiores diretórios e dos 100 maiores arquivos da análise, com filtro por tamanho (todos, > 100 MB, > 1 GB), tamanho, percentual, caminho completo, cópia do caminho e abertura no Explorer. O ranking é calculado em uma thread de trabalho; o diálogo abre imediatamente e mostra “Carregando ranking…”.
 - Coluna **Autor** na árvore: mostra o autor gravado nos metadados do arquivo (o campo “Authors” do Windows — funciona para Office, PDF e outros formatos que guardam essa informação). A consulta roda em segundo plano, com cache por caminho, para não travar a interface; o nome também aparece no tooltip e na linha copiada. Pastas e formatos sem metadados de autor aparecem como `—`.
 - Colunas com mínimos maiores: **Nome** 280 px, **Tamanho** 124, **% do pai** 90, **Itens** 100, **Modificado** 150, **Autor** 200, **Tipo** 100 e **Caminho completo** 600. Quando a janela não comporta todos os mínimos, a tabela usa rolagem horizontal em vez de esmagar o conteúdo.
 - Coluna opcional **Caminho completo** na árvore, ativada pelo checkbox na barra de ferramentas e persistida na configuração. A coluna cresce até o caminho mais longo exibido (sem reticências), mantém **Nome** com no mínimo 280 px e usa rolagem horizontal em janelas estreitas. O caminho do item selecionado também aparece inteiro em um rodapé selecionável.
 - Os chips das raízes e a tabela do **Top 100** também exibem o caminho completo; no Top 100 a coluna de caminho cresce até o conteúdo e há um rodapé com o caminho da linha selecionada.
 - **Exportação de dados** pelo botão **Exportar** no cabeçalho da análise (ou pelo Top 100): janela com seleção de formato, **pasta de destino editável**, nome do arquivo e prévia do caminho. A pasta é escolhida pelo seletor próprio (mesmo padrão dos Locais do seletor de fotos), sem `QFileDialog`. CSV para Excel/LibreOffice, XLSX com abas Resumo, Top 100 e Sugestões, e XLSB binário (requer Microsoft Excel instalado). A coluna **Autor** também é incluída nos arquivos exportados.
-- A gravação da exportação roda em uma **thread separada** (QThreadPool): a janela permanece responsiva e o XLSB inicializa/finaliza o COM na mesma thread, evitando o `RPC_E_WRONG_THREAD` que podia fechar o app ao cancelar uma exportação. O cálculo do Top 100 também foi movido para essa thread: a janela de exportação abre imediatamente, mesmo com milhões de nós na árvore.
+- A gravação da exportação roda em uma **thread separada** (QThreadPool): a janela permanece responsiva e o XLSB inicializa/finaliza o COM na mesma thread, evitando o `RPC_E_WRONG_THREAD` que podia fechar o app ao cancelar uma exportação. O cálculo do Top 100 usado na exportação também foi movido para essa thread: a janela de exportação abre imediatamente, mesmo com milhões de nós na árvore.
 - Árvore aninhada carregada sob demanda, com:
   - tamanho de cada pasta (soma recursiva) e de cada arquivo;
   - percentual em relação ao pai;
@@ -108,6 +109,17 @@ iniciar.cmd
 ```
 
 > Se a IDE estiver usando um ambiente virtual próprio, instale as dependências no interpretador selecionado: `python -m pip install -r requirements.txt`.
+
+### Testes automatizados
+
+A suíte usa **pytest + QtBot** e roda com o plugin offscreen, sem abrir janelas reais:
+
+```powershell
+py -3.14 -m pip install -r requirements-dev.txt
+py -3.14 -m pytest tests -q
+```
+
+Ela cobre a ordenação do Top 100, a varredura paralela com orçamento compartilhado, o seletor de pastas, a exportação CSV, o seletor de imagens em segundo plano e o carregamento assíncrono do Top 100.
 
 ### Diagnóstico de tela e janela
 
@@ -218,7 +230,13 @@ diskpilot/
 ├─ run.py                       # entrada alternativa (mesma inicialização)
 ├─ iniciar.cmd                  # atalho Windows
 ├─ requirements.txt
+├─ requirements-dev.txt          # pytest, pytest-qt e ruff (somente desenvolvimento)
 ├─ README.md
+├─ tests/                        # suíte pytest + QtBot
+│  ├─ conftest.py
+│  ├─ test_model.py
+│  ├─ test_scanner.py
+│  └─ test_dialogs.py
 └─ app/
    ├─ __init__.py               # nome, tagline e versão
    ├─ __main__.py               # permite `python -m app`
@@ -236,7 +254,7 @@ diskpilot/
    │  ├─ buttons.py             # botões com hover, abas desenhadas, busca, selects
    │  ├─ charts.py              # donut e barras com QPainter
    │  ├─ common.py              # cards, headers, chips, empty state, toast
-   │  ├─ dialogs.py             # seletor de pastas, perfil, confirmação
+   │  ├─ dialogs.py             # diálogos roláveis, seletores, perfil, exportação e Top 100
    │  ├─ sidebar.py             # marca fixa, abas verticais, usuário
    │  └─ title_bar.py           # controles da janela
    ├─ services/
@@ -329,7 +347,7 @@ class ClientesPage(BasePage):
 
 ## Notas de implementação
 
-- A varredura usa `os.scandir`, ignora links simbólicos para evitar ciclos e contabiliza erros de acesso sem interromper a análise.
+- A varredura usa `os.scandir`, ignora links simbólicos para evitar ciclos e contabiliza erros de acesso sem interromper a análise. Quando há várias raízes, elas são distribuídas em um `ThreadPoolExecutor` com até 4 workers; um `_ScanBudget` compartilhado garante que o limite de 1,5 milhão de entradas valha para o conjunto, e um agregador combina o progresso sem regredir os contadores.
 - Os tamanhos são **lógicos** (`st_size`), que é o valor esperado em um gerenciador de arquivos. Arquivos esparsos, comprimidos ou com hard links podem ocupar menos espaço físico do que o valor exibido.
 - A árvore é preguiçosa: os filhos de uma pasta só são criados quando ela é expandida, com limite de 1.200 itens por pasta e busca global limitada para manter a responsividade.
 - As estimativas de limpeza não são destrutivas e podem se sobrepor; os cálculos já evitam contar arquivos de cache duas vezes e mostram "seguro" separado de "revisar".
@@ -343,14 +361,17 @@ class ClientesPage(BasePage):
 - O seletor de pastas usa um `QListView` com modelo leve e enumeração em segundo plano, e exibe o caminho completo do item atual/selecionado em um rótulo selecionável (com cópia), além de tooltip por linha. O caminho não é abreviado, o que ajuda em compartilhamentos de rede.
 - O banner de progresso e a lista de caminhos das recomendações mostram o caminho integral: o banner usa quebra de linha e a lista usa rolagem horizontal. A função `short_path` foi removida do projeto.
 - Unidades mapeadas são resolvidas via `QStorageInfo.device()`: quando o `\\servidor\compartilhamento` equivalente está acessível, o seletor, as raízes e o banner passam a usar o caminho UNC em vez de `W:\`/`Z:\`.
-- O ranking **Top 100** percorre a árvore em memória com `heapq.nlargest` (duas passagens: diretórios e arquivos), sem ordenar todos os nós. Percentuais de diretórios são cumulativos e podem se sobrepor.
+- O ranking **Top 100** percorre a árvore em memória uma única vez, mantendo dois heaps (`heapq.nlargest`) para diretórios e arquivos, sem ordenar todos os nós. No diálogo, o cálculo roda em um worker próprio e a tabela mostra “Carregando ranking…” até o resultado chegar. Percentuais de diretórios são cumulativos e podem se sobrepor.
 - **Memória**: diálogos transitórios são destruídos com `deleteLater`, menus e animações são liberados/reutilizados, e o resultado grande anterior é descartado antes de uma nova varredura (`RELEASE_RESULT_THRESHOLD`). A varredura tem limite de 1,5 milhão de entradas; o resumo persistido guarda apenas os 6 maiores diretórios, calculados com `heapq.nlargest`.
 - **Expansão da árvore**: os filhos de uma pasta são carregados em lotes de 120 itens, com debounce de 60 ms. A árvore mostra “Carregando…” enquanto isso, mantém a contagem incremental e restaura as pastas expandidas após uma reordenação. Ícones de arquivo são cacheados por extensão, e a ordenação dos filhos usa `heapq.nlargest/nsmallest` com o limite de 1.200 itens exibidos.
 - `qt-material` fornece a base do tema; o QSS em `theme.py` sobrescreve o que é necessário (especialmente `text-transform`, hovers e cores semânticas) para manter a identidade do app.
 - A geometria inicial e a restaurada são limitadas à área útil da tela: em notebooks pequenos (ou com escala de 125%/150%) a janela não nasce maior que o monitor, então a barra de título e os botões de janela continuam clicáveis. O tamanho mínimo também se adapta ao monitor.
 - O `WM_NCHITTEST` nativo converte a posição do cursor para o espaço lógico do Qt antes de detectar as bordas. Sem isso, em telas com escala o canto direito inteiro era confundido com borda de redimensionamento e os botões de maximizar/fechar não respondiam — o usuário precisava maximizar com duplo clique no meio da barra.
 - O filtro global de `Ctrl+roda` é removido no `aboutToQuit` (`CtrlWheelGuard.stop`) e não chama `super().eventFilter` durante o teardown. Isso evita a recursão de `RuntimeError`/objetos C++ já destruídos no encerramento do Python/Qt.
-- Auditoria estática (`ruff check --select F`) sem erros: imports não utilizados foram removidos e os módulos novos (`services/exporter.py`, filtros do Top 100 e coluna de caminho) passaram por compilação e testes de fumaça.
+- Auditoria estática (`ruff check --select F`) sem erros e suíte **pytest + QtBot** cobrindo modelo, varredura paralela, seletor de pastas, exportação CSV, seletor de imagens e Top 100 assíncrono. Imports não utilizados foram removidos e os módulos novos (`services/exporter.py`, filtros do Top 100 e coluna de caminho) passaram por compilação e testes de fumaça.
+- `SheetDialog` envolve o corpo em um `QScrollArea` e usa mínimo por diálogo (por exemplo, 840×520 no seletor de pastas e 600×420 na exportação). A alça de redimensionamento é desenhada pelo próprio app, em vez de `setSizeGripEnabled(True)`, porque o estilo do Qt procurava `icon:/primary/sizegrip.svg` e emitia um aviso no console.
+- O seletor de imagens usa `_ImageScanTask` + sinais para listar a pasta fora da GUI e adiciona os itens da grade em lotes de 120. O Top 100 usa `_TopItemsTask`; nenhum dos dois calcula a pasta/ranking no construtor do diálogo.
+- A suíte de testes fica em `tests/` e é opcional em produção: `requirements-dev.txt` adiciona pytest, pytest-qt e ruff, e `tests/conftest.py` força `QT_QPA_PLATFORM=offscreen` e a raiz do projeto no `sys.path`.
 - Maximizar e restaurar são controlados pelo próprio app, e não por `showMaximized()`: em janelas sem moldura o `normalGeometry()` do Qt pode crescer a cada ciclo e devolver um retângulo maior que a tela. O estado salvo (geometria e maximizado) é aplicado antes do primeiro `show`, para a janela não piscar em tamanhos intermediários.
 - A janela tem **tamanho máximo igual à área útil da tela** (e a posição é limitada para manter a barra de título alcançável), então nenhum salto de layout consegue empurrar os botões para fora do monitor. O log registra tela, escala e geometria em cada maximizar/restaurar para diagnóstico.
 - A troca de tema usa **cache de QSS por tema** e uma única chamada a `setStyleSheet`. A geração de ícones do `qt_material` (que reescrevia centenas de SVG em `~/.qt_material` a cada troca) é desativada — o app usa apenas qtawesome —, e o QSS do outro tema é pré-montado em segundo plano após a abertura.
@@ -379,6 +400,7 @@ class ClientesPage(BasePage):
 - Não há exclusão em massa; isso é intencional por segurança.
 - Duplicatas são comparadas por nome + tamanho, sem abrir/ler o conteúdo dos arquivos. A lista é ordenada pelo espaço potencialmente recuperável, e os caminhos são exibidos para revisão manual antes de qualquer remoção.
 - O redimensionamento nativo por `WM_NCHITTEST` é específico do Windows; o fallback manual cobre outras plataformas.
+- A varredura paralela distribui raízes independentes, não subpastas de uma mesma raiz. Um disco lento ainda limita o ganho, e o limite de 1,5 milhão de entradas é compartilhado por todas as raízes.
 - Para volumes muito grandes (milhões de itens), considere persistir a árvore em SQLite ou manter uma indexação incremental.
 - O shell pode receber novas páginas sem alterações na janela principal.
 

@@ -1,10 +1,10 @@
-# DiskPilot 1.14.0 — pacote de transporte em texto
+# DiskPilot 1.15.0 — pacote de transporte em texto
 
 Esta pasta existe para levar o projeto para um ambiente onde **só é possível
 copiar texto** (sem clone, sem ZIP, sem download de release).
 
 O conteúdo não é o código-fonte legível: é o projeto inteiro compactado
-(`tar.xz`, 92.024 bytes) e codificado em **Base85**, dividido em 4 partes de
+(`tar.xz`, 97.180 bytes) e codificado em **Base85**, dividido em 4 partes de
 texto ASCII. O script `restaurar_diskpilot.py` remonta o arquivo, confere o
 SHA-256 e extrai a pasta `DiskPilot/`.
 
@@ -12,15 +12,15 @@ SHA-256 e extrai a pasta `DiskPilot/`.
 
 | Arquivo | Bytes | SHA-256 (sem espaços/quebras) |
 |---|---|---|
-| `parte1.txt` | 29.056 | `9d61676096549bfc1c7fe8a1ef1b7172b1358b525e871bf2c39e9e61b9d7caef` |
-| `parte2.txt` | 29.050 | `0c471915e7695994d2f5c9724d1cfb35dba2c370ca47c00b151a6afd3389493e` |
-| `parte3.txt` | 29.044 | `41999332bc8ad7275b2b2cef97bca387a1edf80ab1204e1c6f20247a67a31549` |
-| `parte4.txt` | 29.043 | `6e0746ff77fc64784792bdf334132107c3a36f9308f18b6c1d1245eeb04b601f` |
+| `parte1.txt` | 30.623 | `26ac3a5ab3944e80616b29bc2e2bbfc865c08e915eaeaed06b47d96794f56370` |
+| `parte2.txt` | 30.623 | `6110af896b18223636c5c71d181131439e2ec51c70d8a2f22a89eea06e77acf6` |
+| `parte3.txt` | 30.623 | `83e6f066fa5b6848fa5f4b67d346b85de536b3ed1da748b362f483d7e1a2c4c9` |
+| `parte4.txt` | 30.622 | `081d5c61b7cbbaa90bcdf64bea96237884b957eef9e532d90913b98354c2fc71` |
 
 SHA-256 do `tar.xz` reconstruído (verificado pelo script):
 
 ```text
-0145cb769b29485937a0dbfb7c681e658982756ca75bede1908d9d4cab03c05f
+5d6166c83ed04243c7eb96a9e28ba0f5baf4a26ef467586eb529447030b19146
 ```
 
 ## Como usar
@@ -45,10 +45,32 @@ SHA-256 do `tar.xz` reconstruído (verificado pelo script):
 5. Confirme no `diskpilot.log`:
 
    ```text
-   iniciando DiskPilot 1.14.0
+   iniciando DiskPilot 1.15.0
    ```
 
 ## Novidades desta versão
+
+- **Diálogos redimensionáveis e roláveis**: todas as janelas sem moldura agora
+  usam um `QScrollArea` no corpo, tamanho mínimo por diálogo e uma alça própria
+  no canto inferior direito. Em telas com DPI alto o conteúdo deixa de ser
+  cortado e o aviso `Unable to set geometry` não aparece. A alça é desenhada
+  pelo app para evitar o aviso `sizegrip.svg` do estilo do Qt.
+- **Varredura de várias raízes em paralelo**: raízes independentes são
+  distribuídas em até 4 workers (`ThreadPoolExecutor`), com progresso agregado
+  e um limite compartilhado de 1,5 milhão de entradas. Os totais continuam
+  iguais aos da varredura sequencial, e o truncamento por segurança vale para o
+  conjunto.
+- **Seletor de fotos em segundo plano**: a enumeração da pasta saiu da thread da
+  interface e a grade é preenchida em lotes de 120 itens. O diálogo abre
+  imediatamente mesmo em pastas com dezenas de milhares de imagens.
+- **Top 100 em segundo plano**: o ranking não é mais calculado no construtor do
+  diálogo. A janela abre com “Carregando ranking…” e recebe os itens de um
+  worker; o cálculo continua em uma única travessia com dois heaps.
+- **Suíte pytest + QtBot**: 10 testes automatizados cobrem o Top 100, a varredura
+  paralela com orçamento compartilhado e progresso agregado, o seletor de pastas,
+  a exportação CSV, o seletor de imagens, o carregamento assíncrono do Top 100 e
+  o redimensionamento/rolagem dos diálogos. A suíte é opcional em produção e usa
+  `requirements-dev.txt` + `pytest tests -q`.
 
 - **Auditoria de engenharia/UX**: Top 100 em uma única travessia com dois heaps;
   adição de pastas sem `isdir` extra para caminhos já validados pelo seletor;
@@ -244,7 +266,7 @@ Grava `diagnostico-diskpilot.txt` com Python, PySide6, versão do Qt, tela,
 py -c "from pathlib import Path; [print(p.name, len(''.join(p.read_text(encoding='ascii').split()))) for p in sorted(Path('.').glob('parte*.txt'))]"
 ```
 
-Esperado: `28758`, `28758`, `28758`, `28756`.
+Esperado: `30369`, `30369`, `30369`, `30368`.
 
 ## Observações
 
@@ -260,14 +282,17 @@ Esperado: `28758`, `28758`, `28758`, `28756`.
   interromper a análise.
 - O código é distribuído sob licença **MIT** (`LICENSE`); as dependências
   mantêm suas licenças — inventário em `THIRD-PARTY.md`.
-- Este pacote é gerado a partir do commit `v1.14.0` deste repositório.
+- O pacote agora inclui `tests/` e `requirements-dev.txt` para rodar a suíte
+  `pytest + QtBot` em outro ambiente. Para executar:
+  `py -m pip install -r requirements-dev.txt` e `py -m pytest tests -q`.
+- Este pacote é gerado a partir do commit `v1.15.0` deste repositório.
 
 ## URL dos arquivos crus
 
 ```text
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.14.0/entrega/parte1.txt
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.14.0/entrega/parte2.txt
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.14.0/entrega/parte3.txt
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.14.0/entrega/parte4.txt
-https://raw.githubusercontent.com/landre-codes/diskpilot/v1.14.0/entrega/restaurar_diskpilot.py
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.15.0/entrega/parte1.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.15.0/entrega/parte2.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.15.0/entrega/parte3.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.15.0/entrega/parte4.txt
+https://raw.githubusercontent.com/landre-codes/diskpilot/v1.15.0/entrega/restaurar_diskpilot.py
 ```
