@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-import hashlib
 import os
-import threading
 import time
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from .model import Node, ScanResult, Suggestion, walk_nodes
@@ -49,84 +46,6 @@ STALE_MIN = 200 * 1024 * 1024
 DUP_MIN = 10 * 1024 * 1024
 ARCHIVE_MIN = 1024 * 1024 * 1024
 TEMP_MIN = 20 * 1024 * 1024
-DUP_HASH_WORKERS = max(2, min(8, os.cpu_count() or 4))
-DUP_HASH_MAX_FILES = 400
-DUP_HASH_MAX_BYTES = 8 * 1024**3
-DUP_HASH_CHUNK = 1024 * 1024
-
-
-def _file_digest(
-    path: str, cancel: threading.Event | None = None
-) -> bytes | None:
-    """Hash rápido do conteúdo; ``None`` se não puder ser lido/cancelado."""
-    digest = hashlib.blake2b(digest_size=16)
-    try:
-        with open(path, "rb", buffering=0) as handle:
-            while True:
-                if cancel is not None and cancel.is_set():
-                    return None
-                chunk = handle.read(DUP_HASH_CHUNK)
-                if not chunk:
-                    break
-                digest.update(chunk)
-        return digest.digest()
-    except OSError:
-        return None
-
-
-def _verified_duplicate_groups(
-    groups: list[list[Node]], cancel: threading.Event | None = None
-) -> list[list[Node]]:
-    """Confirma duplicatas por conteúdo, com hashing paralelo."""
-    selected: list[list[Node]] = []
-    files = 0
-    total_bytes = 0
-    for group in groups[:40]:
-        if cancel is not None and cancel.is_set():
-            return []
-        size = group[0].size
-        needed = size * len(group)
-        if (
-            files + len(group) > DUP_HASH_MAX_FILES
-            or total_bytes + needed > DUP_HASH_MAX_BYTES
-        ):
-            continue
-        selected.append(group)
-        files += len(group)
-        total_bytes += needed
-    if not selected:
-        return []
-    digests: dict[str, bytes] = {}
-    with ThreadPoolExecutor(max_workers=DUP_HASH_WORKERS) as pool:
-        futures = {
-            pool.submit(_file_digest, node.path, cancel): node
-            for group in selected
-            for node in group
-        }
-        for future in as_completed(futures):
-            node = futures[future]
-            try:
-                digest = future.result()
-            except Exception:
-                digest = None
-            if digest is not None:
-                digests[os.path.normcase(node.path)] = digest
-            if cancel is not None and cancel.is_set():
-                break
-    refined: list[list[Node]] = []
-    for group in selected:
-        by_digest: dict[bytes, list[Node]] = defaultdict(list)
-        for node in group:
-            digest = digests.get(os.path.normcase(node.path))
-            if digest is not None:
-                by_digest[digest].append(node)
-        for items in by_digest.values():
-            if len(items) > 1:
-                refined.append(items)
-    refined.sort(
-        key=lambda items: items[0].size * (len(items) - 1), reverse=True
-    )
-    return refined
 
 
 def _collect_roots_nodes(result: ScanResult) -> list[Node]:
@@ -144,9 +63,7 @@ def _is_under(path: str, parents: set[str]) -> bool:
 
 
 def build_suggestions(
-    result: ScanResult,
-    max_paths: int = 60,
-    cancel: threading.Event | None = None,
+    result: ScanResult, max_paths: int = 60
 ) -> list[Suggestion]:
     """Analisa a árvore e devolve sugestões ordenadas por segurança/impacto."""
     now = time.time()
@@ -286,12 +203,11 @@ def build_suggestions(
         groups[(node.name.casefold(), node.size)].append(node)
     duplicate_groups = [items for items in groups.values() if len(items) > 1]
     duplicate_groups.sort(key=lambda items: items[0].size * (len(items) - 1), reverse=True)
-    verified_groups = _verified_duplicate_groups(duplicate_groups, cancel)
-    if verified_groups:
+    if duplicate_groups:
         savings = 0
         count = 0
         paths: list[str] = []
-        for items in verified_groups[:40]:
+        for items in duplicate_groups[:40]:
             size = items[0].size
             savings += size * (len(items) - 1)
             count += len(items) - 1
@@ -301,23 +217,23 @@ def build_suggestions(
         suggestions.append(
             Suggestion(
                 key="duplicates",
-                title="Arquivos duplicados (conteúdo idêntico)",
+                title="Possíveis arquivos duplicados",
                 description=(
-                    "Arquivos com mesmo nome, tamanho e conteúdo confirmado por hash "
-                    "BLAKE2b. São cópias redundantes verificadas."
+                    "Arquivos com mesmo nome e exatamente o mesmo tamanho. Podem ser cópias "
+                    "redundantes — confirme o conteúdo antes de remover."
                 ),
                 savings=savings,
                 count=count,
                 confidence="review",
                 icon="content-duplicate",
                 note=(
-                    "O hash foi calculado em paralelo. Mesmo com conteúdo idêntico, "
-                    "confirme qual cópia deve ser mantida antes de remover."
+                    "O app compara nome e tamanho, não o conteúdo. Abra os arquivos ou "
+                    "confirme com a equipe antes de apagar e mantenha ao menos uma cópia."
                 ),
                 paths=paths,
             )
         )
-        for items in verified_groups:
+        for items in duplicate_groups:
             for node in items:
                 claimed.add(os.path.normcase(node.path))
 

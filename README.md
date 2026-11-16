@@ -6,7 +6,7 @@ O projeto nasceu como um "Everything gerencial e enxuto": em vez de apenas local
 
 > Princípio importante: o aplicativo **não apaga arquivos automaticamente**. As recomendações apenas indicam caminhos, explicam o risco e oferecem atalhos para inspeção no Explorer.
 
-> **Aviso de responsabilidade:** o DiskPilot é uma ferramenta de leitura e estimativa. Tamanhos são lógicos e podem diferir do espaço físico; varreduras extensas podem ser parciais; duplicatas são pré-filtradas por nome/tamanho e confirmadas por hash BLAKE2b quando o arquivo é legível. A decisão de remover, mover ou compartilhar dados é integralmente do usuário e da equipe.
+> **Aviso de responsabilidade:** o DiskPilot é uma ferramenta de leitura e estimativa. Tamanhos são lógicos e podem diferir do espaço físico; varreduras extensas podem ser parciais; duplicatas são comparadas apenas por nome/tamanho, sem leitura do conteúdo. A decisão de remover, mover ou compartilhar dados é integralmente do usuário e da equipe.
 
 ---
 
@@ -68,7 +68,7 @@ O projeto nasceu como um "Everything gerencial e enxuto": em vez de apenas local
 - Caches regeneráveis (`node_modules`, `__pycache__`, `.next`, `.pytest_cache`, etc.), classificados como **seguros**.
 - Artefatos de build e ambientes virtuais (`build`, `dist`, `target`, `.venv`, ...), classificados para **revisão**.
 - Arquivos grandes sem alteração há mais de um ano.
-- Duplicatas confirmadas por **hash BLAKE2b** em paralelo (nome + tamanho são usados como pré-filtro; grupos grandes são limitados por uma cota de 8 GB/400 arquivos por análise).
+- Possíveis duplicatas por **nome + tamanho**, sem ler o conteúdo dos arquivos. Os mais pesados aparecem primeiro, o que já permite liberar espaço com uma revisão manual.
 - Arquivos compactados muito grandes e arquivos temporários/backups.
 - Caminhos reais, botão para abrir o local e cópia de todos os caminhos para compartilhar com a equipe.
 - Nenhuma exclusão automática: o texto de cada card explica o risco e o que verificar antes.
@@ -369,7 +369,7 @@ class ClientesPage(BasePage):
 ## Limitações e próximos passos
 
 - Não há exclusão em massa; isso é intencional por segurança.
-- Duplicatas são pré-filtradas por nome + tamanho e confirmadas por hash BLAKE2b em até 8 workers; arquivos sem permissão de leitura não são confirmados. O hashing é limitado a 400 arquivos/8 GB por análise para não transformar a varredura em uma leitura completa do disco.
+- Duplicatas são comparadas por nome + tamanho, sem abrir/ler o conteúdo dos arquivos. A lista é ordenada pelo espaço potencialmente recuperável, e os caminhos são exibidos para revisão manual antes de qualquer remoção.
 - O redimensionamento nativo por `WM_NCHITTEST` é específico do Windows; o fallback manual cobre outras plataformas.
 - Para volumes muito grandes (milhões de itens), considere persistir a árvore em SQLite ou manter uma indexação incremental.
 - O shell pode receber novas páginas sem alterações na janela principal.

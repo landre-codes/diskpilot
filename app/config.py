@@ -111,6 +111,10 @@ class AppConfig:
             self.data.pop("native_frame", None)
             # O logo passou a ser fixo (identidade visual do produto).
             self.data.pop("logo", None)
+            # A análise de conteúdo por hash foi removida por política.
+            scan_cfg = self.data.get("scan")
+            if isinstance(scan_cfg, dict):
+                scan_cfg.pop("hash_duplicates", None)
             # O cargo foi removido do produto; descartamos resíduos de
             # configurações antigas para manter o perfil enxuto.
             if isinstance(self.data.get("user"), dict):

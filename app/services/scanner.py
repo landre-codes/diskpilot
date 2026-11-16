@@ -97,10 +97,7 @@ class _Scanner:
             truncated=self.truncated,
         )
         self._check()
-        if self.progress_cb is not None:
-            self.progress.current = "Verificando duplicatas por hash…"
-            self._emit(force=True)
-        result.suggestions = build_suggestions(result, cancel=self.cancel)
+        result.suggestions = build_suggestions(result)
         self._check()
         return result
 

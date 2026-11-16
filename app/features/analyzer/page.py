@@ -415,12 +415,9 @@ class AnalyzerPage(BasePage):
             f"{format_number(progress.files)} arquivos · {format_bytes(progress.bytes_seen)}"
         )
         path = progress.current or ""
-        if not path:
-            self.banner_path.setText("Mapeando estrutura…")
-        elif path.startswith("Verificando "):
-            self.banner_path.setText(path)
-        else:
-            self.banner_path.setText(f"Lendo pasta: {path}")
+        self.banner_path.setText(
+            f"Lendo pasta: {path}" if path else "Mapeando estrutura…"
+        )
 
     def _cancel_scan(self) -> None:
         self.cancel_btn.setEnabled(False)
