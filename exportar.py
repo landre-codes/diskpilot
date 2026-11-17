@@ -46,11 +46,13 @@ def version() -> str:
 
 def copy_source(destination: Path) -> None:
     destination.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(ROOT / "app", destination / "app", ignore=IGNORE)
+    for folder in ("app", "appshell", "tests"):
+        shutil.copytree(ROOT / folder, destination / folder, ignore=IGNORE)
     for name in (
         "main.py",
         "run.py",
         "requirements.txt",
+        "requirements-dev.txt",
         "README.md",
         "iniciar.cmd",
         "exportar.py",

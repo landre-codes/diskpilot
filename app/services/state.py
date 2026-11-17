@@ -14,7 +14,9 @@ import threading
 import time
 from typing import Any
 
-from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, Signal, Slot
+from PySide6.QtCore import QObject, QTimer, Signal, Slot
+
+from appshell.tasks import Task, TaskCancelled, TaskRunner
 
 from ..config import AppConfig
 from ..utils import normalize_path, path_key, resolve_network_path
@@ -29,39 +31,22 @@ logger = logging.getLogger("diskpilot.state")
 RELEASE_RESULT_THRESHOLD = 80_000
 
 
-class ScanSignals(QObject):
-    progress = Signal(object)
-    finished = Signal(object)
-    cancelled = Signal()
-    failed = Signal(str)
-
-
-class ScanTask(QRunnable):
-    """Uma execução da varredura, gerenciada pelo pool de threads do Qt."""
+class ScanTask(Task):
+    """Uma execução da varredura, gerenciada pelo TaskRunner genérico."""
 
     def __init__(self, roots: list[str], cancel: threading.Event) -> None:
-        super().__init__()
-        self.setAutoDelete(True)
+        super().__init__(cancel)
         self.roots = list(roots)
-        self.cancel = cancel
-        self.signals = ScanSignals()
 
-    def run(self) -> None:
+    def execute(self):
         try:
-            result = scan_paths(
+            return scan_paths(
                 self.roots,
                 self.cancel,
                 progress_cb=self.signals.progress.emit,
             )
-            if self.cancel.is_set():
-                self.signals.cancelled.emit()
-            else:
-                self.signals.finished.emit(result)
-        except ScanCancelled:
-            self.signals.cancelled.emit()
-        except Exception as exc:  # pragma: no cover - proteção de borda
-            logger.exception("scan task failed")
-            self.signals.failed.emit(str(exc))
+        except ScanCancelled as exc:
+            raise TaskCancelled() from exc
 
 
 class AppState(QObject):
@@ -85,10 +70,10 @@ class AppState(QObject):
         self.last_result: ScanResult | None = None
         self.last_error: str = ""
         self.is_scanning = False
-        self._pool = QThreadPool(self)
-        self._pool.setMaxThreadCount(1)
+        self._runner = TaskRunner(self, max_threads=1)
+        self._runner.busyChanged.connect(self.busyChanged.emit)
         self._task: ScanTask | None = None
-        self._signals: ScanSignals | None = None
+        self._signals = None
         self._cancel: threading.Event | None = None
         self._generation = 0
         self._pending_restart = False
@@ -177,10 +162,9 @@ class AppState(QObject):
         self._signals = signals
         self.is_scanning = True
         self._release_large_result()
-        self.busyChanged.emit(True)
         self.scanStarted.emit()
         logger.info("scan start gen=%s roots=%s", generation, len(self.roots))
-        self._pool.start(task)
+        self._runner.submit(task)
 
     def _release_large_result(self) -> None:
         result = self.last_result
@@ -203,14 +187,10 @@ class AppState(QObject):
         """Libera a task atual, ignorando callbacks de gerações antigas."""
         if generation != self._generation:
             return
-        signals = self._signals
         self._signals = None
         self._task = None
         self._cancel = None
-        if signals is not None:
-            signals.deleteLater()
         self.is_scanning = False
-        self.busyChanged.emit(False)
 
     @Slot(int, object)
     def _on_progress(self, generation: int, progress: ScanProgress) -> None:
@@ -348,10 +328,9 @@ class AppState(QObject):
         if self._cancel is not None:
             self._cancel.set()
         try:
-            # QThreadPool aguarda as threads; não destruímos um QThread em
-            # execução, que era a origem do exit 0xC0000409.
-            self._pool.clear()
-            self._pool.waitForDone(15000)
+            # O TaskRunner aguarda as threads e mantém os sinais vivos até o
+            # término; não destruímos um QThread em execução.
+            self._runner.shutdown()
         except Exception:
             logger.exception("falha ao encerrar o pool de varredura")
         try:

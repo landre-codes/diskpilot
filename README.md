@@ -234,9 +234,18 @@ diskpilot/
 ├─ README.md
 ├─ tests/                        # suíte pytest + QtBot
 │  ├─ conftest.py
+│  ├─ test_appshell.py
 │  ├─ test_model.py
 │  ├─ test_scanner.py
+│  ├─ test_shell.py
+│  ├─ test_state.py
 │  └─ test_dialogs.py
+├─ appshell/                     # núcleo genérico, sem dependência de app/
+│  ├─ context.py                # AppContext e SettingsStore
+│  ├─ pages.py                  # BasePage e PageSpec
+│  ├─ tasks.py                  # Task, TaskSignals e TaskRunner
+│  ├─ shell.py                  # ShellWindow, ShellOptions e FadeStack
+│  └─ README.md                 # como reutilizar o núcleo
 └─ app/
    ├─ __init__.py               # nome, tagline e versão
    ├─ __main__.py               # permite `python -m app`
@@ -244,7 +253,7 @@ diskpilot/
    ├─ input_guard.py            # filtro global de Ctrl+roda do mouse
    ├─ single_instance.py        # instância única + ativação da janela
    ├─ pages.py                  # registro das páginas padrão
-   ├─ shell.py                  # janela sem moldura, navegação, atalhos, drag/drop
+   ├─ shell.py                  # composição do DiskPilot sobre appshell
    ├─ config.py                 # persistência JSON e importação de ativos
    ├─ logging_setup.py          # logs rotativos, crash log e migração
    ├─ theme.py                  # paletas, QSS e integração qt-material
@@ -261,9 +270,9 @@ diskpilot/
    │  ├─ model.py               # Node, ScanResult, Suggestion
    │  ├─ scanner.py             # varredura recursiva cancelável
    │  ├─ suggestions.py         # heurísticas de limpeza
-   │  └─ state.py               # estado compartilhado + QThreadPool
+   │  └─ state.py               # estado compartilhado + TaskRunner
    └─ features/
-      ├─ base.py                # BasePage e PageSpec
+      ├─ base.py                # reexporta BasePage e PageSpec de appshell
       ├─ dashboard.py
       ├─ logs.py                # terminal de logs e diagnóstico
       ├─ recommendations.py
@@ -277,17 +286,12 @@ diskpilot/
 
 ## Como reutilizar o shell em outro domínio
 
-O shell não conhece o domínio de disco. Ele apenas recebe uma lista de `PageSpec` e instancia as páginas:
+A camada genérica vive em `appshell/` e não importa nada de `app/`. O app monta
+tudo no composition root: configuração, tema, contexto, páginas e chrome.
 
 ```python
-from app.config import AppConfig
-from app.features.base import PageSpec
-from app.shell import MainWindow
-from app.theme import init_theme
-
-# 1. Crie uma página herdando de BasePage
-# 2. Registre-a com PageSpec
-# 3. Passe a lista para MainWindow
+from appshell.pages import BasePage, PageSpec
+from appshell.shell import ShellOptions, ShellWindow
 
 specs = [
     PageSpec("dashboard", "Visão geral", "Resumo", "view-dashboard-outline", DashboardPage),
@@ -295,26 +299,36 @@ specs = [
     PageSpec("config", "Configurações", "Preferências", "cog-outline", MinhaConfigPage),
 ]
 
-theme = init_theme(app, config)
-window = MainWindow(config, theme, specs)
+window = ShellWindow(
+    config,
+    theme,
+    specs,
+    context,
+    options=ShellOptions(title="Meu App", tagline="Gestor de clientes"),
+    title_bar_factory=lambda title, tagline, parent: TitleBar(title, tagline, parent),
+    sidebar_factory=lambda pages, parent: Sidebar(config, pages, parent),
+    toast_factory=lambda parent: Toast(parent),
+    close_requested=context.shutdown,
+)
 window.show()
 ```
 
 `BasePage` fornece:
 
-- `self.state`: estado compartilhado;
+- `self.state`: contexto compartilhado (o `AppContext` do app);
 - `toastRequested`, `navigateRequested`, `identityChanged`;
 - `on_show()` / `on_hide()`;
 - `toast(mensagem, tipo)`.
 
-Para mudar o nome do produto, altere `APP_NAME`/`APP_TAGLINE` em `app/__init__.py`. Para mudar a identidade visual, trabalhe com os tokens de `app/theme.py`; evite cores hardcoded nos widgets.
+Para mudar o nome do produto, altere `APP_NAME`/`APP_TAGLINE` em `app/__init__.py`.
+Para mudar a identidade visual, trabalhe com os tokens de `app/theme.py`; evite cores hardcoded nos widgets. O `appshell/README.md` traz um exemplo mínimo de composição e as regras de desacoplamento.
 
 ### Criando um tema
 As paletas ficam em `PALETTES` em `theme.py` (`dark` e `light`). O QSS usa `$tokens`, então novos componentes devem usar as mesmas variáveis para funcionar nos dois temas.
 
 ### Criando uma página de feature
 ```python
-from app.features.base import BasePage
+from appshell.pages import BasePage
 from app.widgets.common import PageHeader
 
 class ClientesPage(BasePage):
@@ -387,6 +401,9 @@ class ClientesPage(BasePage):
 - O seletor de pastas não usa `QFileSystemModel`: as subpastas são enumeradas em um `QThreadPool` com `os.scandir` e exibidas em um `QListView` com `QAbstractListModel`. A GUI não cria um widget por pasta nem faz `stat` ao rolar; a lista de unidades é montada após o `show` e a resolução de UNC para os locais não verifica `isdir`, então unidades de rede desconectadas não bloqueiam a abertura. `activated`/Enter e duplo clique navegam sem disparar a navegação duas vezes.
 - A adição de pastas pelo seletor usa `add_roots(..., trusted=True)`: o caminho já foi validado/enumerado pelo diálogo, então não há `os.path.isdir` extra em cada pasta de rede ao confirmar.
 - `top_items` faz uma única travessia com dois heaps (diretórios e arquivos), em vez de varrer a árvore duas vezes. O cálculo do Top 100 da exportação roda na thread de escrita.
+- O núcleo `appshell/` não importa `app`: `AppContext`, `BasePage`/`PageSpec`, `TaskRunner` e `ShellWindow` formam o contrato reutilizável. O `MainWindow` do DiskPilot é uma composição fina que injeta `TitleBar`, `Sidebar`, `Toast`, atalhos e o estado de disco.
+- `AppState` usa o `TaskRunner` genérico para a varredura: a tarefa só implementa `execute()`, e o runner cuida do pool, dos sinais, do cancelamento e da liberação da tarefa. O mesmo contrato pode ser usado por exportação, carregamento de pastas e Top 100.
+- `app/features/base.py` reexporta `BasePage` e `PageSpec` de `appshell.pages` para manter compatibilidade com as páginas existentes.
 - `_AuthorSignals`, `_FolderScanSignals` e `_ExportSignals` não são filhos dos widgets: o `QRunnable` mantém a referência e pode terminar depois do fechamento da janela sem emitir em um QObject já destruído.
 - Acessibilidade: listas de pastas/fotos, campo de caminho, terminal de logs e campos de pasta/nome da exportação têm `accessibleName`; a lista de pastas aceita Enter.
 - O seletor de foto usa miniaturas e prévias decodificadas no tamanho de exibição (com cache), em vez de carregar a imagem inteira; a atualização automática do terminal pausa enquanto há texto selecionado para não atrapalhar a cópia.
