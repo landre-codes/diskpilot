@@ -6,6 +6,7 @@ import heapq
 import os
 import unicodedata
 from collections import deque
+from dataclasses import dataclass
 from typing import Any
 
 from PySide6.QtCore import (
@@ -44,6 +45,7 @@ from shiboken6 import isValid
 
 from appshell.icons import file_icon, icon
 from ...services.model import Node, ScanResult
+from appshell.tasks import Task, TaskCancelled, TaskRunner
 from appshell.theme import get_theme
 from appshell.utils import (
     cached_file_author,
@@ -113,7 +115,7 @@ class _AuthorJob(QRunnable):
 
 MAX_CHILDREN = 1200
 MAX_RENDERED = 2800
-MAX_FILTER_SCAN = 30000
+MAX_RESULT_MATCHES = 5000
 EXPAND_BATCH = 120
 EXPAND_DEBOUNCE_MS = 60
 MB = 1024 * 1024
@@ -123,6 +125,117 @@ GB = 1024 * MB
 def _fold(text: str) -> str:
     normalized = unicodedata.normalize("NFKD", text.casefold())
     return "".join(ch for ch in normalized if not unicodedata.combining(ch))
+
+
+def _node_matches(node: Node, query: str, filter_key: str) -> bool:
+    if query:
+        haystack = _fold(node.name)
+        for token in query.split():
+            if token not in haystack:
+                return False
+    if filter_key == "folders":
+        return node.is_dir
+    if filter_key == "files":
+        return not node.is_dir
+    if filter_key == "large100":
+        return not node.is_dir and node.size >= 100 * MB
+    if filter_key == "large1g":
+        return not node.is_dir and node.size >= GB
+    return True
+
+
+def _sorted_children(
+    node: Node, sort_key: str, limit: int | None = None
+) -> list[Node]:
+    if sort_key == "size_asc":
+        func = lambda n: (n.size, _fold(n.name))
+        if limit is not None:
+            return heapq.nsmallest(limit, node.children, key=func)
+        return sorted(node.children, key=func)
+    if sort_key == "name_asc":
+        func = lambda n: (not n.is_dir, _fold(n.name))
+        if limit is not None:
+            return heapq.nsmallest(limit, node.children, key=func)
+        return sorted(node.children, key=func)
+    if sort_key == "name_desc":
+        func = lambda n: (n.is_dir, _fold(n.name))
+        if limit is not None:
+            return heapq.nlargest(limit, node.children, key=func)
+        names = sorted(node.children, key=lambda n: _fold(n.name), reverse=True)
+        return sorted(names, key=lambda n: not n.is_dir)
+    if sort_key == "recent":
+        func = lambda n: n.mtime
+        if limit is not None:
+            return heapq.nlargest(limit, node.children, key=func)
+        return sorted(node.children, key=func, reverse=True)
+    func = lambda n: (n.size, _fold(n.name))
+    if limit is not None:
+        return heapq.nlargest(limit, node.children, key=func)
+    return sorted(node.children, key=func, reverse=True)
+
+
+@dataclass(slots=True)
+class _FilterResult:
+    generation: int
+    matches: int
+    included: set[int]
+    visited: int
+    limited: bool
+
+
+class _FilterTask(Task):
+    """Percorre a árvore completa fora da GUI e guarda só os primeiros matches."""
+
+    def __init__(
+        self,
+        result: ScanResult,
+        query: str,
+        filter_key: str,
+        sort_key: str,
+        generation: int,
+    ) -> None:
+        super().__init__()
+        self.result = result
+        self.query = query
+        self.filter_key = filter_key
+        self.sort_key = sort_key
+        self.generation = generation
+
+    def execute(self) -> _FilterResult:
+        included: set[int] = set()
+        matches = 0
+        stored = 0
+        visited = 0
+        for root in self.result.roots:
+            stack: list[tuple[Node, bool]] = [(root, False)]
+            path: list[Node] = []
+            while stack:
+                if self.cancel.is_set():
+                    raise TaskCancelled()
+                node, exiting = stack.pop()
+                if exiting:
+                    path.pop()
+                    continue
+                path.append(node)
+                visited += 1
+                if _node_matches(node, self.query, self.filter_key):
+                    matches += 1
+                    if stored < MAX_RESULT_MATCHES:
+                        for ancestor in path:
+                            included.add(id(ancestor))
+                        stored += 1
+                stack.append((node, True))
+                for child in reversed(
+                    _sorted_children(node, self.sort_key)
+                ):
+                    stack.append((child, False))
+        return _FilterResult(
+            generation=self.generation,
+            matches=matches,
+            included=included,
+            visited=visited,
+            limited=matches > stored,
+        )
 
 
 class SizeBarDelegate(QStyledItemDelegate):
@@ -252,7 +365,6 @@ class FileTree(QTreeWidget):
         self._building = False
         self._matches = -1
         self._shown = 0
-        self._overflow = False
         self._expand_queue: deque[tuple[QTreeWidgetItem, Node]] = deque()
         self._expand_active: list[Any] | None = None
         self._expand_all_budget = 0
@@ -266,6 +378,10 @@ class FileTree(QTreeWidget):
         self._author_signals = _AuthorSignals()
         self._author_signals.resolved.connect(self._author_resolved)
         self._author_pending: dict[str, list[QTreeWidgetItem]] = {}
+        self._filter_runner = TaskRunner(self, max_threads=1)
+        self._filter_runner.finished.connect(self._filter_finished)
+        self._filter_runner.failed.connect(self._filter_failed)
+        self._filter_generation = 0
         get_theme().changed.connect(self._refresh_visuals)
 
     # ------------------------------------------------------------- galhos
@@ -552,12 +668,13 @@ class FileTree(QTreeWidget):
         self._path_content_width = 600
         expanded = self._expanded_paths()
         self._restore_paths = set(expanded)
+        self._filter_generation += 1
+        self._filter_runner.cancel()
         self.setUpdatesEnabled(False)
         self._building = True
         self.clear()
         self._matches = -1
         self._shown = 0
-        self._overflow = False
         if self._result is None:
             self._building = False
             self.setUpdatesEnabled(True)
@@ -565,27 +682,26 @@ class FileTree(QTreeWidget):
             return
         filtered = bool(self._query) or self._filter != "all"
         if filtered:
-            self._build_filtered()
-        else:
-            total = self._result.total_size or 1
-            for root in self._result.roots:
-                item = self._create_item(None, root, total, is_root=True, lazy=True)
-                self.addTopLevelItem(item)
             self._building = False
-            for i in range(self.topLevelItemCount()):
-                item = self.topLevelItem(i)
-                item.setExpanded(True)
-                self._restore_expanded(item, expanded)
-            self._matches = -1
-            self._shown = self._count_items()
-            self.countChanged.emit(-1, self._shown)
+            self.setUpdatesEnabled(True)
+            self._start_filter()
+            return
+        total = self._result.total_size or 1
+        for root in self._result.roots:
+            item = self._create_item(None, root, total, is_root=True, lazy=True)
+            self.addTopLevelItem(item)
+        self._building = False
+        for i in range(self.topLevelItemCount()):
+            item = self.topLevelItem(i)
+            item.setExpanded(True)
+            self._restore_expanded(item, expanded)
+        self._matches = -1
+        self._shown = self._count_items()
+        self.countChanged.emit(-1, self._shown)
         self._building = False
         self.setUpdatesEnabled(True)
         self.viewport().update()
         self._fit_columns()
-        if filtered:
-            self.expandAll()
-            self.scrollToTop()
 
     def _expanded_paths(self) -> set[str]:
         paths: set[str] = set()
@@ -618,61 +734,68 @@ class FileTree(QTreeWidget):
         return count
 
     # ---------------------------------------------------------------- filtros
-    def _node_matches(self, node: Node) -> bool:
-        if self._query:
-            haystack = _fold(node.name)
-            for token in self._query.split():
-                if token not in haystack:
-                    return False
-        if self._filter == "folders":
-            return node.is_dir
-        if self._filter == "files":
-            return not node.is_dir
-        if self._filter == "large100":
-            return not node.is_dir and node.size >= 100 * MB
-        if self._filter == "large1g":
-            return not node.is_dir and node.size >= GB
-        return True
-
-    def _build_filtered(self) -> None:
+    def _start_filter(self) -> None:
         if self._result is None:
             return
-        visited = 0
-        matched = 0
+        self._filter_generation += 1
+        generation = self._filter_generation
+        self._filter_runner.cancel()
+        self.clear()
+        self._matches = -1
+        self._shown = 0
+        self._building = False
+        info = QTreeWidgetItem(["  Buscando resultados..."])
+        info.setFirstColumnSpanned(True)
+        info.setFlags(Qt.NoItemFlags)
+        info.setForeground(0, QColor(get_theme().color("muted")))
+        self.addTopLevelItem(info)
+        self.countChanged.emit(-1, 0)
+        self._filter_runner.submit(
+            _FilterTask(
+                self._result,
+                self._query,
+                self._filter,
+                self._sort,
+                generation,
+            )
+        )
 
-        def collect(node: Node) -> tuple[Node, list[Any], bool] | None:
-            nonlocal visited, matched
-            visited += 1
-            if visited > MAX_FILTER_SCAN:
-                self._overflow = True
-                return None
-            children: list[Any] = []
-            for child in self._sorted_children(node):
-                result = collect(child)
-                if result is not None:
-                    children.append(result)
-            self_match = self._node_matches(node)
-            if self_match:
-                matched += 1
-            if self_match or children:
-                return (node, children, self_match)
-            return None
+    def _filter_finished(self, result: _FilterResult) -> None:
+        if result.generation != self._filter_generation or self._result is None:
+            return
+        self._render_filtered(result)
 
-        roots: list[tuple[Node, list[Any], bool]] = []
-        for root in self._result.roots:
-            result = collect(root)
-            if result is not None:
-                roots.append(result)
+    def _filter_failed(self, message: str) -> None:
+        if self._result is None:
+            return
+        self.clear()
+        info = QTreeWidgetItem([f"  Falha na busca: {message}"])
+        info.setFirstColumnSpanned(True)
+        info.setFlags(Qt.NoItemFlags)
+        info.setForeground(0, QColor(get_theme().color("danger")))
+        self.addTopLevelItem(info)
+        self._matches = 0
+        self._shown = 0
+        self.countChanged.emit(0, 0)
 
+    def _render_filtered(self, result: _FilterResult) -> None:
+        self.setUpdatesEnabled(False)
+        self._building = True
+        self.clear()
         rendered = 0
-        truncated_render = False
+        truncated = False
 
-        def add(parent: QTreeWidgetItem | None, entry: tuple[Node, list[Any], bool], parent_size: int):
-            nonlocal rendered, truncated_render
-            if rendered >= MAX_RENDERED:
-                truncated_render = True
+        def add(
+            parent: QTreeWidgetItem | None,
+            node: Node,
+            parent_size: int,
+        ) -> None:
+            nonlocal rendered, truncated
+            if id(node) not in result.included:
                 return
-            node, children, _self_match = entry
+            if rendered >= MAX_RENDERED:
+                truncated = True
+                return
             item = self._create_item(
                 parent, node, parent_size, is_root=parent is None, lazy=False
             )
@@ -680,53 +803,38 @@ class FileTree(QTreeWidget):
                 self.addTopLevelItem(item)
             item.setData(0, POPULATED_ROLE, True)
             rendered += 1
-            for child_entry in children:
-                add(item, child_entry, node.size or 1)
+            for child in _sorted_children(node, self._sort):
+                add(item, child, node.size or 1)
 
-        total = self._result.total_size or 1
-        for entry in roots:
-            add(None, entry, total)
-        if truncated_render:
+        total = self._result.total_size if self._result is not None else 0
+        if self._result is not None:
+            for root in self._result.roots:
+                add(None, root, total or 1)
+        if truncated or result.limited:
+            suffix = (
+                f"{result.matches} correspond?ncia"
+                if result.matches == 1
+                else f"{result.matches} correspond?ncias"
+            )
             info = QTreeWidgetItem(
-                ["  Resultados limitados a 2.800 itens — refine a busca para ver mais."]
+                [f"  {suffix}; exibindo {rendered}. Refine a busca para ver mais."]
             )
             info.setFirstColumnSpanned(True)
             info.setFlags(Qt.NoItemFlags)
             info.setForeground(0, QColor(get_theme().color("muted")))
             self.addTopLevelItem(info)
-        self._matches = matched
+        self._matches = result.matches
         self._shown = rendered
-        self.countChanged.emit(matched, rendered)
+        self.countChanged.emit(result.matches, rendered)
+        self._building = False
+        self.setUpdatesEnabled(True)
+        self.expandAll()
+        self.scrollToTop()
+        self.viewport().update()
+        self._fit_columns()
 
     def _sorted_children(self, node: Node, limit: int | None = None) -> list[Node]:
-        key = self._sort
-        if key == "size_asc":
-            func = lambda n: (n.size, _fold(n.name))
-            if limit is not None:
-                return heapq.nsmallest(limit, node.children, key=func)
-            return sorted(node.children, key=func)
-        if key == "name_asc":
-            func = lambda n: (not n.is_dir, _fold(n.name))
-            if limit is not None:
-                return heapq.nsmallest(limit, node.children, key=func)
-            return sorted(node.children, key=func)
-        if key == "name_desc":
-            func = lambda n: (n.is_dir, _fold(n.name))
-            if limit is not None:
-                return heapq.nlargest(limit, node.children, key=func)
-            names = sorted(
-                node.children, key=lambda n: _fold(n.name), reverse=True
-            )
-            return sorted(names, key=lambda n: not n.is_dir)
-        if key == "recent":
-            func = lambda n: n.mtime
-            if limit is not None:
-                return heapq.nlargest(limit, node.children, key=func)
-            return sorted(node.children, key=func, reverse=True)
-        func = lambda n: (n.size, _fold(n.name))
-        if limit is not None:
-            return heapq.nlargest(limit, node.children, key=func)
-        return sorted(node.children, key=func, reverse=True)
+        return _sorted_children(node, self._sort, limit)
 
     def _node_tooltip(self, node: Node) -> str:
         tip = [

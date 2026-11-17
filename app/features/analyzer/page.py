@@ -265,7 +265,8 @@ class AnalyzerPage(BasePage):
     def _refresh_roots(self) -> None:
         self._clear_chips()
         for path in self.state.roots:
-            chip = Chip(path, self.chips_host)
+            label = Path(path).name or path
+            chip = Chip(path, self.chips_host, label=label)
             chip.removeRequested.connect(self._remove_root)
             self.chips_layout.addWidget(chip)
         self.chips_layout.addStretch(1)

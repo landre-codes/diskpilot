@@ -355,7 +355,13 @@ class EmptyState(QFrame):
 class Chip(QFrame):
     removeRequested = Signal(str)
 
-    def __init__(self, path: str, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        path: str,
+        parent: QWidget | None = None,
+        *,
+        label: str | None = None,
+    ) -> None:
         super().__init__(parent)
         self.path = path
         self.setObjectName("Pill")
@@ -367,8 +373,12 @@ class Chip(QFrame):
         lay.setSpacing(6)
         self.icon = IconLabel("folder", 15, "primary", self)
         lay.addWidget(self.icon, 0, Qt.AlignVCenter)
-        self.label = QLabel(path)
+        self.label = ElidedLabel(label or path, self)
         self.label.setObjectName("ChipText")
+        self.label.setMaximumWidth(260)
+        text_width = self.label.fontMetrics().horizontalAdvance(label or path)
+        self.label.setMinimumWidth(min(240, text_width + 2))
+        self.label.setToolTip(path)
         lay.addWidget(self.label, 1, Qt.AlignVCenter)
         close = IconButton(
             "close",

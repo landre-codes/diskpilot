@@ -9,6 +9,7 @@ from app.pages import default_pages
 from app.shell import MainWindow
 from appshell.theme import init_theme
 from appshell.pages import BasePage, PageSpec
+from appshell.widgets.common import Chip
 
 
 class _SamplePage(BasePage):
@@ -54,3 +55,11 @@ def test_default_pages_are_registered(qapp, qtbot, tmp_path: Path) -> None:
         "logs",
         "settings",
     ]
+
+
+def test_chip_shows_folder_name_and_full_path_tooltip(qapp) -> None:
+    path = r"C:\dados\clientes_2026"
+    chip = Chip(path, label="clientes_2026")
+
+    assert chip.label.full_text() == "clientes_2026"
+    assert chip.toolTip() == path

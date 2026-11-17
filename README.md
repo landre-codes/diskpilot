@@ -40,14 +40,14 @@ O projeto nasceu como um "Everything gerencial e enxuto": em vez de apenas local
 ### Análise de diretórios
 - Seleção de **uma ou várias pastas** pelo seletor próprio (Ctrl+clique), por arrastar e soltar ou por múltiplas adições.
 - O seletor de pastas mostra o **caminho completo** da pasta atual ou da pasta selecionada, com botão de copiar; cada linha também exibe o caminho integral em tooltip, útil para caminhos longos e unidades de rede.
-- Chips das raízes selecionadas, com remoção individual. Ao adicionar pastas com um resultado já existente, apenas as novas raízes são varridas e o resultado anterior é preservado; raízes aninhadas ou resultados truncados disparam uma reanálise completa.
+- Chips das raízes selecionadas, com o **nome da pasta** visível e o caminho completo no tooltip; remoção individual. Ao adicionar pastas com um resultado já existente, apenas as novas raízes são varridas e o resultado anterior é preservado; raízes aninhadas ou resultados truncados disparam uma reanálise completa.
 - Falhas de permissão não interrompem a análise: a pasta ou entrada inacessível é registrada como aviso, o restante da árvore continua e o total de avisos aparece ao final.
 - Varredura em segundo plano com `QThreadPool`, progresso agregado, cancelamento e tolerância a erros de permissão. Várias raízes são varridas em paralelo (até 4 workers) com um limite compartilhado de 1,5 milhão de entradas; o progresso combina arquivos, pastas e bytes das raízes ativas. Logs em `~/DiskPilot/logs/diskpilot.log` e `diskpilot-crash.log` por padrão, com pasta configurável pela página **Logs**.
 - Botão **Top 100**: ranking dos 100 maiores diretórios e dos 100 maiores arquivos da análise, com filtro por tamanho (todos, > 100 MB, > 1 GB), tamanho, percentual, caminho completo, cópia do caminho e abertura no Explorer. O ranking é calculado em uma thread de trabalho; o diálogo abre imediatamente e mostra “Carregando ranking…”.
 - Coluna **Autor** na árvore: mostra o autor gravado nos metadados do arquivo (o campo “Authors” do Windows — funciona para Office, PDF e outros formatos que guardam essa informação). A consulta roda em segundo plano, com cache por caminho, para não travar a interface; o nome também aparece no tooltip e na linha copiada. Pastas e formatos sem metadados de autor aparecem como `—`.
 - Colunas com mínimos maiores: **Nome** 280 px, **Tamanho** 124, **% do pai** 90, **Itens** 100, **Modificado** 150, **Autor** 200, **Tipo** 100 e **Caminho completo** 600. Quando a janela não comporta todos os mínimos, a tabela usa rolagem horizontal em vez de esmagar o conteúdo.
 - Coluna opcional **Caminho completo** na árvore, ativada pelo checkbox na barra de ferramentas e persistida na configuração. A coluna cresce até o caminho mais longo exibido (sem reticências), mantém **Nome** com no mínimo 280 px e usa rolagem horizontal em janelas estreitas. O caminho do item selecionado também aparece inteiro em um rodapé selecionável.
-- Os chips das raízes e a tabela do **Top 100** também exibem o caminho completo; no Top 100 a coluna de caminho cresce até o conteúdo e há um rodapé com o caminho da linha selecionada.
+- Os chips das raízes mostram o nome da pasta, com o caminho completo no tooltip; a tabela do **Top 100** também exibe o caminho completo; no Top 100 a coluna de caminho cresce até o conteúdo e há um rodapé com o caminho da linha selecionada.
 - **Exportação de dados** pelo botão **Exportar** no cabeçalho da análise (ou pelo Top 100): janela com seleção de formato, **pasta de destino editável**, nome do arquivo e prévia do caminho. A pasta é escolhida pelo seletor próprio (mesmo padrão dos Locais do seletor de fotos), sem `QFileDialog`. CSV para Excel/LibreOffice, XLSX com abas Resumo, Top 100 e Sugestões, e XLSB binário (requer Microsoft Excel instalado). A coluna **Autor** também é incluída nos arquivos exportados.
 - A gravação da exportação roda em uma **thread separada** (QThreadPool): a janela permanece responsiva e o XLSB inicializa/finaliza o COM na mesma thread, evitando o `RPC_E_WRONG_THREAD` que podia fechar o app ao cancelar uma exportação. O cálculo do Top 100 usado na exportação também foi movido para essa thread: a janela de exportação abre imediatamente, mesmo com milhões de nós na árvore.
 - Árvore aninhada carregada sob demanda, com:
@@ -56,7 +56,7 @@ O projeto nasceu como um "Everything gerencial e enxuto": em vez de apenas local
   - quantidade de arquivos, data de modificação e tipo;
   - barras proporcionais na coluna de tamanho;
   - limite de itens por pasta para manter a interface responsiva.
-- Busca com **debounce de 260 ms** e limpeza rápida. O campo fica alinhado à esquerda e o contador de resultados ocupa o espaço restante, sem elidir o texto quando há largura suficiente.
+- Busca com **debounce de 260 ms** e limpeza rápida. A varredura da busca roda em segundo plano, percorre a árvore inteira e conta todas as correspondências; a renderização é limitada para manter a interface fluida. O campo fica alinhado à esquerda e o contador de resultados ocupa o espaço restante, sem elidir o texto quando há largura suficiente.
 - Estados vazios com descrição responsiva: a largura acompanha o cartão (até 520 px) e a altura mínima é calculada pelo texto, com margens compactas em janelas baixas — a mensagem “Analisando pastas…” não é cortada.
 - Filtros: tudo, pastas, arquivos, arquivos > 100 MB e > 1 GB.
 - Conversor de unidade na tabela: automático, KB, MB, GB ou TB.
@@ -240,6 +240,7 @@ diskpilot/
 │  ├─ test_scanner.py
 │  ├─ test_shell.py
 │  ├─ test_state.py
+│  ├─ test_tree.py
 │  └─ test_dialogs.py
 ├─ templates/
 │  └─ basic/                    # scaffold Copier: appshell + NotesPage
@@ -443,7 +444,7 @@ class ClientesPage(BasePage):
 - Duplicatas são comparadas por nome + tamanho, sem abrir/ler o conteúdo dos arquivos. A lista é ordenada pelo espaço potencialmente recuperável, e os caminhos são exibidos para revisão manual antes de qualquer remoção.
 - O redimensionamento nativo por `WM_NCHITTEST` é específico do Windows; o fallback manual cobre outras plataformas.
 - A varredura paralela distribui raízes independentes, não subpastas de uma mesma raiz. Um disco lento ainda limita o ganho, e o limite de 1,5 milhão de entradas é compartilhado por todas as raízes.
-- A busca/filtro percorre até 30.000 nós e renderiza no máximo 2.800 itens por consulta para manter a interface responsiva. Em árvores com centenas de milhares de itens, resultados além desse recorte podem não aparecer; a próxima evolução é mover a busca para um worker com índice/cancelamento.
+- A busca/filtro percorre a árvore inteira em segundo plano e conta todas as correspondências. Para renderizar, mantém até 5.000 correspondências e exibe no máximo 2.800 itens; em buscas muito amplas, o contador indica que há mais resultados e pede para refinar o termo.
 - Para volumes muito grandes (milhões de itens), considere persistir a árvore em SQLite ou manter uma indexação incremental.
 - O shell pode receber novas páginas sem alterações na janela principal.
 
