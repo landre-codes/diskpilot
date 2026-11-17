@@ -240,11 +240,24 @@ diskpilot/
 │  ├─ test_shell.py
 │  ├─ test_state.py
 │  └─ test_dialogs.py
+├─ templates/
+│  └─ basic/                    # scaffold Copier: appshell + NotesPage
 ├─ appshell/                     # núcleo genérico, sem dependência de app/
+│  ├─ config.py                 # JsonSettings + preferências genéricas
 │  ├─ context.py                # AppContext e SettingsStore
 │  ├─ pages.py                  # BasePage e PageSpec
 │  ├─ tasks.py                  # Task, TaskSignals e TaskRunner
+│  ├─ theme.py                  # paletas, QSS e integração qt-material
+│  ├─ icons.py                  # cache de ícones MDI e avatares
+│  ├─ utils.py                  # formatação, Explorer, clipboard
 │  ├─ shell.py                  # ShellWindow, ShellOptions e FadeStack
+│  ├─ widgets/
+│  │  ├─ buttons.py             # botões com hover, abas desenhadas, busca, selects
+│  │  ├─ charts.py              # donut e barras com QPainter
+│  │  ├─ common.py              # cards, headers, chips, empty state, toast
+│  │  ├─ dialogs.py             # SheetDialog, confirmação e resize grip
+│  │  ├─ sidebar.py             # marca configurável, abas verticais, usuário
+│  │  └─ title_bar.py           # controles da janela
 │  └─ README.md                 # como reutilizar o núcleo
 └─ app/
    ├─ __init__.py               # nome, tagline e versão
@@ -254,18 +267,10 @@ diskpilot/
    ├─ single_instance.py        # instância única + ativação da janela
    ├─ pages.py                  # registro das páginas padrão
    ├─ shell.py                  # composição do DiskPilot sobre appshell
-   ├─ config.py                 # persistência JSON e importação de ativos
+   ├─ config.py                 # defaults de disco e propriedade roots
    ├─ logging_setup.py          # logs rotativos, crash log e migração
-   ├─ theme.py                  # paletas, QSS e integração qt-material
-   ├─ icons.py                  # cache de ícones MDI e avatares
-   ├─ utils.py                  # formatação, Explorer, clipboard
    ├─ widgets/
-   │  ├─ buttons.py             # botões com hover, abas desenhadas, busca, selects
-   │  ├─ charts.py              # donut e barras com QPainter
-   │  ├─ common.py              # cards, headers, chips, empty state, toast
-   │  ├─ dialogs.py             # diálogos roláveis, seletores, perfil, exportação e Top 100
-   │  ├─ sidebar.py             # marca fixa, abas verticais, usuário
-   │  └─ title_bar.py           # controles da janela
+   │  └─ dialogs.py             # seletores, perfil, exportação e Top 100
    ├─ services/
    │  ├─ model.py               # Node, ScanResult, Suggestion
    │  ├─ scanner.py             # varredura recursiva cancelável
@@ -321,15 +326,34 @@ window.show()
 - `toast(mensagem, tipo)`.
 
 Para mudar o nome do produto, altere `APP_NAME`/`APP_TAGLINE` em `app/__init__.py`.
-Para mudar a identidade visual, trabalhe com os tokens de `app/theme.py`; evite cores hardcoded nos widgets. O `appshell/README.md` traz um exemplo mínimo de composição e as regras de desacoplamento.
+Para mudar a identidade visual, trabalhe com os tokens de `appshell/theme.py`; evite cores hardcoded nos widgets. O `appshell/README.md` traz um exemplo mínimo de composição e as regras de desacoplamento.
+
+### Gerando um app novo com Copier
+
+O template fica em `templates/basic/` e gera um projeto autocontido: a feature
+de exemplo (`NotesPage`) e uma cópia do `appshell/` são incluídas no destino.
+
+```powershell
+py -3.14 -m pip install copier
+py -3.14 -m copier copy templates/basic "C:\Projetos\meu_app" --trust
+```
+
+O `--trust` é necessário porque o template executa uma tarefa que copia o
+`appshell/` para o projeto gerado. Depois:
+
+```powershell
+cd "C:\Projetos\meu_app"
+py -3.14 -m pip install -r requirements.txt
+py -3.14 main.py
+```
 
 ### Criando um tema
-As paletas ficam em `PALETTES` em `theme.py` (`dark` e `light`). O QSS usa `$tokens`, então novos componentes devem usar as mesmas variáveis para funcionar nos dois temas.
+As paletas ficam em `PALETTES` em `appshell/theme.py` (`dark` e `light`). O QSS usa `$tokens`, então novos componentes devem usar as mesmas variáveis para funcionar nos dois temas.
 
 ### Criando uma página de feature
 ```python
 from appshell.pages import BasePage
-from app.widgets.common import PageHeader
+from appshell.widgets.common import PageHeader
 
 class ClientesPage(BasePage):
     page_id = "clientes"
@@ -378,7 +402,7 @@ class ClientesPage(BasePage):
 - O ranking **Top 100** percorre a árvore em memória uma única vez, mantendo dois heaps (`heapq.nlargest`) para diretórios e arquivos, sem ordenar todos os nós. No diálogo, o cálculo roda em um worker próprio e a tabela mostra “Carregando ranking…” até o resultado chegar. Percentuais de diretórios são cumulativos e podem se sobrepor.
 - **Memória**: diálogos transitórios são destruídos com `deleteLater`, menus e animações são liberados/reutilizados, e o resultado grande anterior é descartado antes de uma nova varredura (`RELEASE_RESULT_THRESHOLD`). A varredura tem limite de 1,5 milhão de entradas; o resumo persistido guarda apenas os 6 maiores diretórios, calculados com `heapq.nlargest`.
 - **Expansão da árvore**: os filhos de uma pasta são carregados em lotes de 120 itens, com debounce de 60 ms. A árvore mostra “Carregando…” enquanto isso, mantém a contagem incremental e restaura as pastas expandidas após uma reordenação. Ícones de arquivo são cacheados por extensão, e a ordenação dos filhos usa `heapq.nlargest/nsmallest` com o limite de 1.200 itens exibidos.
-- `qt-material` fornece a base do tema; o QSS em `theme.py` sobrescreve o que é necessário (especialmente `text-transform`, hovers e cores semânticas) para manter a identidade do app.
+- `qt-material` fornece a base do tema; o QSS em `appshell/theme.py` sobrescreve o que é necessário (especialmente `text-transform`, hovers e cores semânticas) para manter a identidade do app.
 - A geometria inicial e a restaurada são limitadas à área útil da tela: em notebooks pequenos (ou com escala de 125%/150%) a janela não nasce maior que o monitor, então a barra de título e os botões de janela continuam clicáveis. O tamanho mínimo também se adapta ao monitor.
 - O `WM_NCHITTEST` nativo converte a posição do cursor para o espaço lógico do Qt antes de detectar as bordas. Sem isso, em telas com escala o canto direito inteiro era confundido com borda de redimensionamento e os botões de maximizar/fechar não respondiam — o usuário precisava maximizar com duplo clique no meio da barra.
 - O filtro global de `Ctrl+roda` é removido no `aboutToQuit` (`CtrlWheelGuard.stop`) e não chama `super().eventFilter` durante o teardown. Isso evita a recursão de `RuntimeError`/objetos C++ já destruídos no encerramento do Python/Qt.

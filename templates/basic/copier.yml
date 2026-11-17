@@ -1,0 +1,28 @@
+_min_copier_version: "9.0.0"
+_answers_file: .copier-answers.yml
+_templates_suffix: ""
+_exclude:
+  - copier.yml
+  - scripts
+  - __pycache__
+  - "**/__pycache__"
+  - "*.pyc"
+  - "**/*.pyc"
+
+_tasks:
+  - command: '"{{ _copier_python }}" "{{ _copier_conf.src_path }}/scripts/vendor_appshell.py" "{{ _copier_conf.src_path }}/../../appshell" "appshell"'
+
+project_name:
+  type: str
+  default: "Meu Aplicativo"
+  help: "Nome exibido na janela e no repositório."
+
+project_slug:
+  type: str
+  default: "meu_app"
+  help: "Nome da pasta e do pacote do projeto (sem espaços)."
+
+tagline:
+  type: str
+  default: "Feito com appshell"
+  help: "Frase curta exibida na barra de título."

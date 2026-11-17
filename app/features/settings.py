@@ -19,16 +19,16 @@ from PySide6.QtWidgets import (
 )
 
 from .. import APP_NAME, __version__
-from ..icons import avatar_pixmap, icon
-from ..theme import get_theme
-from ..utils import (
+from appshell.icons import avatar_pixmap, icon
+from appshell.theme import get_theme
+from appshell.utils import (
     avatar_photo,
     format_bytes,
     format_datetime,
     open_in_explorer,
 )
-from ..widgets.buttons import ActionButton
-from ..widgets.common import Card, ElidedLabel, IconLabel, PageHeader
+from appshell.widgets.buttons import ActionButton
+from appshell.widgets.common import Card, ElidedLabel, IconLabel, PageHeader
 from ..widgets.dialogs import ConfirmDialog, ProfileDialog
 from .base import BasePage
 

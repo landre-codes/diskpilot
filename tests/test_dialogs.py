@@ -9,7 +9,7 @@ from PySide6.QtGui import QColor, QImage
 
 from app.config import AppConfig
 from app.services.model import ScanResult
-from app.theme import init_theme
+from appshell.theme import init_theme
 from app.widgets.dialogs import (
     ExportDialog,
     FolderPickerDialog,

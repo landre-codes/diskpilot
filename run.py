@@ -19,7 +19,7 @@ from app.logging_setup import configure_logging
 from app.pages import default_pages
 from app.shell import MainWindow
 from app.single_instance import SingleInstanceGuard
-from app.theme import init_theme
+from appshell.theme import init_theme
 
 
 def _configure_logging(config: AppConfig) -> None:

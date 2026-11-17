@@ -42,10 +42,10 @@ from PySide6.QtWidgets import (
 
 from shiboken6 import isValid
 
-from ...icons import file_icon, icon
+from appshell.icons import file_icon, icon
 from ...services.model import Node, ScanResult
-from ...theme import get_theme
-from ...utils import (
+from appshell.theme import get_theme
+from appshell.utils import (
     cached_file_author,
     copy_to_clipboard,
     file_author,
@@ -105,7 +105,11 @@ class _AuthorJob(QRunnable):
         self.signals = signals
 
     def run(self) -> None:
-        self.signals.resolved.emit(self.path, file_author(self.path))
+        try:
+            self.signals.resolved.emit(self.path, file_author(self.path))
+        except RuntimeError:
+            # A árvore pode ter sido fechada enquanto a consulta terminava.
+            pass
 
 MAX_CHILDREN = 1200
 MAX_RENDERED = 2800

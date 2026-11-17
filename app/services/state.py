@@ -19,7 +19,7 @@ from PySide6.QtCore import QObject, QTimer, Signal, Slot
 from appshell.tasks import Task, TaskCancelled, TaskRunner
 
 from ..config import AppConfig
-from ..utils import normalize_path, path_key, resolve_network_path
+from appshell.utils import normalize_path, path_key, resolve_network_path
 from .model import ScanProgress, ScanResult, Suggestion
 from .scanner import ScanCancelled, scan_paths
 

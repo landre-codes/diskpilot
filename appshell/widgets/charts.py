@@ -151,13 +151,13 @@ class DonutChart(QWidget):
             p.drawText(
                 QRectF(x, h / 2 - 12, max(80, w - x - 20), 24),
                 Qt.AlignVCenter | Qt.AlignLeft,
-                "Nenhuma pasta analisada ainda",
+                "Nenhum dado para exibir",
             )
         p.end()
 
 
 class BarList(QWidget):
-    """Ranking de diretórios com barras e participação percentual."""
+    """Ranking de itens com barras e participação percentual."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)

@@ -7,7 +7,7 @@ from PySide6.QtWidgets import QLabel
 from app.config import AppConfig
 from app.pages import default_pages
 from app.shell import MainWindow
-from app.theme import init_theme
+from appshell.theme import init_theme
 from appshell.pages import BasePage, PageSpec
 
 

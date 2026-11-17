@@ -11,15 +11,15 @@ from PySide6.QtWidgets import QDialog
 
 from appshell.pages import PageSpec
 from appshell.shell import ShellOptions, ShellWindow
+from appshell.theme import ThemeManager
+from appshell.widgets.common import Toast
+from appshell.widgets.sidebar import Sidebar
+from appshell.widgets.title_bar import TitleBar
 
 from . import APP_NAME, APP_TAGLINE
 from .config import AppConfig
 from .services.state import AppState
-from .theme import ThemeManager
-from .widgets.common import Toast
 from .widgets.dialogs import ProfileDialog
-from .widgets.sidebar import Sidebar
-from .widgets.title_bar import TitleBar
 
 
 class MainWindow(ShellWindow):
@@ -58,7 +58,14 @@ class MainWindow(ShellWindow):
             title_bar_factory=lambda title, tagline, parent: TitleBar(
                 title, tagline, parent
             ),
-            sidebar_factory=lambda pages, parent: Sidebar(config, pages, parent),
+            sidebar_factory=lambda pages, parent: Sidebar(
+                config,
+                pages,
+                parent,
+                brand_title=APP_NAME,
+                brand_tagline=APP_TAGLINE,
+                brand_icon="harddisk",
+            ),
             toast_factory=lambda parent: Toast(parent),
             profile_requested=self._edit_profile,
             identity_changed=self._refresh_settings_identity,

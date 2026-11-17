@@ -35,7 +35,7 @@ def main() -> int:
     from app.config import AppConfig
     from app.pages import default_pages
     from app.shell import MainWindow
-    from app.theme import init_theme
+    from appshell.theme import init_theme
 
     linha("DiskPilot — diagnóstico")
     linha("=" * 60)

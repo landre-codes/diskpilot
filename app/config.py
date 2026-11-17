@@ -1,37 +1,15 @@
-"""Persistência de configurações e ativos do aplicativo.
-
-Tudo fica em um único JSON no diretório de configuração do usuário. Ativos
-importados (avatar) são copiados para ``assets/`` ao lado do arquivo,
-evitando que o app quebre quando o arquivo original for movido. A marca do
-aplicativo é fixa e faz parte da identidade visual.
-"""
+"""Configuração específica do DiskPilot sobre ``appshell.config``."""
 
 from __future__ import annotations
 
-import copy
-import getpass
-import json
 import os
-import shutil
-import time
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QStandardPaths
+from appshell.config import GENERIC_CONFIG, JsonSettings, merge_defaults
 
 
-DEFAULT_CONFIG: dict[str, Any] = {
-    "theme": "dark",
-    "sidebar_collapsed": False,
-    "geometry": "",
-    "window_state": "normal",
-    "user": {
-        "name": "",
-        "avatar": "",
-        "avatar_focus_x": 0.5,
-        "avatar_focus_y": 0.3,
-        "avatar_zoom": 1.0,
-    },
+DOMAIN_DEFAULTS: dict[str, Any] = {
     "scan": {
         "roots": [],
         "last_scan": "",
@@ -43,155 +21,23 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "tree_path": False,
         "size_unit": "auto",
     },
-    "logging": {
-        "directory": "",
-    },
 }
 
-
-def _default_config_dir() -> Path:
-    location = QStandardPaths.writableLocation(QStandardPaths.AppConfigLocation)
-    if not location:
-        location = str(Path.home() / ".diskpilot")
-    return Path(location)
+DEFAULT_CONFIG = merge_defaults(GENERIC_CONFIG, DOMAIN_DEFAULTS)
 
 
-def _merge(base: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
-    """Recursive merge that keeps unknown/default keys alive."""
-    result = copy.deepcopy(base)
-    for key, value in incoming.items():
-        if isinstance(value, dict) and isinstance(result.get(key), dict):
-            result[key] = _merge(result[key], value)
-        else:
-            result[key] = value
-    return result
-
-
-def _normalize_asset_ext(path: str) -> str:
-    ext = Path(path).suffix.lower()
-    if ext in {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".svg", ".ico"}:
-        return ext
-    return ".png"
-
-
-def _logical_user() -> str:
-    try:
-        name = getpass.getuser().strip()
-    except Exception:
-        name = ""
-    if not name:
-        name = os.environ.get("USERNAME") or "Usuário"
-    return name[:1].upper() + name[1:]
-
-
-class AppConfig:
-    """Configuração global, com leitura tolerante a arquivos corrompidos."""
+class AppConfig(JsonSettings):
+    """Configuração do DiskPilot: preferências genéricas + estado de disco."""
 
     def __init__(self, path: str | Path | None = None) -> None:
-        base = Path(path) if path else _default_config_dir()
-        self.path = base / "config.json"
-        self.assets_dir = base / "assets"
-        self.assets_dir.mkdir(parents=True, exist_ok=True)
-        self.data: dict[str, Any] = copy.deepcopy(DEFAULT_CONFIG)
-        self.data["user"]["name"] = _logical_user()
-        self._loaded_ok = self._load()
+        super().__init__(path, DOMAIN_DEFAULTS, fallback_name="diskpilot")
 
-    # ------------------------------------------------------------------ I/O
     def _load(self) -> bool:
-        if not self.path.exists():
-            self.save()
-            return False
-        try:
-            raw = json.loads(self.path.read_text(encoding="utf-8"))
-            if not isinstance(raw, dict):
-                raise ValueError("config raiz não é um objeto")
-            self.data = _merge(DEFAULT_CONFIG, raw)
-            # A opção experimental de moldura nativa não existe mais; qualquer
-            # resíduo em configurações antigas é descartado na próxima gravação.
-            self.data.pop("native_frame", None)
-            # O logo passou a ser fixo (identidade visual do produto).
-            self.data.pop("logo", None)
-            # A análise de conteúdo por hash foi removida por política.
-            scan_cfg = self.data.get("scan")
-            if isinstance(scan_cfg, dict):
-                scan_cfg.pop("hash_duplicates", None)
-            # O cargo foi removido do produto; descartamos resíduos de
-            # configurações antigas para manter o perfil enxuto.
-            if isinstance(self.data.get("user"), dict):
-                self.data["user"].pop("role", None)
-            if not str(self.data.get("user", {}).get("name", "")).strip():
-                self.data["user"]["name"] = _logical_user()
-            # Remove raízes que não existem mais? Não: unidades de rede podem
-            # estar temporariamente indisponíveis. A UI lida com isso.
-            return True
-        except Exception:
-            backup = self.path.with_suffix(
-                f".corrompido-{time.strftime('%Y%m%d-%H%M%S')}.json"
-            )
-            try:
-                shutil.copy2(self.path, backup)
-            except Exception:
-                pass
-            self.data = copy.deepcopy(DEFAULT_CONFIG)
-            self.data["user"]["name"] = _logical_user()
-            return False
-
-    def save(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_suffix(".json.tmp")
-        payload = json.dumps(self.data, ensure_ascii=False, indent=2)
-        tmp.write_text(payload, encoding="utf-8")
-        os.replace(tmp, self.path)
-
-    # ------------------------------------------------------------- helpers
-    def get(self, dotted: str, default: Any = None) -> Any:
-        node: Any = self.data
-        for part in dotted.split("."):
-            if not isinstance(node, dict) or part not in node:
-                return default
-            node = node[part]
-        return node
-
-    def set(self, dotted: str, value: Any, save: bool = True) -> None:
-        parts = dotted.split(".")
-        node = self.data
-        for part in parts[:-1]:
-            nxt = node.get(part)
-            if not isinstance(nxt, dict):
-                nxt = {}
-                node[part] = nxt
-            node = nxt
-        node[parts[-1]] = value
-        if save:
-            self.save()
-
-    def import_asset(self, source: str, prefix: str) -> str:
-        """Copia um arquivo para o diretório de ativos e devolve o novo path."""
-        src = Path(source)
-        if not src.exists():
-            raise FileNotFoundError(source)
-        ext = _normalize_asset_ext(source)
-        stamp = int(time.time() * 1000)
-        dest = self.assets_dir / f"{prefix}_{stamp}{ext}"
-        shutil.copy2(src, dest)
-        # Remove versões antigas do mesmo tipo, mantendo o diretório enxuto.
-        for old in self.assets_dir.glob(f"{prefix}_*"):
-            if old != dest:
-                try:
-                    old.unlink()
-                except OSError:
-                    pass
-        return str(dest)
-
-    # --------------------------------------------------- domínio específico
-    @property
-    def theme(self) -> str:
-        value = str(self.get("theme", "dark")).lower()
-        return value if value in {"dark", "light"} else "dark"
-
-    @theme.setter
-    def theme(self, value: str) -> None:
-        self.set("theme", value if value in {"dark", "light"} else "dark")
+        loaded = super()._load()
+        scan_cfg = self.data.get("scan")
+        if isinstance(scan_cfg, dict):
+            scan_cfg.pop("hash_duplicates", None)
+        return loaded
 
     @property
     def roots(self) -> list[str]:
@@ -214,33 +60,3 @@ class AppConfig:
     @roots.setter
     def roots(self, paths: list[str]) -> None:
         self.set("scan.roots", list(dict.fromkeys(paths)))
-
-    @property
-    def user_name(self) -> str:
-        return str(self.get("user.name", "") or _logical_user())
-
-    @property
-    def avatar_path(self) -> str:
-        path = str(self.get("user.avatar", "") or "")
-        return path if path and Path(path).exists() else ""
-
-    @property
-    def avatar_framing(self) -> tuple[float, float, float]:
-        """Ponto focal (x, y) e zoom do avatar, com valores seguros."""
-        try:
-            focus_x = float(self.get("user.avatar_focus_x", 0.5))
-        except (TypeError, ValueError):
-            focus_x = 0.5
-        try:
-            focus_y = float(self.get("user.avatar_focus_y", 0.3))
-        except (TypeError, ValueError):
-            focus_y = 0.3
-        try:
-            zoom = float(self.get("user.avatar_zoom", 1.0))
-        except (TypeError, ValueError):
-            zoom = 1.0
-        return (
-            max(0.0, min(1.0, focus_x)),
-            max(0.0, min(1.0, focus_y)),
-            max(1.0, min(4.0, zoom)),
-        )

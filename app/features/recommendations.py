@@ -18,15 +18,15 @@ from PySide6.QtWidgets import (
 )
 
 from ..services.model import Suggestion
-from ..theme import get_theme
-from ..utils import (
+from appshell.theme import get_theme
+from appshell.utils import (
     copy_to_clipboard,
     format_bytes,
     format_datetime,
     open_in_explorer,
 )
-from ..widgets.buttons import ActionButton, SelectButton
-from ..widgets.common import DisclaimerBanner, EmptyState, IconLabel, PageHeader
+from appshell.widgets.buttons import ActionButton, SelectButton
+from appshell.widgets.common import DisclaimerBanner, EmptyState, IconLabel, PageHeader
 from .base import BasePage
 
 
@@ -140,7 +140,7 @@ class SuggestionCard(QFrame):
                 paths_width = max(
                     paths_width, tree.fontMetrics().horizontalAdvance(path) + 32
                 )
-                from ..icons import file_icon
+                from appshell.icons import file_icon
 
                 item.setIcon(
                     0,

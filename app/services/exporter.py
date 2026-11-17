@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from .. import APP_NAME
-from ..utils import file_author_fast, format_bytes, format_datetime
+from appshell.utils import file_author_fast, format_bytes, format_datetime
 from .model import Node, ScanResult
 
 

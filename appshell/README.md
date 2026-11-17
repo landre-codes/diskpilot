@@ -15,6 +15,8 @@ janela genérica.
   maximizar/restaurar, tela cheia, atalhos, resize nativo no Windows e toasts.
 - `ShellOptions`: identidade da janela, página inicial, atalhos e opção de
   aceitar drag & drop.
+- `JsonSettings`, `theme`, `icons`, `utils` e `widgets`: configuração JSON,
+  temas, ícones, formatação e o kit visual reutilizável.
 
 ## Exemplo mínimo
 
@@ -42,9 +44,9 @@ class Chrome:
     """O app fornece barra de título, sidebar e toast próprios."""
 
     def __init__(self):
-        from app.widgets.title_bar import TitleBar
-        from app.widgets.sidebar import Sidebar
-        from app.widgets.common import Toast
+        from appshell.widgets.title_bar import TitleBar
+        from appshell.widgets.sidebar import Sidebar
+        from appshell.widgets.common import Toast
         self.title_bar = TitleBar
         self.sidebar = Sidebar
         self.toast = Toast
@@ -65,9 +67,8 @@ def build_window(config, theme, context):
     )
 ```
 
-No template completo, a barra de título, a sidebar e o toast também são
-genéricos; o exemplo acima mostra apenas como injetá-los enquanto o kit visual
-ainda não foi movido para `appshell.widgets`.
+A barra de título, a sidebar e o toast já vivem em `appshell.widgets`; o app
+só precisa fornecer a marca, a configuração e as páginas do domínio.
 
 ## Regras de ouro
 

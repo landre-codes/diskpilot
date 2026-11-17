@@ -16,11 +16,11 @@ from PySide6.QtWidgets import (
 )
 
 from ..services.model import Suggestion
-from ..theme import get_theme
-from ..utils import format_bytes, format_datetime, format_number
-from ..widgets.buttons import ActionButton
-from ..widgets.charts import BarList, DonutChart
-from ..widgets.common import (
+from appshell.theme import get_theme
+from appshell.utils import format_bytes, format_datetime, format_number
+from appshell.widgets.buttons import ActionButton
+from appshell.widgets.charts import BarList, DonutChart
+from appshell.widgets.common import (
     Card,
     DisclaimerBanner,
     ElidedLabel,

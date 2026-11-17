@@ -46,7 +46,7 @@ def version() -> str:
 
 def copy_source(destination: Path) -> None:
     destination.mkdir(parents=True, exist_ok=True)
-    for folder in ("app", "appshell", "tests"):
+    for folder in ("app", "appshell", "templates", "tests"):
         shutil.copytree(ROOT / folder, destination / folder, ignore=IGNORE)
     for name in (
         "main.py",

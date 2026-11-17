@@ -19,9 +19,9 @@ from PySide6.QtWidgets import (
 )
 
 from ...services.model import ScanProgress, ScanResult
-from ...utils import format_bytes, format_number
-from ...widgets.buttons import ActionButton, IconButton, SearchField, SelectButton
-from ...widgets.common import Chip, ElidedLabel, EmptyState, PageHeader
+from appshell.utils import format_bytes, format_number
+from appshell.widgets.buttons import ActionButton, IconButton, SearchField, SelectButton
+from appshell.widgets.common import Chip, ElidedLabel, EmptyState, PageHeader
 from ...widgets.dialogs import ExportDialog, FolderPickerDialog, TopItemsDialog
 from ..base import BasePage
 from .tree import FileTree
@@ -178,7 +178,7 @@ class AnalyzerPage(BasePage):
         bl.setContentsMargins(13, 10, 10, 10)
         bl.setSpacing(12)
         self.banner_icon = QLabel(self)
-        from ...widgets.common import IconLabel
+        from appshell.widgets.common import IconLabel
 
         self.banner_icon = IconLabel("radar", 20, "primary", self)
         bl.addWidget(self.banner_icon)

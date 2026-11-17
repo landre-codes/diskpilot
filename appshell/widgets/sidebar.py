@@ -1,4 +1,4 @@
-"""Menu lateral com marca fixa, abas verticais e usuário logado."""
+"""Menu lateral com marca configurável, abas verticais e usuário logado."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..config import AppConfig
+from ..context import SettingsStore
 from ..icons import avatar_pixmap, icon
 from ..theme import get_theme
 from ..utils import avatar_photo
@@ -26,8 +26,9 @@ from .buttons import NavButton
 from .common import Divider
 
 
-# Compatibilidade com instalações antigas de app/icons.py (antes do parâmetro
-# dpr, adicionado na 1.3.4). Evita TypeError quando só o sidebar.py é atualizado.
+# Compatibilidade com instalações antigas de appshell/icons.py (antes do
+# parâmetro dpr, adicionado na 1.3.4). Evita TypeError quando só o sidebar.py
+# é atualizado.
 _AVATAR_HAS_DPR = "dpr" in signature(avatar_pixmap).parameters
 
 
@@ -36,13 +37,22 @@ COLLAPSED_WIDTH = 80
 
 
 class LogoButton(QWidget):
-    """Marca fixa do DiskPilot no topo da barra lateral."""
+    """Marca configurável no topo da barra lateral."""
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        title: str,
+        tagline: str = "",
+        icon_name: str = "application",
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
+        self._title = title
+        self._tagline = tagline
+        self._icon_name = icon_name
         self._ratio = 1.0
         self.setFixedHeight(72)
-        self.setToolTip("DiskPilot — gestor de espaço")
+        self.setToolTip(f"{title} — {tagline}" if tagline else title)
         self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         get_theme().changed.connect(self.update)
 
@@ -69,7 +79,7 @@ class LogoButton(QWidget):
         p.setPen(Qt.NoPen)
         p.setBrush(grad)
         p.drawRoundedRect(QRectF(x, y, mark, mark), 11, 11)
-        pm = icon("harddisk", theme.color("on_primary"), 23).pixmap(23, 23)
+        pm = icon(self._icon_name, theme.color("on_primary"), 23).pixmap(23, 23)
         p.drawPixmap(int(x + (mark - 23) / 2), int(y + (mark - 23) / 2), pm)
 
         if ratio > 0.1:
@@ -84,7 +94,7 @@ class LogoButton(QWidget):
             p.drawText(
                 QRectF(x + mark + 10, h / 2 - 19, w - x - mark - 18, 22),
                 Qt.AlignVCenter | Qt.AlignLeft,
-                "DiskPilot",
+                self._title,
             )
             cap = QColor(theme.color("muted"))
             cap.setAlpha(int(alpha * 0.9))
@@ -96,7 +106,7 @@ class LogoButton(QWidget):
             p.drawText(
                 QRectF(x + mark + 10, h / 2 + 2, w - x - mark - 18, 16),
                 Qt.AlignVCenter | Qt.AlignLeft,
-                "GESTOR DE ESPAÇO",
+                self._tagline.upper(),
             )
         p.end()
 
@@ -104,12 +114,14 @@ class LogoButton(QWidget):
 class UserCard(QWidget):
     clicked = Signal()
 
-    def __init__(self, config: AppConfig, parent: QWidget | None = None) -> None:
+    def __init__(self, config: SettingsStore, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.config = config
         self._ratio = 1.0
         self._hover = False
         self._avatar = QPixmap()
+        self._user_name = ""
+        self._user_subtitle = "Conta local"
         self.setFixedHeight(58)
         self.setCursor(Qt.PointingHandCursor)
         self.setAttribute(Qt.WA_Hover, True)
@@ -118,17 +130,20 @@ class UserCard(QWidget):
 
     def refresh(self) -> None:
         dpr = max(2.0, self.devicePixelRatioF())
-        path = self.config.avatar_path
+        path = str(getattr(self.config, "avatar_path", "") or "")
+        self._user_name = str(getattr(self.config, "user_name", "") or "Usuário")
         avatar_kwargs = {"dpr": dpr} if _AVATAR_HAS_DPR else {}
         if path:
-            focus_x, focus_y, zoom = self.config.avatar_framing
+            focus_x, focus_y, zoom = getattr(
+                self.config, "avatar_framing", (0.5, 0.3, 1.0)
+            )
             self._avatar = avatar_photo(
                 path, 38, dpr, focus_x, focus_y, zoom
             )
         else:
             theme = get_theme()
             self._avatar = avatar_pixmap(
-                self.config.user_name,
+                self._user_name,
                 38,
                 theme.color("primary"),
                 theme.color("info"),
@@ -136,7 +151,7 @@ class UserCard(QWidget):
                 **avatar_kwargs,
             )
         self.setToolTip(
-            f"{self.config.user_name}\nConta local\nClique para editar o perfil"
+            f"{self._user_name}\n{self._user_subtitle}\nClique para editar o perfil"
         )
         self.update()
 
@@ -191,7 +206,7 @@ class UserCard(QWidget):
                 QRectF(x + avatar_size + 9, h / 2 - 18, w - x - avatar_size - 38, 19),
                 Qt.AlignVCenter | Qt.AlignLeft,
                 p.fontMetrics().elidedText(
-                    self.config.user_name,
+                    self._user_name,
                     Qt.ElideRight,
                     int(max(20, w - x - avatar_size - 40)),
                 ),
@@ -223,9 +238,13 @@ class Sidebar(QWidget):
 
     def __init__(
         self,
-        config: AppConfig,
+        config: SettingsStore,
         pages: list[tuple[str, str, str]],
         parent: QWidget | None = None,
+        *,
+        brand_title: str = "App",
+        brand_tagline: str = "",
+        brand_icon: str = "application",
     ) -> None:
         super().__init__(parent)
         self.setObjectName("Sidebar")
@@ -239,7 +258,7 @@ class Sidebar(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(6, 4, 6, 10)
         lay.setSpacing(4)
-        self.logo = LogoButton(self)
+        self.logo = LogoButton(brand_title, brand_tagline, brand_icon, self)
         lay.addWidget(self.logo)
         lay.addSpacing(8)
 

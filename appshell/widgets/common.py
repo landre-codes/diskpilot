@@ -372,7 +372,7 @@ class Chip(QFrame):
         lay.addWidget(self.label, 1, Qt.AlignVCenter)
         close = IconButton(
             "close",
-            "Remover pasta",
+            "Remover",
             self,
             14,
             22,

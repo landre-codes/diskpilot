@@ -727,7 +727,7 @@ class ThemeManager(QObject):
             except Exception:
                 pass
         self.changed.emit(key)
-        logging.getLogger("diskpilot.theme").info(
+        logging.getLogger("appshell.theme").info(
             "tema %s aplicado em %.2fs (cache=%s)",
             key,
             time.perf_counter() - inicio,

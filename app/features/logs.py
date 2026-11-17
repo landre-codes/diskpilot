@@ -38,9 +38,9 @@ from ..logging_setup import (
     migrate_logs,
     prune_logs,
 )
-from ..utils import copy_to_clipboard, format_bytes, format_datetime, open_in_explorer
-from ..widgets.buttons import ActionButton, IconButton, SearchField, SelectButton
-from ..widgets.common import IconLabel, PageHeader
+from appshell.utils import copy_to_clipboard, format_bytes, format_datetime, open_in_explorer
+from appshell.widgets.buttons import ActionButton, IconButton, SearchField, SelectButton
+from appshell.widgets.common import IconLabel, PageHeader
 from ..widgets.dialogs import FolderPickerDialog
 from .base import BasePage
 
