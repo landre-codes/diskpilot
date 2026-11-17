@@ -22,9 +22,23 @@ from ..config import AppConfig
 from appshell.utils import normalize_path, path_key, resolve_network_path
 from .model import ScanProgress, ScanResult, Suggestion
 from .scanner import ScanCancelled, scan_paths
+from .suggestions import build_suggestions
 
 
 logger = logging.getLogger("diskpilot.state")
+
+
+def _is_within(path: str, parent: str) -> bool:
+    """True quando ``path`` é igual ou está dentro de ``parent``."""
+    try:
+        child = os.path.normcase(os.path.normpath(os.path.abspath(path))).rstrip("\\/")
+        root = os.path.normcase(os.path.normpath(os.path.abspath(parent))).rstrip("\\/")
+    except Exception:
+        return False
+    if child == root:
+        return True
+    return child.startswith(root + os.sep)
+
 
 # Acima deste volume, manter a árvore antiga enquanto a nova é construída
 # pode duplicar o uso de memória e derrubar o processo em discos grandes.
@@ -75,6 +89,7 @@ class AppState(QObject):
         self._task: ScanTask | None = None
         self._signals = None
         self._cancel: threading.Event | None = None
+        self._scan_merge = False
         self._generation = 0
         self._pending_restart = False
         self._closing = False
@@ -106,8 +121,35 @@ class AppState(QObject):
             self.config.roots = self.roots
             self.rootsChanged.emit()
             if autoscan:
-                self.start_scan()
+                self.scan_added(added)
         return added
+
+    def _can_merge_added(self, added: list[str]) -> bool:
+        """A adição é incremental se o resultado atual ainda representa as raízes antigas."""
+        if self.last_result is None or self.is_scanning:
+            return False
+        if self.last_result.truncated:
+            return False
+        added_keys = {path_key(path) for path in added}
+        old_keys = {path_key(path) for path in self.roots} - added_keys
+        result_keys = {path_key(root.path) for root in self.last_result.roots}
+        if result_keys != old_keys:
+            return False
+        # Raízes aninhadas seriam contadas duas vezes; nesse caso, refaça tudo.
+        for index, first in enumerate(self.roots):
+            for second in self.roots[index + 1 :]:
+                if _is_within(first, second) or _is_within(second, first):
+                    return False
+        return True
+
+    def scan_added(self, added: list[str]) -> None:
+        """Varre somente as pastas novas e mescla o resultado anterior."""
+        if not added:
+            return
+        if self._can_merge_added(added):
+            self.start_scan(roots=added, merge=True)
+        else:
+            self.start_scan()
 
     def remove_root(self, path: str, autoscan: bool = True) -> None:
         key = path_key(path)
@@ -132,7 +174,12 @@ class AppState(QObject):
         self.resultsCleared.emit()
 
     # -------------------------------------------------------------- varredura
-    def start_scan(self, force: bool = False) -> None:
+    def start_scan(
+        self,
+        force: bool = False,
+        roots: list[str] | None = None,
+        merge: bool = False,
+    ) -> None:
         if self._closing or not self.roots:
             return
         if self._task is not None:
@@ -140,11 +187,14 @@ class AppState(QObject):
             if self._cancel is not None:
                 self._cancel.set()
             return
+        scan_roots = list(roots) if roots is not None else list(self.roots)
+        if not scan_roots:
+            return
         self.last_error = ""
         self._generation += 1
         generation = self._generation
         self._cancel = threading.Event()
-        task = ScanTask(list(self.roots), self._cancel)
+        task = ScanTask(scan_roots, self._cancel)
         signals = task.signals
         signals.progress.connect(
             lambda progress, gen=generation: self._on_progress(gen, progress)
@@ -160,10 +210,17 @@ class AppState(QObject):
         )
         self._task = task
         self._signals = signals
+        self._scan_merge = bool(merge and not force and self.last_result is not None)
         self.is_scanning = True
-        self._release_large_result()
+        if not self._scan_merge:
+            self._release_large_result()
         self.scanStarted.emit()
-        logger.info("scan start gen=%s roots=%s", generation, len(self.roots))
+        logger.info(
+            "scan start gen=%s roots=%s merge=%s",
+            generation,
+            len(scan_roots),
+            self._scan_merge,
+        )
         self._runner.submit(task)
 
     def _release_large_result(self) -> None:
@@ -190,7 +247,23 @@ class AppState(QObject):
         self._signals = None
         self._task = None
         self._cancel = None
+        self._scan_merge = False
         self.is_scanning = False
+
+    @staticmethod
+    def _merge_results(base: ScanResult, extra: ScanResult) -> ScanResult:
+        merged = ScanResult(
+            roots=[*base.roots, *extra.roots],
+            total_size=base.total_size + extra.total_size,
+            total_files=base.total_files + extra.total_files,
+            total_dirs=base.total_dirs + extra.total_dirs,
+            errors=base.errors + extra.errors,
+            elapsed=base.elapsed + extra.elapsed,
+            started_at=base.started_at or extra.started_at,
+            truncated=base.truncated or extra.truncated,
+        )
+        merged.suggestions = build_suggestions(merged)
+        return merged
 
     @Slot(int, object)
     def _on_progress(self, generation: int, progress: ScanProgress) -> None:
@@ -202,11 +275,14 @@ class AppState(QObject):
     def _on_result(self, generation: int, result: ScanResult) -> None:
         if generation != self._generation:
             return
+        merge_base = self.last_result if self._scan_merge else None
         self._finish_task(generation)
         if self._pending_restart:
             self._pending_restart = False
             QTimer.singleShot(0, self.start_scan)
             return
+        if merge_base is not None:
+            result = self._merge_results(merge_base, result)
         self.last_result = result
         try:
             self._store_summary(result)

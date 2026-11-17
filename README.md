@@ -40,7 +40,8 @@ O projeto nasceu como um "Everything gerencial e enxuto": em vez de apenas local
 ### Análise de diretórios
 - Seleção de **uma ou várias pastas** pelo seletor próprio (Ctrl+clique), por arrastar e soltar ou por múltiplas adições.
 - O seletor de pastas mostra o **caminho completo** da pasta atual ou da pasta selecionada, com botão de copiar; cada linha também exibe o caminho integral em tooltip, útil para caminhos longos e unidades de rede.
-- Chips das raízes selecionadas, com remoção individual.
+- Chips das raízes selecionadas, com remoção individual. Ao adicionar pastas com um resultado já existente, apenas as novas raízes são varridas e o resultado anterior é preservado; raízes aninhadas ou resultados truncados disparam uma reanálise completa.
+- Falhas de permissão não interrompem a análise: a pasta ou entrada inacessível é registrada como aviso, o restante da árvore continua e o total de avisos aparece ao final.
 - Varredura em segundo plano com `QThreadPool`, progresso agregado, cancelamento e tolerância a erros de permissão. Várias raízes são varridas em paralelo (até 4 workers) com um limite compartilhado de 1,5 milhão de entradas; o progresso combina arquivos, pastas e bytes das raízes ativas. Logs em `~/DiskPilot/logs/diskpilot.log` e `diskpilot-crash.log` por padrão, com pasta configurável pela página **Logs**.
 - Botão **Top 100**: ranking dos 100 maiores diretórios e dos 100 maiores arquivos da análise, com filtro por tamanho (todos, > 100 MB, > 1 GB), tamanho, percentual, caminho completo, cópia do caminho e abertura no Explorer. O ranking é calculado em uma thread de trabalho; o diálogo abre imediatamente e mostra “Carregando ranking…”.
 - Coluna **Autor** na árvore: mostra o autor gravado nos metadados do arquivo (o campo “Authors” do Windows — funciona para Office, PDF e outros formatos que guardam essa informação). A consulta roda em segundo plano, com cache por caminho, para não travar a interface; o nome também aparece no tooltip e na linha copiada. Pastas e formatos sem metadados de autor aparecem como `—`.
@@ -442,6 +443,7 @@ class ClientesPage(BasePage):
 - Duplicatas são comparadas por nome + tamanho, sem abrir/ler o conteúdo dos arquivos. A lista é ordenada pelo espaço potencialmente recuperável, e os caminhos são exibidos para revisão manual antes de qualquer remoção.
 - O redimensionamento nativo por `WM_NCHITTEST` é específico do Windows; o fallback manual cobre outras plataformas.
 - A varredura paralela distribui raízes independentes, não subpastas de uma mesma raiz. Um disco lento ainda limita o ganho, e o limite de 1,5 milhão de entradas é compartilhado por todas as raízes.
+- A busca/filtro percorre até 30.000 nós e renderiza no máximo 2.800 itens por consulta para manter a interface responsiva. Em árvores com centenas de milhares de itens, resultados além desse recorte podem não aparecer; a próxima evolução é mover a busca para um worker com índice/cancelamento.
 - Para volumes muito grandes (milhões de itens), considere persistir a árvore em SQLite ou manter uma indexação incremental.
 - O shell pode receber novas páginas sem alterações na janela principal.
 

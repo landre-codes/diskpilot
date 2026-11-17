@@ -30,3 +30,32 @@ def test_app_state_scans_with_task_runner(qapp, qtbot, tmp_path: Path) -> None:
     assert busy[0] is True
     assert busy[-1] is False
     state.shutdown()
+
+
+def test_adding_root_merges_previous_result(qapp, qtbot, tmp_path: Path) -> None:
+    config = AppConfig(tmp_path / "config")
+    state = AppState(config)
+    first = tmp_path / "primeira"
+    second = tmp_path / "segunda"
+    first.mkdir()
+    second.mkdir()
+    (first / "a.bin").write_bytes(b"x" * 10)
+    (second / "b.bin").write_bytes(b"x" * 20)
+
+    results = []
+    state.scanFinished.connect(results.append)
+    state.add_roots([str(first)], autoscan=True)
+    qtbot.waitUntil(lambda: len(results) == 1, timeout=5000)
+    first_result = state.last_result
+    assert first_result is not None
+
+    state.add_roots([str(second)], autoscan=True)
+    qtbot.waitUntil(lambda: len(results) == 2, timeout=5000)
+
+    merged = state.last_result
+    assert merged is not None
+    assert len(merged.roots) == 2
+    assert merged.roots[0] is first_result.roots[0]
+    assert merged.total_files == 2
+    assert merged.total_size == 30
+    state.shutdown()

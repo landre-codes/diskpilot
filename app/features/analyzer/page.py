@@ -319,7 +319,7 @@ class AnalyzerPage(BasePage):
             return
         noun = "pasta adicionada" if len(added) == 1 else "pastas adicionadas"
         self.toast(f"{len(added)} {noun}. Iniciando análise…", "info")
-        QTimer.singleShot(100, self.state.start_scan)
+        QTimer.singleShot(100, lambda: self.state.scan_added(added))
 
     def _rescan(self) -> None:
         if not self.state.roots:
