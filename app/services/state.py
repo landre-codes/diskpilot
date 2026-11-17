@@ -20,6 +20,7 @@ from appshell.tasks import Task, TaskCancelled, TaskRunner
 
 from ..config import AppConfig
 from appshell.utils import normalize_path, path_key, resolve_network_path
+from .index_store import IndexTask, SearchIndex
 from .model import ScanProgress, ScanResult, Suggestion
 from .scanner import ScanCancelled, scan_paths
 from .suggestions import build_suggestions
@@ -43,6 +44,7 @@ def _is_within(path: str, parent: str) -> bool:
 # Acima deste volume, manter a árvore antiga enquanto a nova é construída
 # pode duplicar o uso de memória e derrubar o processo em discos grandes.
 RELEASE_RESULT_THRESHOLD = 80_000
+INDEX_THRESHOLD = 50_000
 
 
 class ScanTask(Task):
@@ -72,6 +74,9 @@ class AppState(QObject):
     scanFailed = Signal(str)
     resultsCleared = Signal()
     busyChanged = Signal(bool)
+    searchIndexReady = Signal(object)
+    searchIndexCleared = Signal()
+    searchIndexFailed = Signal(str)
 
     def __init__(self, config: AppConfig) -> None:
         super().__init__()
@@ -86,6 +91,14 @@ class AppState(QObject):
         self.is_scanning = False
         self._runner = TaskRunner(self, max_threads=1)
         self._runner.busyChanged.connect(self.busyChanged.emit)
+        self._index_runner = TaskRunner(self, max_threads=1)
+        self._index_generation = 0
+        self.search_index: SearchIndex | None = None
+        self.index_building = False
+        try:
+            SearchIndex.prune(self.config.path.parent / "index")
+        except Exception:
+            logger.exception("falha ao limpar índices antigos")
         self._task: ScanTask | None = None
         self._signals = None
         self._cancel: threading.Event | None = None
@@ -168,6 +181,9 @@ class AppState(QObject):
 
     def clear_results(self, persist: bool = False) -> None:
         self.last_result = None
+        self._index_generation += 1
+        self._index_runner.cancel()
+        self._drop_index(emit=True)
         if persist:
             self.config.set("scan.summary", {}, save=False)
             self.config.set("scan.last_scan", 0, save=True)
@@ -298,6 +314,61 @@ class AppState(QObject):
             result.truncated,
         )
         self.scanFinished.emit(result)
+        self._schedule_index(result)
+
+    def _drop_index(self, emit: bool = True) -> None:
+        old = self.search_index
+        self.search_index = None
+        if old is not None:
+            old.delete()
+        if emit:
+            self.searchIndexCleared.emit()
+
+    def _schedule_index(self, result: ScanResult) -> None:
+        """Constrói o sidecar SQLite somente para análises grandes."""
+        self._index_generation += 1
+        generation = self._index_generation
+        self._index_runner.cancel()
+        self._drop_index(emit=True)
+        entries = result.total_files + result.total_dirs
+        if entries < INDEX_THRESHOLD or not result.roots or self._closing:
+            self.index_building = False
+            return
+        try:
+            index = SearchIndex.create(self.config.path.parent / "index")
+        except Exception as exc:
+            self.index_building = False
+            logger.exception("falha ao preparar o índice de busca")
+            self.searchIndexFailed.emit(str(exc))
+            return
+        self.index_building = True
+        task = IndexTask(result, index)
+        task.signals.finished.connect(
+            lambda value, gen=generation: self._on_index_ready(gen, value)
+        )
+        task.signals.failed.connect(
+            lambda message, gen=generation: self._on_index_failed(gen, message)
+        )
+        self._index_runner.submit(task)
+
+    def _on_index_ready(self, generation: int, index: SearchIndex) -> None:
+        if generation != self._index_generation or self._closing:
+            index.delete()
+            return
+        old = self.search_index
+        self.search_index = index
+        self.index_building = False
+        if old is not None and old.path != index.path:
+            old.delete()
+        logger.info("índice de busca pronto: %s", index.path)
+        self.searchIndexReady.emit(index)
+
+    def _on_index_failed(self, generation: int, message: str) -> None:
+        if generation != self._index_generation:
+            return
+        self.index_building = False
+        logger.error("falha ao construir o índice de busca: %s", message)
+        self.searchIndexFailed.emit(message)
 
     @Slot(int)
     def _on_cancelled(self, generation: int) -> None:
@@ -409,6 +480,12 @@ class AppState(QObject):
             self._runner.shutdown()
         except Exception:
             logger.exception("falha ao encerrar o pool de varredura")
+        try:
+            self._index_runner.shutdown()
+        except Exception:
+            logger.exception("falha ao encerrar o pool do índice")
+        self._index_generation += 1
+        self._drop_index(emit=False)
         try:
             self.config.save()
         except Exception:

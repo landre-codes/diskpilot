@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 
 from ..services.model import Suggestion
 from appshell.theme import get_theme
-from appshell.utils import format_bytes, format_datetime, format_number
+from appshell.utils import format_bytes, format_datetime, format_duration, format_number
 from appshell.widgets.buttons import ActionButton
 from appshell.widgets.charts import BarList, DonutChart
 from appshell.widgets.common import (
@@ -363,7 +363,7 @@ class DashboardPage(BasePage):
         started = summary.get("started_at", 0) if has else 0
         self.info_values["data"].setText(format_datetime(started) if started else "—")
         self.info_values["duracao"].setText(
-            f"{float(summary.get('elapsed', 0)):.1f}s" if has else "—"
+            format_duration(summary.get("elapsed", 0)) if has else "-"
         )
         self.info_values["pastas"].setText(
             format_number(len(roots)) if has else str(len(self.state.roots))

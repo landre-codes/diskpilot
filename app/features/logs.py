@@ -38,7 +38,7 @@ from ..logging_setup import (
     migrate_logs,
     prune_logs,
 )
-from appshell.utils import copy_to_clipboard, format_bytes, format_datetime, open_in_explorer
+from appshell.utils import copy_to_clipboard, format_bytes, format_datetime, format_duration, open_in_explorer
 from appshell.widgets.buttons import ActionButton, IconButton, SearchField, SelectButton
 from appshell.widgets.common import IconLabel, PageHeader
 from ..widgets.dialogs import FolderPickerDialog
@@ -417,7 +417,7 @@ class LogsPage(BasePage):
         if result is not None:
             scan = (
                 f"{format_bytes(result.total_size)} · {result.total_files} arquivos · "
-                f"{result.errors} avisos · {result.elapsed:.1f}s"
+                f"{result.errors} avisos · {format_duration(result.elapsed)}"
             )
         else:
             scan = "(nenhuma análise nesta sessão)"

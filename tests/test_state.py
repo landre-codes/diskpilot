@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from app.config import AppConfig
+from app.services.model import Node, ScanResult
+from app.services import state as state_module
 from app.services.state import AppState
 
 
@@ -58,4 +60,31 @@ def test_adding_root_merges_previous_result(qapp, qtbot, tmp_path: Path) -> None
     assert merged.roots[0] is first_result.roots[0]
     assert merged.total_files == 2
     assert merged.total_size == 30
+    state.shutdown()
+
+
+def test_state_builds_search_index_in_background(
+    qapp, qtbot, tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setattr(state_module, "INDEX_THRESHOLD", 1)
+    config = AppConfig(tmp_path / "config")
+    state = AppState(config)
+    root = Node(path="C:/raiz", name="raiz", is_dir=True, dirs=1)
+    root.children = [
+        Node(
+            path="C:/raiz/agulha.txt",
+            name="agulha.txt",
+            is_dir=False,
+            size=10,
+            files=1,
+        )
+    ]
+    result = ScanResult(roots=[root], total_size=10, total_files=1, total_dirs=1)
+    ready = []
+    state.searchIndexReady.connect(ready.append)
+
+    state._schedule_index(result)
+    qtbot.waitUntil(lambda: bool(ready), timeout=5000)
+
+    assert ready[0].search("agulha").matches == 1
     state.shutdown()

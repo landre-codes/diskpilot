@@ -74,11 +74,22 @@ def format_number(value: int | float) -> str:
 
 def format_datetime(timestamp: float | int | None) -> str:
     if not timestamp:
-        return "—"
+        return "-"
     try:
         return datetime.fromtimestamp(float(timestamp)).strftime("%d/%m/%Y %H:%M")
     except (OSError, OverflowError, ValueError):
-        return "—"
+        return "-"
+
+
+def format_duration(seconds: float | int | None) -> str:
+    """Formata segundos como ``hh:mm:ss`` para exibição ao usuário."""
+    try:
+        total = max(0, int(round(float(seconds or 0))))
+    except (TypeError, ValueError, OverflowError):
+        return "00:00:00"
+    hours, remainder = divmod(total, 3600)
+    minutes, secs = divmod(remainder, 60)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}"
 
 
 def plural(count: int, singular: str, plural_form: str) -> str:

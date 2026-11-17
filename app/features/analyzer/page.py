@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 from ...services.model import ScanProgress, ScanResult
-from appshell.utils import format_bytes, format_number
+from appshell.utils import format_bytes, format_duration, format_number
 from appshell.widgets.buttons import ActionButton, IconButton, SearchField, SelectButton
 from appshell.widgets.common import Chip, ElidedLabel, EmptyState, PageHeader
 from ...widgets.dialogs import ExportDialog, FolderPickerDialog, TopItemsDialog
@@ -248,6 +248,9 @@ class AnalyzerPage(BasePage):
         self.state.scanCancelled.connect(self._on_scan_cancelled)
         self.state.scanFailed.connect(self._on_scan_failed)
         self.state.resultsCleared.connect(self._on_results_cleared)
+        self.state.searchIndexReady.connect(self._on_search_index_ready)
+        self.state.searchIndexCleared.connect(self._on_search_index_cleared)
+        self.state.searchIndexFailed.connect(self._on_search_index_failed)
 
         self._refresh_roots()
         if self.state.last_result is not None:
@@ -437,7 +440,7 @@ class AnalyzerPage(BasePage):
             suffix = f" com {result.errors} aviso{'s' if result.errors != 1 else ''} de acesso"
         message = (
             f"Análise concluída: {format_bytes(result.total_size)} em "
-            f"{result.elapsed:.1f}s{suffix}."
+            f"{format_duration(result.elapsed)}{suffix}."
         )
         if result.truncated:
             self.toast(
@@ -466,6 +469,17 @@ class AnalyzerPage(BasePage):
         self._update_header()
         self._update_empty()
         self._update_path_detail()
+
+    def _on_search_index_ready(self, index) -> None:
+        self.tree.set_search_index(index)
+
+    def _on_search_index_cleared(self) -> None:
+        self.tree.set_search_index(None)
+
+    def _on_search_index_failed(self, message: str) -> None:
+        # A busca em memória continua funcionando; o índice é um acelerador.
+        self.tree.set_search_index(None)
+        self.toast("Índice de busca indisponível; usando busca em memória.", "warn")
 
     def _on_count(self, matches: int, shown: int) -> None:
         self._last_matches = matches

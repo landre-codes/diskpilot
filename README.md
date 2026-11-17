@@ -57,6 +57,7 @@ O projeto nasceu como um "Everything gerencial e enxuto": em vez de apenas local
   - barras proporcionais na coluna de tamanho;
   - limite de itens por pasta para manter a interface responsiva.
 - Busca com **debounce de 260 ms** e limpeza rápida. A varredura da busca roda em segundo plano, percorre a árvore inteira e conta todas as correspondências; a renderização é limitada para manter a interface fluida. O campo fica alinhado à esquerda e o contador de resultados ocupa o espaço restante, sem elidir o texto quando há largura suficiente.
+- Em análises grandes (a partir de 50 mil entradas), um **índice SQLite com FTS5** é construído em segundo plano. A busca usa o índice; se ele ainda não estiver pronto, a busca em memória continua funcionando como fallback.
 - Estados vazios com descrição responsiva: a largura acompanha o cartão (até 520 px) e a altura mínima é calculada pelo texto, com margens compactas em janelas baixas — a mensagem “Analisando pastas…” não é cortada.
 - Filtros: tudo, pastas, arquivos, arquivos > 100 MB e > 1 GB.
 - Conversor de unidade na tabela: automático, KB, MB, GB ou TB.
@@ -241,6 +242,8 @@ diskpilot/
 │  ├─ test_shell.py
 │  ├─ test_state.py
 │  ├─ test_tree.py
+│  ├─ test_index_store.py
+│  ├─ test_utils.py
 │  └─ test_dialogs.py
 ├─ templates/
 │  └─ basic/                    # scaffold Copier: appshell + NotesPage
@@ -276,6 +279,7 @@ diskpilot/
    ├─ services/
    │  ├─ model.py               # Node, ScanResult, Suggestion
    │  ├─ scanner.py             # varredura recursiva cancelável
+   │  ├─ index_store.py         # índice SQLite/FTS5 para análises grandes
    │  ├─ suggestions.py         # heurísticas de limpeza
    │  └─ state.py               # estado compartilhado + TaskRunner
    └─ features/
@@ -427,6 +431,8 @@ class ClientesPage(BasePage):
 - O seletor de pastas não usa `QFileSystemModel`: as subpastas são enumeradas em um `QThreadPool` com `os.scandir` e exibidas em um `QListView` com `QAbstractListModel`. A GUI não cria um widget por pasta nem faz `stat` ao rolar; a lista de unidades é montada após o `show` e a resolução de UNC para os locais não verifica `isdir`, então unidades de rede desconectadas não bloqueiam a abertura. `activated`/Enter e duplo clique navegam sem disparar a navegação duas vezes.
 - A adição de pastas pelo seletor usa `add_roots(..., trusted=True)`: o caminho já foi validado/enumerado pelo diálogo, então não há `os.path.isdir` extra em cada pasta de rede ao confirmar.
 - `top_items` faz uma única travessia com dois heaps (diretórios e arquivos), em vez de varrer a árvore duas vezes. O cálculo do Top 100 da exportação roda na thread de escrita.
+- A duração da análise é exibida ao usuário como `hh:mm:ss` por `appshell.utils.format_duration`; a exportação mantém a coluna numérica em segundos para planilhas.
+- O índice SQLite é um sidecar opcional: `IndexTask` o constrói em background, `SearchIndex` abre uma conexão por consulta e o `FileTree` escolhe entre busca em memória e busca indexada. Arquivos antigos são podados e o índice atual é descartado ao limpar a análise ou fechar o app.
 - O núcleo `appshell/` não importa `app`: `AppContext`, `BasePage`/`PageSpec`, `TaskRunner` e `ShellWindow` formam o contrato reutilizável. O `MainWindow` do DiskPilot é uma composição fina que injeta `TitleBar`, `Sidebar`, `Toast`, atalhos e o estado de disco.
 - `AppState` usa o `TaskRunner` genérico para a varredura: a tarefa só implementa `execute()`, e o runner cuida do pool, dos sinais, do cancelamento e da liberação da tarefa. O mesmo contrato pode ser usado por exportação, carregamento de pastas e Top 100.
 - `app/features/base.py` reexporta `BasePage` e `PageSpec` de `appshell.pages` para manter compatibilidade com as páginas existentes.
@@ -445,7 +451,8 @@ class ClientesPage(BasePage):
 - O redimensionamento nativo por `WM_NCHITTEST` é específico do Windows; o fallback manual cobre outras plataformas.
 - A varredura paralela distribui raízes independentes, não subpastas de uma mesma raiz. Um disco lento ainda limita o ganho, e o limite de 1,5 milhão de entradas é compartilhado por todas as raízes.
 - A busca/filtro percorre a árvore inteira em segundo plano e conta todas as correspondências. Para renderizar, mantém até 5.000 correspondências e exibe no máximo 2.800 itens; em buscas muito amplas, o contador indica que há mais resultados e pede para refinar o termo.
-- Para volumes muito grandes (milhões de itens), considere persistir a árvore em SQLite ou manter uma indexação incremental.
+- Para volumes muito grandes (milhões de itens), o índice SQLite/FTS5 cobre a busca; a árvore e o resumo ainda ficam em memória nesta fase. A próxima evolução é transmitir os nós direto para o SQLite e carregar a árvore sob demanda.
+- O índice é um arquivo SQLite separado, criado em segundo plano; em 500 mil entradas ele ocupou cerca de 125 MB e levou ~5,5 s em SSD (o tempo varia com o disco). O app continua responsivo durante a indexação.
 - O shell pode receber novas páginas sem alterações na janela principal.
 
 ---

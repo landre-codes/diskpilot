@@ -44,6 +44,7 @@ from PySide6.QtWidgets import (
 from shiboken6 import isValid
 
 from appshell.icons import file_icon, icon
+from ...services.index_store import SearchIndex
 from ...services.model import Node, ScanResult
 from appshell.tasks import Task, TaskCancelled, TaskRunner
 from appshell.theme import get_theme
@@ -55,6 +56,7 @@ from appshell.utils import (
     format_number,
     format_size,
     open_in_explorer,
+    path_key,
 )
 
 
@@ -238,6 +240,63 @@ class _FilterTask(Task):
         )
 
 
+class _IndexFilterTask(Task):
+    """Usa o SQLite para achar os caminhos e a árvore só para montar ancestrais."""
+
+    def __init__(
+        self,
+        result: ScanResult,
+        index: SearchIndex,
+        query: str,
+        filter_key: str,
+        sort_key: str,
+        generation: int,
+    ) -> None:
+        super().__init__()
+        self.result = result
+        self.index = index
+        self.query = query
+        self.filter_key = filter_key
+        self.sort_key = sort_key
+        self.generation = generation
+
+    def execute(self) -> _FilterResult:
+        hits = self.index.search(
+            self.query,
+            self.filter_key,
+            self.sort_key,
+            limit=MAX_RESULT_MATCHES,
+        )
+        target = {path_key(path) for path in hits.paths}
+        included: set[int] = set()
+        visited = 0
+        for root in self.result.roots:
+            stack: list[tuple[Node, bool]] = [(root, False)]
+            path: list[Node] = []
+            while stack:
+                if self.cancel.is_set():
+                    raise TaskCancelled()
+                node, exiting = stack.pop()
+                if exiting:
+                    path.pop()
+                    continue
+                path.append(node)
+                visited += 1
+                if path_key(node.path) in target:
+                    for ancestor in path:
+                        included.add(id(ancestor))
+                stack.append((node, True))
+                for child in reversed(node.children):
+                    stack.append((child, False))
+        return _FilterResult(
+            generation=self.generation,
+            matches=hits.matches,
+            included=included,
+            visited=visited,
+            limited=hits.matches > len(hits.paths),
+        )
+
+
 class SizeBarDelegate(QStyledItemDelegate):
     """Coluna de tamanho com micro barra proporcional e alinhamento à direita."""
 
@@ -358,6 +417,7 @@ class FileTree(QTreeWidget):
         self._size_delegate = SizeBarDelegate(self)
         self.setItemDelegateForColumn(1, self._size_delegate)
         self._result: ScanResult | None = None
+        self._search_index: SearchIndex | None = None
         self._query = ""
         self._filter = "all"
         self._sort = "size_desc"
@@ -507,7 +567,16 @@ class FileTree(QTreeWidget):
     # -------------------------------------------------------------- configuração
     def set_result(self, result: ScanResult | None) -> None:
         self._result = result
+        self._search_index = None
         self.rebuild()
+
+    def set_search_index(self, index: SearchIndex | None) -> None:
+        """Troca o backend de busca; ``None`` volta ao filtro em memória."""
+        if self._search_index is index:
+            return
+        self._search_index = index
+        if self._result is not None and (self._query or self._filter != "all"):
+            self.rebuild()
 
     def set_path_visible(self, visible: bool) -> None:
         self._path_visible = bool(visible)
@@ -751,12 +820,23 @@ class FileTree(QTreeWidget):
         self.addTopLevelItem(info)
         self.countChanged.emit(-1, 0)
         self._filter_runner.submit(
-            _FilterTask(
-                self._result,
-                self._query,
-                self._filter,
-                self._sort,
-                generation,
+            (
+                _IndexFilterTask(
+                    self._result,
+                    self._search_index,
+                    self._query,
+                    self._filter,
+                    self._sort,
+                    generation,
+                )
+                if self._search_index is not None
+                else _FilterTask(
+                    self._result,
+                    self._query,
+                    self._filter,
+                    self._sort,
+                    generation,
+                )
             )
         )
 
