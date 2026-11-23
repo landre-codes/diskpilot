@@ -535,6 +535,22 @@ def test_load_result_rejects_cycles(tmp_path: Path) -> None:
             conn.close()
 
         assert index.load_result() is None
+        assert index.load_result(lazy=True) is None
+    finally:
+        index.delete()
+
+
+def test_load_result_lazy_rejects_self_parent(tmp_path: Path) -> None:
+    index = SearchIndex.create(tmp_path / "index")
+    try:
+        index.write(_result())
+        _update_index(
+            index.path,
+            "UPDATE nodes SET parent_id = id "
+            "WHERE id = (SELECT id FROM nodes WHERE parent_id IS NOT NULL LIMIT 1)",
+        )
+
+        assert index.load_result(lazy=True) is None
     finally:
         index.delete()
 

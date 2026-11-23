@@ -135,6 +135,24 @@ class JsonSettings:
                 self._prune_corrupt_backups()
             except Exception:
                 pass
+            good = self.path.with_name(f"{self.path.stem}.good.json")
+            if good.exists():
+                try:
+                    raw = json.loads(good.read_text(encoding="utf-8"))
+                    if not isinstance(raw, dict):
+                        raise ValueError("backup raiz não é um objeto")
+                    self.data = merge_defaults(self.defaults, raw)
+                    self.data.pop("native_frame", None)
+                    self.data.pop("logo", None)
+                    if isinstance(self.data.get("user"), dict):
+                        self.data["user"].pop("role", None)
+                    if not str(
+                        self.data.get("user", {}).get("name", "")
+                    ).strip():
+                        self.data["user"]["name"] = logical_user()
+                    return True
+                except Exception:
+                    pass
             self.data = copy.deepcopy(self.defaults)
             self.data["user"]["name"] = logical_user()
             return False
@@ -142,8 +160,16 @@ class JsonSettings:
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_suffix(".json.tmp")
+        good = self.path.with_name(f"{self.path.stem}.good.json")
         payload = json.dumps(self.data, ensure_ascii=False, indent=2)
         try:
+            if self.path.exists():
+                try:
+                    current = json.loads(self.path.read_text(encoding="utf-8"))
+                    if isinstance(current, dict):
+                        shutil.copy2(self.path, good)
+                except Exception:
+                    pass
             tmp.write_text(payload, encoding="utf-8")
             os.replace(tmp, self.path)
         except Exception:

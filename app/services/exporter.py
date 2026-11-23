@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import logging
+import os
 import shutil
 import tempfile
 from datetime import datetime
@@ -340,6 +341,9 @@ def write_xlsb(
     result: ScanResult, dirs: list[Node], files: list[Node], path: str
 ) -> None:
     temp_dir = Path(tempfile.mkdtemp(prefix="diskpilot-xlsb-"))
+    (temp_dir / ".diskpilot-owner").write_text(
+        str(os.getpid()), encoding="utf-8"
+    )
     temp_xlsx = temp_dir / "export.xlsx"
     try:
         write_xlsx(result, dirs, files, str(temp_xlsx))

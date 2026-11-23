@@ -41,17 +41,43 @@ def test_corrupt_config_backups_are_bounded(tmp_path: Path) -> None:
     assert len(backups) == 5
 
 
+def test_corrupt_config_recovers_last_good_backup(tmp_path: Path) -> None:
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "config.json").write_text("{ invalido", encoding="utf-8")
+    (config_dir / "config.good.json").write_text(
+        '{"theme": "light"}', encoding="utf-8"
+    )
+
+    config = AppConfig(config_dir)
+
+    assert config.get("theme") == "light"
+
+
+def test_save_keeps_last_good_config(tmp_path: Path) -> None:
+    config_dir = tmp_path / "config"
+    config = AppConfig(config_dir)
+    config.set("theme", "light")
+
+    good = config_dir / "config.good.json"
+    assert good.is_file()
+    assert '"theme": "dark"' in good.read_text(encoding="utf-8")
+
+
 def test_cleanup_stale_temp_dirs_only_removes_old_prefixes(
     tmp_path: Path, monkeypatch
 ) -> None:
     old = tmp_path / "diskpilot-xlsb-antigo"
     fresh = tmp_path / "diskpilot-export-novo"
+    unprotected = tmp_path / "diskpilot-xlsb-sem-dono"
     unrelated = tmp_path / "outro-app-antigo"
-    for folder in (old, fresh, unrelated):
+    for folder in (old, fresh, unprotected, unrelated):
         folder.mkdir()
         (folder / "arquivo.tmp").write_text("x", encoding="utf-8")
+    for folder in (old, fresh):
+        (folder / ".diskpilot-owner").write_text("123", encoding="utf-8")
     stamp = time.time() - 2 * 24 * 60 * 60
-    for folder in (old, unrelated):
+    for folder in (old, unprotected, unrelated):
         os.utime(folder, (stamp, stamp))
     monkeypatch.setattr(utils.tempfile, "gettempdir", lambda: str(tmp_path))
 
@@ -60,4 +86,5 @@ def test_cleanup_stale_temp_dirs_only_removes_old_prefixes(
     assert removed == 1
     assert not old.exists()
     assert fresh.exists()
+    assert unprotected.exists()
     assert unrelated.exists()

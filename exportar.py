@@ -16,6 +16,7 @@ execute este script novamente usando o interpretador de destino.
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import shutil
 import subprocess
@@ -172,6 +173,9 @@ def main() -> int:
     DIST.mkdir(parents=True, exist_ok=True)
     v = version()
     staging = Path(tempfile.mkdtemp(prefix="diskpilot-export-"))
+    (staging / ".diskpilot-owner").write_text(
+        str(os.getpid()), encoding="utf-8"
+    )
     try:
         source_dir = staging / "source"
         copy_source(source_dir)

@@ -1014,6 +1014,15 @@ class SearchIndex:
                 if orphaned:
                     self._invalid("nó órfão com parent_id inexistente")
                     return None
+                cyclic = int(
+                    conn.execute(
+                        "SELECT COUNT(*) FROM nodes WHERE scan_id = 1 "
+                        "AND parent_id IS NOT NULL AND parent_id >= id"
+                    ).fetchone()[0]
+                )
+                if cyclic:
+                    self._invalid("parent_id não anterior ao filho (ciclo)")
+                    return None
                 inconsistent = int(
                     conn.execute(
                         "SELECT COUNT(*) FROM nodes n LEFT JOIN nodes p "
@@ -1298,12 +1307,19 @@ class SearchIndex:
         conn = sqlite3.connect(self.path)
         try:
             conn.execute("PRAGMA query_only=ON")
+            columns = {
+                str(row[1])
+                for row in conn.execute("PRAGMA table_info(nodes)")
+            }
+            path_column = (
+                "path_exact" if "path_exact" in columns else "path"
+            )
             for start in range(0, len(normalized), 400):
                 chunk = normalized[start : start + 400]
                 placeholders = ",".join("?" for _ in chunk)
                 rows = conn.execute(
                     "SELECT id, name, path, is_dir, size, mtime, files, dirs, "
-                    "error FROM nodes WHERE scan_id = 1 AND path_exact IN "
+                    f"error FROM nodes WHERE scan_id = 1 AND {path_column} IN "
                     f"({placeholders})",
                     chunk,
                 ).fetchall()

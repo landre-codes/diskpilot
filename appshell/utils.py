@@ -247,6 +247,9 @@ def cleanup_stale_temp_dirs(max_age_seconds: float = 24 * 60 * 60) -> int:
         for candidate in root.glob(f"{prefix}*"):
             if not candidate.is_dir():
                 continue
+            marker = candidate / ".diskpilot-owner"
+            if not marker.is_file():
+                continue
             try:
                 age = now - candidate.stat().st_mtime
             except OSError:

@@ -6,12 +6,13 @@ Este módulo é separado para evitar importação circular: ele é chamado por
 
 from __future__ import annotations
 
+import heapq
 import logging
 import os
 import sqlite3
 import time
 from bisect import bisect_right
-from collections import defaultdict
+from collections.abc import Iterator
 from pathlib import Path
 
 from appshell.utils import normalize_path
@@ -67,9 +68,6 @@ def build_indexed_suggestions(
             return False
         index = bisect_right(prefixes, path) - 1
         return index >= 0 and path.startswith(prefixes[index])
-
-    def claim(path: str, claimed: set[str]) -> None:
-        claimed.add(normalize_path(path))
 
     suggestions: list[Suggestion] = []
     try:
@@ -155,24 +153,46 @@ def build_indexed_suggestions(
             )
 
         prefixes = sorted(set(prefixes_for(chosen_cache + chosen_build)))
-        claimed: set[str] = set()
+        conn.execute(
+            "CREATE TEMP TABLE IF NOT EXISTS excluded(path TEXT PRIMARY KEY)"
+        )
 
-        # As consultas abaixo trazem somente candidatos acima do limiar;
-        # a exclusão dos caches/builds é feita nos poucos milhares de
-        # candidatos, não em todos os 1,4 milhão de nós.
-        stale_rows = conn.execute(
+        def add_excluded(paths: list[str]) -> None:
+            if paths:
+                conn.executemany(
+                    "INSERT OR IGNORE INTO excluded(path) VALUES (?)",
+                    [(str(path),) for path in paths],
+                )
+
+        def fetch_batches(statement: str, params: tuple) -> Iterator[list[tuple]]:
+            cursor = conn.execute(statement, params)
+            while True:
+                batch = cursor.fetchmany(2000)
+                if not batch:
+                    return
+                yield batch
+
+        # Stale: stream ordered by size; retém apenas os exemplos exibidos.
+        stale_count = 0
+        stale_total = 0
+        stale_paths: list[str] = []
+        for batch in fetch_batches(
             f"SELECT {path_expr}, path, size FROM nodes WHERE scan_id = 1 "
             "AND is_dir = 0 AND size >= ? AND mtime < ? ORDER BY size DESC",
             (STALE_MIN, now - STALE_AGE),
-        ).fetchall()
-        stale = [
-            (str(path_exact), str(path), int(size))
-            for path_exact, path, size in stale_rows
-            if not blocked(normalize_path(str(path_exact)), prefixes)
-            and normalize_path(str(path_exact)) not in claimed
-        ]
-        if stale:
-            total = sum(size for _exact, _path, size in stale)
+        ):
+            stale_excluded: list[str] = []
+            for path_exact, path, size in batch:
+                exact = normalize_path(str(path_exact))
+                if blocked(exact, prefixes):
+                    continue
+                stale_count += 1
+                stale_total += int(size)
+                if len(stale_paths) < max_paths:
+                    stale_paths.append(str(path))
+                stale_excluded.append(str(path_exact))
+            add_excluded(stale_excluded)
+        if stale_count:
             suggestions.append(
                 Suggestion(
                     key="stale",
@@ -181,49 +201,81 @@ def build_indexed_suggestions(
                         "Arquivos pesados que não são modificados há muito tempo. Bons candidatos "
                         "para arquivar em armazenamento externo ou revisar com o responsável."
                     ),
-                    savings=total,
-                    count=len(stale),
+                    savings=stale_total,
+                    count=stale_count,
                     confidence="review",
                     icon="clock-outline",
                     note=(
                         "Abra os arquivos antes de mover. Arquivos de clientes, backups e mídias "
                         "podem ter valor histórico mesmo sem alterações recentes."
                     ),
-                    paths=[path for _exact, path, _size in stale[:max_paths]],
+                    paths=stale_paths,
                 )
             )
-            for exact, _path, _size in stale:
-                claim(exact, claimed)
 
-        duplicate_rows = conn.execute(
+        # Duplicatas: stream ordenado por (nome, tamanho); guarda no heap
+        # apenas os 40 grupos de maior economia.
+        duplicate_top: list[tuple] = []
+        duplicate_serial = 0
+        current_key: tuple[str, int] | None = None
+        current_count = 0
+        current_size = 0
+        current_exact: list[str] = []
+        current_samples: list[str] = []
+
+        def finish_duplicate_group() -> None:
+            nonlocal duplicate_serial
+            if current_key is None:
+                return
+            if current_count > 1:
+                savings = current_size * (current_count - 1)
+                duplicate_serial += 1
+                heapq.heappush(
+                    duplicate_top,
+                    (
+                        savings,
+                        duplicate_serial,
+                        current_size,
+                        current_count,
+                        list(current_samples),
+                    ),
+                )
+                if len(duplicate_top) > 40:
+                    heapq.heappop(duplicate_top)
+                add_excluded(current_exact)
+            current_exact.clear()
+            current_samples.clear()
+
+        for batch in fetch_batches(
             f"SELECT {path_expr}, path, name_fold, size FROM nodes "
-            "WHERE scan_id = 1 AND is_dir = 0 AND size >= ?",
+            "WHERE scan_id = 1 AND is_dir = 0 AND size >= ? "
+            f"AND {path_expr} NOT IN (SELECT path FROM excluded) "
+            f"ORDER BY name_fold, size, {path_expr}",
             (DUP_MIN,),
-        ).fetchall()
-        groups: dict[tuple[str, int], list[str]] = defaultdict(list)
-        for path_exact, path, name_fold, size in duplicate_rows:
-            if blocked(normalize_path(str(path_exact)), prefixes):
-                continue
-            if normalize_path(str(path_exact)) in claimed:
-                continue
-            groups[(str(name_fold), int(size))].append(str(path))
-        duplicate_groups = [
-            (size, items)
-            for (_name_fold, size), items in groups.items()
-            if len(items) > 1
-        ]
-        duplicate_groups.sort(
-            key=lambda item: item[0] * (len(item[1]) - 1),
-            reverse=True,
-        )
-        if duplicate_groups:
-            savings = 0
-            count = 0
+        ):
+            for path_exact, path, name_fold, size in batch:
+                exact = normalize_path(str(path_exact))
+                if blocked(exact, prefixes):
+                    continue
+                key = (str(name_fold), int(size))
+                if current_key is not None and key != current_key:
+                    finish_duplicate_group()
+                if key != current_key:
+                    current_key = key
+                    current_count = 0
+                    current_size = int(size)
+                current_count += 1
+                current_exact.append(str(path_exact))
+                if len(current_samples) < max_paths:
+                    current_samples.append(str(path))
+        finish_duplicate_group()
+        if duplicate_top:
+            groups = sorted(duplicate_top, key=lambda item: item[0], reverse=True)
+            savings = sum(item[0] for item in groups)
+            count = sum(item[3] - 1 for item in groups)
             paths: list[str] = []
-            for size, items in duplicate_groups[:40]:
-                savings += size * (len(items) - 1)
-                count += len(items) - 1
-                for path in items:
+            for _savings, _serial, _size, _count, samples in groups:
+                for path in samples:
                     if len(paths) < max_paths:
                         paths.append(path)
             if count:
@@ -246,23 +298,30 @@ def build_indexed_suggestions(
                         paths=paths,
                     )
                 )
-                for _size, items in duplicate_groups[:40]:
-                    for path in items:
-                        claim(path, claimed)
 
-        archive_rows = conn.execute(
+        archive_count = 0
+        archive_total = 0
+        archive_paths: list[str] = []
+        archive_excluded: list[str] = []
+        for batch in fetch_batches(
             f"SELECT {path_expr}, path, name, size FROM nodes "
-            "WHERE scan_id = 1 AND is_dir = 0 AND size >= ? ORDER BY size DESC",
+            "WHERE scan_id = 1 AND is_dir = 0 AND size >= ? "
+            f"AND {path_expr} NOT IN (SELECT path FROM excluded) "
+            "ORDER BY size DESC",
             (ARCHIVE_MIN,),
-        ).fetchall()
-        archives = [
-            (str(path_exact), str(path), str(name), int(size))
-            for path_exact, path, name, size in archive_rows
-            if os.path.splitext(str(name))[1].lower() in ARCHIVE_EXT
-            and not blocked(normalize_path(str(path_exact)), prefixes)
-            and normalize_path(str(path_exact)) not in claimed
-        ]
-        if archives:
+        ):
+            for path_exact, path, name, size in batch:
+                if os.path.splitext(str(name))[1].lower() not in ARCHIVE_EXT:
+                    continue
+                exact = normalize_path(str(path_exact))
+                if blocked(exact, prefixes):
+                    continue
+                archive_count += 1
+                archive_total += int(size)
+                if len(archive_paths) < max_paths:
+                    archive_paths.append(str(path))
+                archive_excluded.append(str(path_exact))
+        if archive_count:
             suggestions.append(
                 Suggestion(
                     key="archives",
@@ -271,35 +330,40 @@ def build_indexed_suggestions(
                         "Pacotes e imagens de disco com mais de 1 GB. Costumam ser candidatos "
                         "naturais a armazenamento externo ou à exclusão após extração."
                     ),
-                    savings=sum(size for _exact, _path, _name, size in archives),
-                    count=len(archives),
+                    savings=archive_total,
+                    count=archive_count,
                     confidence="review",
                     icon="zip-box-outline",
                     note="Verifique se o conteúdo já foi extraído ou publicado antes de remover.",
-                    paths=[
-                        path for _exact, path, _name, _size in archives[:max_paths]
-                    ],
+                    paths=archive_paths,
                 )
             )
-            for exact, _path, _name, _size in archives:
-                claim(exact, claimed)
+            add_excluded(archive_excluded)
 
-        temp_rows = conn.execute(
+        temp_count = 0
+        temp_total = 0
+        temp_paths: list[str] = []
+        for batch in fetch_batches(
             f"SELECT {path_expr}, path, name, size FROM nodes "
-            "WHERE scan_id = 1 AND is_dir = 0 AND size >= ? ORDER BY size DESC",
+            "WHERE scan_id = 1 AND is_dir = 0 AND size >= ? "
+            f"AND {path_expr} NOT IN (SELECT path FROM excluded) "
+            "ORDER BY size DESC",
             (TEMP_MIN,),
-        ).fetchall()
-        temps = [
-            (str(path_exact), str(path), str(name), int(size))
-            for path_exact, path, name, size in temp_rows
-            if (
-                os.path.splitext(str(name))[1].lower() in TEMP_EXT
-                or str(name).startswith("~$")
-            )
-            and not blocked(normalize_path(str(path_exact)), prefixes)
-            and normalize_path(str(path_exact)) not in claimed
-        ]
-        if temps:
+        ):
+            for path_exact, path, name, size in batch:
+                if not (
+                    os.path.splitext(str(name))[1].lower() in TEMP_EXT
+                    or str(name).startswith("~$")
+                ):
+                    continue
+                exact = normalize_path(str(path_exact))
+                if blocked(exact, prefixes):
+                    continue
+                temp_count += 1
+                temp_total += int(size)
+                if len(temp_paths) < max_paths:
+                    temp_paths.append(str(path))
+        if temp_count:
             suggestions.append(
                 Suggestion(
                     key="temp",
@@ -308,15 +372,15 @@ def build_indexed_suggestions(
                         "Arquivos .tmp, .bak e similares que normalmente sobram de edições "
                         "interrompidas ou rotinas de backup."
                     ),
-                    savings=sum(size for _exact, _path, _name, size in temps),
-                    count=len(temps),
+                    savings=temp_total,
+                    count=temp_count,
                     confidence="review",
                     icon="file-clock-outline",
                     note=(
                         "Backups .bak podem ser a última versão boa de um documento. "
                         "Confirme a data e o contexto antes de remover."
                     ),
-                    paths=[path for _exact, path, _name, _size in temps[:max_paths]],
+                    paths=temp_paths,
                 )
             )
     except sqlite3.Error:

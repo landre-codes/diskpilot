@@ -403,6 +403,73 @@ def test_stream_index_failure_does_not_start_memory_scan(
     state.shutdown()
 
 
+def test_added_roots_wait_for_restore(qapp, tmp_path: Path, monkeypatch) -> None:
+    state = AppState(AppConfig(tmp_path / "config"))
+    state._restoring = True
+    calls: list[dict] = []
+    monkeypatch.setattr(
+        state, "start_scan", lambda **kwargs: calls.append(kwargs)
+    )
+
+    state.scan_added([str(tmp_path)])
+    assert calls == []
+    assert state._pending_added_roots == [str(tmp_path)]
+
+    state._restoring = False
+    state._flush_pending_added()
+
+    assert len(calls) == 1
+    state.shutdown()
+
+
+def test_state_discovers_managed_index_without_config_reference(
+    qapp, qtbot, tmp_path: Path
+) -> None:
+    config = AppConfig(tmp_path / "config")
+    root = tmp_path / "dados"
+    root.mkdir()
+    index = SearchIndex.create(config.path.parent / "index")
+    result = _index_result(root)
+    index.write(result)
+    try:
+        state = AppState(config)
+        finished = []
+        state.scanFinished.connect(finished.append)
+        qtbot.waitUntil(lambda: bool(finished), timeout=5000)
+        try:
+            assert state.last_result is not None
+            assert state.last_result.total_files == 1
+            assert config.get("scan.index_path", "") == str(index.path)
+        finally:
+            state.shutdown()
+    finally:
+        index.delete()
+
+
+def test_low_disk_space_blocks_streaming_scan(
+    qapp, tmp_path: Path, monkeypatch
+) -> None:
+    config = AppConfig(tmp_path / "config")
+    state = AppState(config)
+    state.roots = [str(tmp_path)]
+    failed: list[str] = []
+    state.scanFailed.connect(failed.append)
+
+    class _Usage:
+        free = 0
+
+    monkeypatch.setattr(
+        state_module.shutil, "disk_usage", lambda _path: _Usage()
+    )
+
+    state.start_scan()
+
+    assert failed
+    assert "espaço livre insuficiente" in failed[0]
+    assert state.is_scanning is False
+    state.shutdown()
+
+
 def test_state_builds_search_index_in_background(
     qapp, qtbot, tmp_path: Path
 ) -> None:

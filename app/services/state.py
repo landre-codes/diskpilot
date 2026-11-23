@@ -10,6 +10,7 @@ from __future__ import annotations
 import gc
 import logging
 import os
+import shutil
 import threading
 import time
 from pathlib import Path
@@ -247,6 +248,7 @@ class AppState(QObject):
         self._current_limit_entries = 0
         self._scan_budget_total = 0
         self._pending_index: SearchIndex | None = None
+        self._pending_added_roots: list[str] = []
         self._retention_timer = QTimer(self)
         self._retention_timer.setInterval(24 * 60 * 60 * 1000)
         self._retention_timer.timeout.connect(self._enforce_index_retention)
@@ -271,6 +273,26 @@ class AppState(QObject):
             override or "automático",
         )
         return limit
+
+    def _index_space_guard(self, merge: bool) -> str:
+        """Falha cedo quando não há espaço para o índice temporário/merge."""
+        try:
+            base = self.index_dir if self.index_dir.exists() else self.index_dir.parent
+            free = int(shutil.disk_usage(base).free)
+        except OSError:
+            return ""
+        current = int(self.index_usage().get("total_bytes", 0) or 0)
+        required = max(
+            256 * 1024 * 1024,
+            int(current * 1.10) + 64 * 1024 * 1024,
+        ) if merge else 256 * 1024 * 1024
+        if free >= required:
+            return ""
+        return (
+            "espaço livre insuficiente para criar o índice de busca "
+            f"({free // (1024 * 1024)} MB livres; {required // (1024 * 1024)} MB "
+            "necessários). O snapshot anterior foi preservado."
+        )
 
     @property
     def scan_limit(self) -> int:
@@ -355,6 +377,27 @@ class AppState(QObject):
             else:
                 logger.warning("índice persistido ausente: %s", path)
         if not candidates:
+            try:
+                managed = sorted(
+                    (
+                        path
+                        for path in self.index_dir.glob("search-*.sqlite")
+                        if is_managed_index(path, self.index_dir)
+                    ),
+                    key=lambda path: path.stat().st_mtime,
+                    reverse=True,
+                )
+            except OSError:
+                managed = []
+            for path in managed[:3]:
+                if path.is_file():
+                    candidates.append(path)
+            if candidates:
+                logger.info(
+                    "recuperando índice gerenciado sem referência: %s",
+                    candidates[0],
+                )
+        if not candidates:
             if active_raw or previous_raw:
                 self._clear_index_reference()
                 QTimer.singleShot(
@@ -395,6 +438,7 @@ class AppState(QObject):
         self.searchIndexFailed.emit(
             self._last_restore_error or "índice persistido inválido"
         )
+        self._flush_pending_added()
 
     def _stored_suggestions(self) -> list[Suggestion]:
         stored = self.config.get("scan.summary", {})
@@ -529,6 +573,7 @@ class AppState(QObject):
         self.searchIndexReady.emit(self.search_index)
         self._emit_pending_roots()
         self._collect_index_garbage()
+        self._flush_pending_added()
 
     def _on_restore_failed(self, generation: int, message: str) -> None:
         if generation != self._restore_generation or self._closing:
@@ -595,9 +640,34 @@ class AppState(QObject):
                     return False
         return True
 
+    def _queue_pending_added(self, added: list[str]) -> None:
+        existing = {path_key(path) for path in self._pending_added_roots}
+        for path in added:
+            key = path_key(path)
+            if key in existing:
+                continue
+            existing.add(key)
+            self._pending_added_roots.append(path)
+        if self._pending_added_roots:
+            logger.info(
+                "adições aguardando restauração: %s",
+                len(self._pending_added_roots),
+            )
+
+    def _flush_pending_added(self) -> None:
+        if self._restoring or not self._pending_added_roots:
+            return
+        added = list(self._pending_added_roots)
+        self._pending_added_roots.clear()
+        if added:
+            self.scan_added(added)
+
     def scan_added(self, added: list[str]) -> None:
         """Varre somente as pastas novas e mescla o resultado anterior."""
         if not added:
+            return
+        if self._restoring:
+            self._queue_pending_added(added)
             return
         if self._can_merge_added(added):
             base_entries = (
@@ -648,6 +718,7 @@ class AppState(QObject):
         self.is_scanning = False
         self._scan_merge = False
         self._restoring = False
+        self._pending_added_roots.clear()
         self._restore_generation += 1
         self._restore_queue.clear()
         self._restore_index = None
@@ -694,6 +765,7 @@ class AppState(QObject):
         self._scan_budget_total = max_entries + base_entries
         self._current_limit_entries = self._scan_budget_total
         self._restoring = False
+        self._pending_added_roots.clear()
         self._restore_generation += 1
         self._restore_queue.clear()
         self._restore_index = None
@@ -714,6 +786,17 @@ class AppState(QObject):
         if self._use_streaming() and (
             not merge or merge_base_index is not None
         ):
+            space_error = self._index_space_guard(
+                bool(merge and merge_base_index is not None)
+            )
+            if space_error:
+                logger.error(space_error)
+                self.index_building = False
+                self._building_index_path = None
+                self._pending_index = None
+                self.last_error = space_error
+                self.scanFailed.emit(space_error)
+                return
             try:
                 stream_index = SearchIndex.create(self.index_dir)
             except Exception:
