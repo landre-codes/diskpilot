@@ -22,7 +22,13 @@ from ...services.model import ScanProgress, ScanResult
 from appshell.utils import format_bytes, format_duration, format_number
 from appshell.widgets.buttons import ActionButton, IconButton, SearchField, SelectButton
 from appshell.widgets.common import Chip, ElidedLabel, EmptyState, PageHeader
-from ...widgets.dialogs import ExportDialog, FolderPickerDialog, TopItemsDialog
+from ...widgets.dialogs import (
+    ConfirmDialog,
+    ExportDialog,
+    FolderPickerDialog,
+    TopItemsDialog,
+    WarningsDialog,
+)
 from ..base import BasePage
 from .tree import FileTree
 
@@ -36,6 +42,7 @@ class AnalyzerPage(BasePage):
     def __init__(self, state, parent: QWidget | None = None) -> None:
         super().__init__(state, parent)
         self._last_matches: int | None = None
+        self._index_fallback = False
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(14)
@@ -49,6 +56,9 @@ class AnalyzerPage(BasePage):
         self.top_btn.setToolTip("Ver os 100 maiores diretórios e arquivos da última análise")
         self.top_btn.clicked.connect(self._open_top_items)
         self.header.add_action(self.top_btn)
+        self.warnings_btn = IconButton("alert-circle-outline", "Avisos da análise", self, 18)
+        self.warnings_btn.clicked.connect(self._open_warnings)
+        self.warnings_btn.hide()
         self.export_btn = ActionButton("Exportar", "export-variant", "ghost")
         self.export_btn.setToolTip("Exportar análise em CSV, XLSX ou XLSB")
         self.export_btn.clicked.connect(self._open_export)
@@ -59,6 +69,7 @@ class AnalyzerPage(BasePage):
         self.add_btn = ActionButton("Adicionar pastas", "folder-plus-outline", "primary")
         self.add_btn.clicked.connect(self.add_folders)
         self.header.add_action(self.add_btn)
+        self.header.add_action(self.warnings_btn)
         root.addWidget(self.header)
 
         # chips de raízes -------------------------------------------------
@@ -251,10 +262,13 @@ class AnalyzerPage(BasePage):
         self.state.searchIndexReady.connect(self._on_search_index_ready)
         self.state.searchIndexCleared.connect(self._on_search_index_cleared)
         self.state.searchIndexFailed.connect(self._on_search_index_failed)
+        self.state.rootsPending.connect(self._on_roots_pending)
 
         self._refresh_roots()
         if self.state.last_result is not None:
             self.tree.set_result(self.state.last_result)
+            if self.state.search_index is not None:
+                self.tree.set_search_index(self.state.search_index)
         self._update_empty()
 
     # --------------------------------------------------------------- raízes
@@ -281,27 +295,78 @@ class AnalyzerPage(BasePage):
         self.state.remove_root(path)
         self.toast("Pasta removida da análise.", "info")
 
+    def _warning_tooltip(self, result: ScanResult) -> str:
+        if not result.warnings:
+            return ""
+        labels = {
+            "permission_denied": "permissão negada",
+            "not_found": "item removido durante a análise",
+            "path_too_long": "caminho longo demais",
+            "io_error": "erro de I/O",
+        }
+        lines = ["Avisos da varredura:"]
+        for warning in result.warnings:
+            label = labels.get(warning.category, warning.category)
+            lines.append(
+                f"- {warning.count} × {label} ({warning.operation})"
+            )
+        return "\n".join(lines)
+
     def _update_header(self) -> None:
         result = self.state.last_result
-        count = len(self.state.roots)
+        count = (
+            len(result.roots)
+            if result is not None
+            else len(self.state.roots)
+        )
+        pending = self.state.pending_roots if result is not None else []
         self.top_btn.setEnabled(result is not None)
         self.export_btn.setEnabled(result is not None)
+        self.warnings_btn.setVisible(bool(result is not None and result.errors))
+        if result is not None and result.errors:
+            self.warnings_btn.setToolTip(
+                f"{result.errors} avisos — ver detalhes"
+            )
         if result is not None:
             errors = f" · {result.errors} avisos" if result.errors else ""
-            self.header.subtitle.setText(
+            subtitle = (
                 f"{count} pasta{'s' if count != 1 else ''} · "
                 f"{format_bytes(result.total_size)} · "
                 f"{format_number(result.total_files)} arquivos{errors}"
             )
+            tooltip = self._warning_tooltip(result)
+            if pending:
+                subtitle += (
+                    f" · {len(pending)} pasta"
+                    f"{'s' if len(pending) != 1 else ''} pendente"
+                    f"{'s' if len(pending) != 1 else ''}"
+                )
+                pending_note = (
+                    "Pastas solicitadas que ainda não fazem parte da análise "
+                    "salva. Reanalise para incluí-las."
+                )
+                tooltip = (
+                    f"{tooltip}\n{pending_note}" if tooltip else pending_note
+                )
+            if self._index_fallback:
+                subtitle += " · busca em memória"
+                fallback = (
+                    "A varredura foi concluída; a busca pode ficar mais lenta."
+                )
+                tooltip = f"{tooltip}\n{fallback}" if tooltip else fallback
+            self.header.subtitle.setText(subtitle)
+            self.header.subtitle.setToolTip(tooltip)
         elif count:
             self.header.subtitle.setText(
                 f"{count} pasta{'s' if count != 1 else ''} selecionada{'s' if count != 1 else ''}. "
                 "Execute a análise para ver os tamanhos."
             )
+            self.header.subtitle.setToolTip("")
         else:
             self.header.subtitle.setText(
                 "Selecione uma ou mais pastas para mapear onde o espaço está sendo usado."
             )
+            self.header.subtitle.setToolTip("")
 
     # ------------------------------------------------------------- adicionar
     def add_folders(self) -> None:
@@ -329,8 +394,26 @@ class AnalyzerPage(BasePage):
         if not self.state.roots:
             self.add_folders()
             return
+        if self.state.is_scanning:
+            dialog = ConfirmDialog(
+                self.window(),
+                "Análise em andamento",
+                "Já existe uma análise em andamento. Deseja cancelá-la e "
+                "iniciar outra?",
+                confirm_text="Reiniciar",
+                danger=True,
+            )
+            try:
+                if dialog.exec() != QDialog.Accepted:
+                    return
+            finally:
+                dialog.deleteLater()
         self.state.start_scan(force=True)
-        self.toast("Reanalisando as pastas selecionadas…", "info")
+        self.toast("Reanalisando as pastas selecionadas.", "info")
+
+    def request_rescan(self) -> None:
+        """Ponto de entrada para atalhos; aplica a confirmação de segurança."""
+        self._rescan()
 
     def _open_top_items(self) -> None:
         result = self.state.last_result
@@ -339,6 +422,16 @@ class AnalyzerPage(BasePage):
             return
         dialog = TopItemsDialog(self.window(), result)
         dialog.exec()
+
+    def _open_warnings(self) -> None:
+        result = self.state.last_result
+        if result is None or not result.errors:
+            return
+        dialog = WarningsDialog(self.window(), result)
+        try:
+            dialog.exec()
+        finally:
+            dialog.deleteLater()
         dialog.deleteLater()
 
     def _open_export(self) -> None:
@@ -399,6 +492,7 @@ class AnalyzerPage(BasePage):
 
     # ------------------------------------------------------------- progresso
     def _on_scan_started(self) -> None:
+        self._index_fallback = False
         self.banner.show()
         self.banner_title.setText("Analisando pastas…")
         self.banner_path.setText("Preparando varredura…")
@@ -437,7 +531,7 @@ class AnalyzerPage(BasePage):
         self._update_path_detail()
         suffix = ""
         if result.errors:
-            suffix = f" com {result.errors} aviso{'s' if result.errors != 1 else ''} de acesso"
+            suffix = f" com {result.errors} aviso{'s' if result.errors != 1 else ''}"
         message = (
             f"Análise concluída: {format_bytes(result.total_size)} em "
             f"{format_duration(result.elapsed)}{suffix}."
@@ -465,21 +559,39 @@ class AnalyzerPage(BasePage):
         self._update_empty()
 
     def _on_results_cleared(self) -> None:
+        self._index_fallback = False
         self.tree.set_result(None)
         self._update_header()
         self._update_empty()
         self._update_path_detail()
 
     def _on_search_index_ready(self, index) -> None:
+        self._index_fallback = False
         self.tree.set_search_index(index)
+        self._update_header()
 
     def _on_search_index_cleared(self) -> None:
+        self._index_fallback = False
         self.tree.set_search_index(None)
+        self._update_header()
 
     def _on_search_index_failed(self, message: str) -> None:
         # A busca em memória continua funcionando; o índice é um acelerador.
+        self._index_fallback = True
         self.tree.set_search_index(None)
+        self._update_header()
         self.toast("Índice de busca indisponível; usando busca em memória.", "warn")
+
+    def _on_roots_pending(self, paths: list[str]) -> None:
+        if not paths:
+            return
+        count = len(paths)
+        self.toast(
+            f"{count} pasta{'s' if count != 1 else ''} ainda não "
+            f"faz{'em' if count != 1 else ''} parte da análise salva. "
+            "Use Reanalisar para incluí-la.",
+            "warn",
+        )
 
     def _on_count(self, matches: int, shown: int) -> None:
         self._last_matches = matches

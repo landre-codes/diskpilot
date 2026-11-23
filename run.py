@@ -20,6 +20,7 @@ from app.pages import default_pages
 from app.shell import MainWindow
 from app.single_instance import SingleInstanceGuard
 from appshell.theme import init_theme
+from appshell.utils import cleanup_stale_temp_dirs
 
 
 def _configure_logging(config: AppConfig) -> None:
@@ -76,6 +77,16 @@ def main() -> int:
     _configure_logging(config)
     _install_exception_hook()
     logging.getLogger("diskpilot").info("iniciando %s %s", APP_NAME, __version__)
+    try:
+        removed_temp = cleanup_stale_temp_dirs()
+        if removed_temp:
+            logging.getLogger("diskpilot").info(
+                "temporários órfãos removidos: %s", removed_temp
+            )
+    except Exception:
+        logging.getLogger("diskpilot").exception(
+            "falha ao limpar temporários órfãos"
+        )
     theme = init_theme(app, config)
     window = MainWindow(config, theme, default_pages())
     guard.set_activation_callback(window.bring_to_front)

@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
+import time
+from collections import OrderedDict
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
@@ -82,10 +87,22 @@ def format_datetime(timestamp: float | int | None) -> str:
 
 
 def format_duration(seconds: float | int | None) -> str:
-    """Formata segundos como ``hh:mm:ss`` para exibição ao usuário."""
+    """Formata segundos como ``hh:mm:ss`` para exibição ao usuário.
+
+    Durações positivas abaixo de meio segundo aparecem como ``< 1 s`` para
+    não sugerir que a operação foi instantânea.
+    """
     try:
-        total = max(0, int(round(float(seconds or 0))))
+        value = max(0.0, float(seconds or 0))
     except (TypeError, ValueError, OverflowError):
+        return "00:00:00"
+    if value <= 0:
+        return "00:00:00"
+    if value < 0.5:
+        return "< 1 s"
+    try:
+        total = int(value + 0.5)
+    except (OverflowError, ValueError):
         return "00:00:00"
     hours, remainder = divmod(total, 3600)
     minutes, secs = divmod(remainder, 60)
@@ -186,7 +203,8 @@ def open_in_explorer(path: str, select: bool = False) -> bool:
         return False
 
 
-_author_cache: dict[str, str] = {}
+_author_cache: OrderedDict[str, str] = OrderedDict()
+_AUTHOR_CACHE_LIMIT = 4096
 _OOXML_EXT = {
     ".docx",
     ".docm",
@@ -204,15 +222,54 @@ _OOXML_EXT = {
 
 def cached_file_author(path: str) -> str | None:
     """Autor já resolvido, ou ``None`` se ainda não foi consultado."""
-    return _author_cache.get(os.path.normcase(str(path)))
+    key = normalize_path(str(path))
+    value = _author_cache.get(key)
+    if value is not None:
+        _author_cache.move_to_end(key)
+    return value
+
+
+def clear_author_cache() -> None:
+    """Invalida metadados de autores ao trocar ou limpar a análise."""
+    _author_cache.clear()
+
+
+def cleanup_stale_temp_dirs(max_age_seconds: float = 24 * 60 * 60) -> int:
+    """Remove staging do DiskPilot que ficou órfão após uma queda.
+
+    Só atua em diretórios com os prefixos criados pelo próprio app, no
+    diretório temporário do sistema, e apenas depois da carência.
+    """
+    root = Path(tempfile.gettempdir())
+    now = time.time()
+    removed = 0
+    for prefix in ("diskpilot-xlsb-", "diskpilot-export-"):
+        for candidate in root.glob(f"{prefix}*"):
+            if not candidate.is_dir():
+                continue
+            try:
+                age = now - candidate.stat().st_mtime
+            except OSError:
+                continue
+            if age < max(0.0, float(max_age_seconds)):
+                continue
+            try:
+                shutil.rmtree(candidate)
+                removed += 1
+            except OSError as exc:
+                logging.getLogger("appshell.utils").warning(
+                    "temporário órfão não removido: %s (%s)", candidate, exc
+                )
+    return removed
 
 
 def file_author(path: str) -> str:
     """Autor gravado nos metadados do arquivo (campo “Authors”)."""
     text = str(path)
-    key = os.path.normcase(text)
+    key = normalize_path(text)
     cached = _author_cache.get(key)
     if cached is not None:
+        _author_cache.move_to_end(key)
         return cached
     author = ""
     if sys.platform.startswith("win"):
@@ -220,6 +277,9 @@ def file_author(path: str) -> str:
     if not author:
         author = _embedded_author(text)
     _author_cache[key] = author
+    _author_cache.move_to_end(key)
+    while len(_author_cache) > _AUTHOR_CACHE_LIMIT:
+        _author_cache.popitem(last=False)
     return author
 
 

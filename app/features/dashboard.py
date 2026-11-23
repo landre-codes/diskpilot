@@ -204,7 +204,7 @@ class DashboardPage(BasePage):
             self.toast("Essas pastas já estão na análise.", "info")
             return
         self.toast(f"{len(added)} pasta(s) adicionada(s). Iniciando análise…", "info")
-        QTimer.singleShot(100, self.state.start_scan)
+        QTimer.singleShot(100, lambda: self.state.scan_added(added))
         self.navigateRequested.emit("analyzer")
 
     def _scan_now(self) -> None:
@@ -262,6 +262,7 @@ class DashboardPage(BasePage):
         errors = int(summary.get("errors", 0)) if has else 0
         suggestions = self.state.suggestions
         pending = not has and bool(self.state.roots)
+        truncated = bool(summary.get("truncated")) if has else False
 
         self.card_size.set_value(
             format_bytes(total_size) if has else "—",
@@ -350,8 +351,7 @@ class DashboardPage(BasePage):
                 self.rec_box.addWidget(self._suggestion_row(suggestion))
         else:
             empty = QLabel(
-                "Nenhuma recomendação calculada nesta sessão. Execute uma nova análise "
-                "para identificar caches, duplicatas e arquivos antigos."
+                "A última análise não gerou recomendações de limpeza."
                 if has
                 else "Adicione pastas e execute uma análise para receber recomendações de limpeza segura."
             )
@@ -362,8 +362,9 @@ class DashboardPage(BasePage):
         # última análise
         started = summary.get("started_at", 0) if has else 0
         self.info_values["data"].setText(format_datetime(started) if started else "—")
+        elapsed = summary.get("elapsed") if has else None
         self.info_values["duracao"].setText(
-            format_duration(summary.get("elapsed", 0)) if has else "-"
+            format_duration(elapsed) if elapsed is not None else "-"
         )
         self.info_values["pastas"].setText(
             format_number(len(roots)) if has else str(len(self.state.roots))
@@ -379,6 +380,9 @@ class DashboardPage(BasePage):
             if self.state.is_scanning:
                 self.last_status.setText("Em andamento")
                 self.last_status.setObjectName("BadgeInfo")
+            elif truncated:
+                self.last_status.setText("Parcial")
+                self.last_status.setObjectName("BadgeWarn")
             elif errors:
                 self.last_status.setText("Com avisos")
                 self.last_status.setObjectName("BadgeWarn")

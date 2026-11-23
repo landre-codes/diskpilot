@@ -14,6 +14,7 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPixmap
 from PySide6.QtWidgets import (
+    QLabel,
     QVBoxLayout,
     QWidget,
 )
@@ -244,6 +245,8 @@ class Sidebar(QWidget):
         *,
         brand_title: str = "App",
         brand_tagline: str = "",
+        brand_author: str = "",
+        brand_credit: str = "",
         brand_icon: str = "application",
     ) -> None:
         super().__init__(parent)
@@ -280,6 +283,20 @@ class Sidebar(QWidget):
         self.user = UserCard(config, self)
         self.user.clicked.connect(self.userRequested)
         lay.addWidget(self.user)
+        self.author = QLabel(
+            brand_credit
+            or (f"por {brand_author}" if brand_author else ""),
+            self,
+        )
+        self.author.setObjectName("SidebarCredit")
+        self.author.setAlignment(Qt.AlignCenter)
+        author_tip = (
+            f"Desenvolvido por {brand_author}" if brand_author else ""
+        )
+        self.author.setToolTip(author_tip)
+        self.author.setAccessibleName(author_tip)
+        self.author.setVisible(bool(brand_credit or brand_author))
+        lay.addWidget(self.author)
 
         start_w = COLLAPSED_WIDTH if self._collapsed else EXPANDED_WIDTH
         self.setFixedWidth(start_w)
@@ -303,6 +320,7 @@ class Sidebar(QWidget):
     def _apply_expansion(self, ratio: float) -> None:
         self.logo.set_expansion(ratio)
         self.user.set_expansion(ratio)
+        self.author.setVisible(ratio > 0.55 and bool(self.author.text()))
         for btn in self._buttons.values():
             btn.set_expansion(ratio)
 

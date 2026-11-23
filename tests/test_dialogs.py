@@ -3,19 +3,21 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QPoint
-from PySide6.QtWidgets import QDialog
+from PySide6.QtWidgets import QApplication, QDialog, QLineEdit
 
 from PySide6.QtGui import QColor, QImage
 
 from app.config import AppConfig
-from app.services.model import ScanResult
+from app.services.model import ScanResult, ScanWarning
 from appshell.theme import init_theme
 from app.widgets.dialogs import (
     ExportDialog,
     FolderPickerDialog,
     ImagePickerDialog,
     TopItemsDialog,
+    WarningsDialog,
 )
+from appshell.widgets.dialogs import SheetDialog
 
 
 def _config(tmp_path: Path) -> AppConfig:
@@ -102,6 +104,46 @@ def test_top_items_loads_in_background(qapp, qtbot, tmp_path: Path) -> None:
     qtbot.waitUntil(lambda: not dialog._loading, timeout=5000)
 
     assert dialog.summary.text() != ""
+    dialog.close()
+
+
+def test_warnings_dialog_lists_categories(qapp, qtbot, tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    init_theme(qapp, config)
+    result = ScanResult(
+        total_size=100,
+        total_files=1,
+        total_dirs=1,
+        errors=3,
+        warnings=[
+            ScanWarning("list_dir", "permission_denied", 2),
+            ScanWarning("read_entry", "io_error", 1),
+        ],
+    )
+    dialog = WarningsDialog(None, result)
+    qtbot.addWidget(dialog)
+
+    assert dialog.tree.topLevelItemCount() == 2
+    assert dialog.tree.topLevelItem(0).text(0) == "Permissão negada"
+    assert dialog.tree.topLevelItem(1).text(2) == "1"
+    assert "Permissão negada" in dialog.summary_text()
+    assert "Caminhos completos não são armazenados" in dialog.summary_text()
+    dialog.close()
+
+
+def test_sheet_dialog_focuses_body_not_close_button(
+    qapp, qtbot, tmp_path: Path
+) -> None:
+    config = _config(tmp_path)
+    init_theme(qapp, config)
+    dialog = SheetDialog(None, "Teste", "Foco inicial")
+    edit = QLineEdit("conteúdo")
+    dialog.body.addWidget(edit)
+    qtbot.addWidget(dialog)
+    dialog.show()
+
+    qtbot.waitUntil(lambda: QApplication.focusWidget() is edit, timeout=2000)
+    assert dialog.header.close_btn.hasFocus() is False
     dialog.close()
 
 

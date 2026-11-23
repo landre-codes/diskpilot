@@ -18,16 +18,18 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .. import APP_NAME, __version__
+from .. import APP_AUTHOR, APP_NAME, __version__
+from ..services.limits import MAX_ENTRIES, MIN_ENTRIES
 from appshell.icons import avatar_pixmap, icon
 from appshell.theme import get_theme
 from appshell.utils import (
     avatar_photo,
     format_bytes,
     format_datetime,
+    format_number,
     open_in_explorer,
 )
-from appshell.widgets.buttons import ActionButton
+from appshell.widgets.buttons import ActionButton, SelectButton
 from appshell.widgets.common import Card, ElidedLabel, IconLabel, PageHeader
 from ..widgets.dialogs import ConfirmDialog, ProfileDialog
 from .base import BasePage
@@ -39,6 +41,7 @@ class ThemeButton(QPushButton):
         self.setObjectName("ThemeOption")
         self.setCheckable(True)
         self.setCursor(Qt.PointingHandCursor)
+        self.setFocusPolicy(Qt.TabFocus)
         self._icon_name = icon_name
         self.setIconSize(QSize(19, 19))
         self.toggled.connect(self._sync)
@@ -150,6 +153,10 @@ class SettingsPage(BasePage):
                 ("pastas", "Pastas selecionadas"),
                 ("ultima", "Última análise"),
                 ("tamanho", "Espaço analisado"),
+                ("limite", "Limite de análise"),
+                ("motor", "Motor de análise"),
+                ("indice", "Índice de busca"),
+                ("snapshots", "Snapshots do índice"),
                 ("config", "Pasta de configurações"),
             )
         ):
@@ -167,6 +174,29 @@ class SettingsPage(BasePage):
             self.data_values[key] = value
         grid.setColumnStretch(1, 1)
         data_card.body.addLayout(grid)
+        quota_row = QHBoxLayout()
+        quota_row.setSpacing(8)
+        quota_caption = QLabel("Quota do índice")
+        quota_caption.setObjectName("InfoLabel")
+        self.quota_btn = SelectButton("database", "8 GB", self)
+        self.quota_btn.set_options(
+            (
+                ("4", "4 GB", "database"),
+                ("8", "8 GB", "database"),
+                ("16", "16 GB", "database"),
+                ("0", "Sem quota", "database"),
+            ),
+            current="8",
+        )
+        self.quota_btn.setToolTip(
+            "Limite soft para a pasta index. O snapshot ativo nunca é "
+            "removido automaticamente para caber na quota."
+        )
+        self.quota_btn.changed.connect(self._set_index_quota)
+        quota_row.addWidget(quota_caption)
+        quota_row.addStretch(1)
+        quota_row.addWidget(self.quota_btn)
+        data_card.body.addLayout(quota_row)
         data_actions = QHBoxLayout()
         data_actions.setSpacing(8)
         config_btn = ActionButton("Abrir configurações", "folder-open-outline", "soft", self, 16)
@@ -177,6 +207,14 @@ class SettingsPage(BasePage):
         rescan = ActionButton("Reanalisar agora", "refresh", "ghost", self, 16)
         rescan.clicked.connect(self._rescan)
         data_actions.addWidget(rescan)
+        self.clear_previous_btn = ActionButton(
+            "Limpar índice anterior", "history", "ghost", self, 16
+        )
+        self.clear_previous_btn.setToolTip(
+            "Remove apenas o snapshot de rollback; o índice ativo é mantido."
+        )
+        self.clear_previous_btn.clicked.connect(self._clear_previous_index)
+        data_actions.addWidget(self.clear_previous_btn)
         data_actions.addStretch(1)
         clear = ActionButton("Limpar resultados", "delete-outline", "danger", self, 16)
         clear.clicked.connect(self._clear_results)
@@ -251,6 +289,10 @@ class SettingsPage(BasePage):
         desc.setWordWrap(True)
         desc.setObjectName("Muted")
         about_text.addWidget(desc)
+        author = QLabel(f"Desenvolvido por {APP_AUTHOR}")
+        author.setObjectName("Muted")
+        author.setToolTip("Autor do DiskPilot")
+        about_text.addWidget(author)
         stack = QLabel("PySide6 · qt-material · qtawesome (MDI) · QPainter")
         stack.setObjectName("Faint")
         about_text.addWidget(stack)
@@ -266,6 +308,10 @@ class SettingsPage(BasePage):
         self.state.scanStarted.connect(self._refresh_data)
         self.state.resultsCleared.connect(self._refresh_data)
         self.state.rootsChanged.connect(self._refresh_data)
+        self.state.indexUsageChanged.connect(self._refresh_data)
+        self.state.searchIndexReady.connect(self._refresh_data)
+        self.state.searchIndexCleared.connect(self._refresh_data)
+        self.state.searchIndexFailed.connect(self._refresh_data)
         get_theme().changed.connect(self._on_theme_changed)
         self._refresh_identity()
         self._refresh_data()
@@ -328,6 +374,61 @@ class SettingsPage(BasePage):
         self.data_values["ultima"].setText(format_datetime(started) if started else "Nenhuma")
         size = int(summary.get("total_size", 0)) if summary else 0
         self.data_values["tamanho"].setText(format_bytes(size) if summary else "—")
+        limit = self.state.scan_limit
+        self.data_values["limite"].setText(
+            f"{format_number(limit)} entradas"
+        )
+        self.data_values["limite"].setToolTip(
+            "Limite automático calculado pela memória disponível. "
+            f"Piso de {format_number(MIN_ENTRIES)} e teto de "
+            f"{format_number(MAX_ENTRIES)} entradas."
+        )
+        engine = self.state.scan_engine
+        self.data_values["motor"].setText(
+            "Indexado (lazy)" if engine != "memory" else "Memória"
+        )
+        self.data_values["motor"].setToolTip(
+            "Indexado: grava no SQLite durante a varredura e carrega a árvore "
+            "sob demanda. Memória: mantém a árvore completa em RAM."
+        )
+        usage = self.state.index_usage()
+        total_bytes = int(usage["total_bytes"])
+        quota_bytes = int(usage["quota_bytes"])
+        self.data_values["indice"].setText(format_bytes(total_bytes))
+        quota_text = (
+            f"Quota: {format_bytes(quota_bytes)}"
+            if quota_bytes
+            else "Sem quota configurada"
+        )
+        self.data_values["indice"].setToolTip(
+            f"{usage.get('active_path') or 'sem índice ativo'}\n{quota_text}"
+        )
+        snapshots = int(usage["snapshots"])
+        parts = []
+        if usage.get("active_exists"):
+            parts.append("ativo")
+        if usage.get("previous_exists"):
+            parts.append("anterior")
+        extras = max(0, snapshots - len(parts))
+        if extras > 0:
+            parts.append(f"{extras} órfão" + ("s" if extras != 1 else ""))
+        self.data_values["snapshots"].setText(
+            f"{snapshots} ({' + '.join(parts) if parts else 'nenhum'})"
+        )
+        self.data_values["snapshots"].setToolTip(
+            "O snapshot ativo é mantido. O anterior serve de rollback e "
+            "expira pela política de retenção/quota."
+        )
+        self.clear_previous_btn.setEnabled(bool(usage.get("previous_exists")))
+        try:
+            quota_current = str(
+                int(float(self.state.config.get("scan.index_max_gb", 8) or 8))
+            )
+        except (TypeError, ValueError):
+            quota_current = "8"
+        if quota_current not in {"0", "4", "8", "16"}:
+            quota_current = "8"
+        self.quota_btn.set_current(quota_current, emit=False)
 
     def _rescan(self) -> None:
         if not self.state.roots:
@@ -335,6 +436,47 @@ class SettingsPage(BasePage):
             return
         self.state.start_scan(force=True)
         self.toast("Reanalisando diretórios…", "info")
+
+    def _set_index_quota(self, value: str) -> None:
+        try:
+            gigabytes = max(0, int(value))
+        except (TypeError, ValueError):
+            return
+        try:
+            self.state.config.set("scan.index_max_gb", gigabytes, save=True)
+        except Exception:
+            self.toast("Não foi possível salvar a quota do índice.", "danger")
+            return
+        self.state._enforce_index_retention()
+        self._refresh_data()
+        self.toast(
+            "Quota do índice atualizada."
+            if gigabytes
+            else "Quota do índice desativada.",
+            "info",
+        )
+
+    def _clear_previous_index(self) -> None:
+        usage = self.state.index_usage()
+        if not usage.get("previous_exists"):
+            self.toast("Não há índice anterior para remover.", "info")
+            self._refresh_data()
+            return
+        dialog = ConfirmDialog(
+            self.window(),
+            "Remover índice anterior",
+            "O snapshot anterior será removido. O índice ativo e a análise "
+            "atual serão mantidos; a restauração rápida continua funcionando.",
+            confirm_text="Remover anterior",
+        )
+        if dialog.exec() != QDialog.Accepted:
+            self._refresh_data()
+            return
+        if self.state.clear_previous_index():
+            self.toast("Índice anterior removido.", "success")
+        else:
+            self.toast("Não foi possível remover o índice anterior.", "warn")
+        self._refresh_data()
 
     def _clear_results(self) -> None:
         dialog = ConfirmDialog(

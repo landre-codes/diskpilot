@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import os
+import threading
+import time
 from pathlib import Path
 
 from app.config import AppConfig
-from app.services.model import Node, ScanResult
+from app.services.index_store import SearchIndex
 from app.services import state as state_module
-from app.services.state import AppState
+from app.services.model import Node, ScanResult, ScanWarning, Suggestion
+from app.services.state import AppState, ScanTask
+from appshell.utils import path_key
 
 
 def test_app_state_scans_with_task_runner(qapp, qtbot, tmp_path: Path) -> None:
@@ -57,16 +62,274 @@ def test_adding_root_merges_previous_result(qapp, qtbot, tmp_path: Path) -> None
     merged = state.last_result
     assert merged is not None
     assert len(merged.roots) == 2
-    assert merged.roots[0] is first_result.roots[0]
+    assert [root.path for root in merged.roots] == [
+        first_result.roots[0].path,
+        str(second),
+    ]
     assert merged.total_files == 2
     assert merged.total_size == 30
     state.shutdown()
 
 
-def test_state_builds_search_index_in_background(
-    qapp, qtbot, tmp_path: Path, monkeypatch
+def test_summary_persists_suggestions_across_restart(tmp_path: Path) -> None:
+    config = AppConfig(tmp_path / "config")
+    state = AppState(config)
+    result = ScanResult(
+        total_size=1234,
+        total_files=2,
+        total_dirs=1,
+        suggestions=[
+            Suggestion(
+                key="caches",
+                title="Caches regeneráveis",
+                description="Pastas de cache que podem ser recriadas.",
+                savings=1234,
+                count=2,
+                confidence="safe",
+                icon="broom",
+                note="Revise antes de remover.",
+                paths=["C:/dados/cache-a", "C:/dados/cache-b"],
+            )
+        ],
+    )
+    state._store_summary(result)
+    state.shutdown()
+
+    restored = AppState(config)
+    try:
+        suggestions = restored.suggestions
+        assert len(suggestions) == 1
+        assert suggestions[0].key == "caches"
+        assert suggestions[0].savings == 1234
+        assert suggestions[0].paths == ["C:/dados/cache-a", "C:/dados/cache-b"]
+        assert restored.summary["suggestion_count"] == 1
+    finally:
+        restored.shutdown()
+
+
+def test_merge_results_preserves_warning_categories() -> None:
+    base = ScanResult(
+        roots=[],
+        warnings=[ScanWarning("list_dir", "permission_denied", 1)],
+    )
+    extra = ScanResult(
+        roots=[],
+        warnings=[
+            ScanWarning("list_dir", "permission_denied", 2),
+            ScanWarning("stat_root", "not_found", 1),
+        ],
+    )
+
+    merged = AppState._merge_results(base, extra)
+
+    assert [
+        (warning.operation, warning.category, warning.count)
+        for warning in merged.warnings
+    ] == [
+        ("list_dir", "permission_denied", 3),
+        ("stat_root", "not_found", 1),
+    ]
+
+
+class _DeletedIndex:
+    def __init__(self) -> None:
+        self.deleted = False
+        self.path = "stale-index"
+
+    def delete(self, managed_dir=None) -> bool:
+        self.deleted = True
+        return True
+
+
+def test_stale_index_callback_is_discarded(qapp, tmp_path: Path) -> None:
+    state = AppState(AppConfig(tmp_path / "config"))
+    stale = _DeletedIndex()
+    ready = []
+    state.searchIndexReady.connect(ready.append)
+    state._index_generation = 2
+
+    state._on_index_ready(1, stale)
+
+    assert stale.deleted is True
+    assert ready == []
+    state.shutdown()
+
+
+
+
+def test_restore_reuses_summary_suggestions(qapp, qtbot, tmp_path: Path, monkeypatch) -> None:
+    config = AppConfig(tmp_path / "config")
+    root = tmp_path / "dados"
+    root.mkdir()
+    (root / "cache.bin").write_bytes(b"x" * 10)
+    index = SearchIndex.create(tmp_path / "index")
+    result = _index_result(root)
+    result.started_at = 123.0
+    index.write(result)
+    config.roots = [str(root)]
+    config.set(
+        "scan.summary",
+        {
+            "started_at": 123.0,
+            "roots": [{"path": str(root)}],
+            "suggestion_count": 1,
+            "suggestions": [
+                {
+                    "key": "caches",
+                    "title": "Caches regeneráveis",
+                    "description": "Teste",
+                    "savings": 123,
+                    "count": 1,
+                    "confidence": "safe",
+                    "icon": "broom",
+                    "note": "",
+                    "paths": [str(root / "cache.bin")],
+                }
+            ],
+        },
+        save=False,
+    )
+    config.set("scan.index_path", str(index.path), save=True)
+
+    def fail_build(*_args, **_kwargs):
+        raise AssertionError("não deveria recalcular sugestões no restore")
+
+    monkeypatch.setattr(state_module, "build_suggestions", fail_build)
+    state = AppState(config)
+    restored = []
+    state.scanFinished.connect(restored.append)
+    qtbot.waitUntil(lambda: bool(restored), timeout=5000)
+    try:
+        assert state.last_result is not None
+        assert [item.key for item in state.last_result.suggestions] == ["caches"]
+        assert state.last_result.suggestions[0].savings == 123
+    finally:
+        state.shutdown()
+        index.delete()
+
+
+def test_state_restores_persisted_analysis(qapp, qtbot, tmp_path: Path) -> None:
+    config = AppConfig(tmp_path / "config")
+    state = AppState(config)
+    base = tmp_path / "dados"
+    base.mkdir()
+    (base / "a.bin").write_bytes(b"x" * 10)
+    (base / "b.bin").write_bytes(b"x" * 20)
+
+    first_results = []
+    index_ready = []
+    state.scanFinished.connect(first_results.append)
+    state.searchIndexReady.connect(index_ready.append)
+    state.add_roots([str(base)], autoscan=True)
+    qtbot.waitUntil(lambda: bool(first_results), timeout=5000)
+    qtbot.waitUntil(lambda: bool(index_ready), timeout=5000)
+
+    state.shutdown()
+    assert config.get("scan.index_path", "")
+
+    restored_state = AppState(config)
+    restored = []
+    restored_state.scanFinished.connect(restored.append)
+    qtbot.waitUntil(lambda: bool(restored), timeout=5000)
+
+    assert restored_state.last_result is not None
+    assert restored_state.last_result.total_files == 2
+    assert restored_state.last_result.total_size == 30
+    assert restored_state.search_index is not None
+    assert restored_state.search_index.search("a.bin").matches == 1
+    assert config.get("scan.index_entries", 0) > 0
+    restored_state.shutdown()
+
+
+
+
+def test_restored_analysis_adds_only_new_root(qapp, qtbot, tmp_path: Path) -> None:
+    config = AppConfig(tmp_path / "config")
+    first = tmp_path / "primeira"
+    second = tmp_path / "segunda"
+    first.mkdir()
+    second.mkdir()
+    (first / "a.bin").write_bytes(b"x" * 10)
+    (second / "b.bin").write_bytes(b"x" * 20)
+
+    state = AppState(config)
+    first_results = []
+    first_index = []
+    state.scanFinished.connect(first_results.append)
+    state.searchIndexReady.connect(first_index.append)
+    state.add_roots([str(first)], autoscan=True)
+    qtbot.waitUntil(lambda: bool(first_results), timeout=5000)
+    qtbot.waitUntil(lambda: bool(first_index), timeout=5000)
+    state.shutdown()
+
+    restored_state = AppState(config)
+    restored = []
+    restored_state.scanFinished.connect(restored.append)
+    qtbot.waitUntil(lambda: bool(restored), timeout=5000)
+
+    progress = []
+    finished = []
+    restored_state.scanProgress.connect(progress.append)
+    restored_state.scanFinished.connect(finished.append)
+    restored_state.add_roots([str(second)], autoscan=True)
+    qtbot.waitUntil(lambda: bool(finished), timeout=5000)
+
+    assert restored_state.last_result is not None
+    assert restored_state.last_result.total_files == 2
+    assert restored_state.last_result.total_size == 30
+    assert progress
+    assert progress[-1].roots_total == 1
+    restored_state.shutdown()
+
+
+
+
+def test_corrupt_persisted_index_falls_back(qapp, qtbot, tmp_path: Path) -> None:
+    config = AppConfig(tmp_path / "config")
+    index_dir = config.path.parent / "index"
+    index_dir.mkdir(parents=True, exist_ok=True)
+    corrupt = index_dir / "corrupt.sqlite"
+    corrupt.write_bytes(b"not a sqlite database")
+    config.set("scan.index_path", str(corrupt), save=True)
+
+    state = AppState(config)
+    failed = []
+    state.searchIndexFailed.connect(failed.append)
+    qtbot.waitUntil(lambda: bool(failed), timeout=5000)
+
+    assert state.last_result is None
+    assert failed
+    state.shutdown()
+
+
+
+
+def test_corrupt_persisted_index_is_unpublished_without_deletion(
+    qapp, qtbot, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(state_module, "INDEX_THRESHOLD", 1)
+    config = AppConfig(tmp_path / "config")
+    index_dir = config.path.parent / "index"
+    index_dir.mkdir(parents=True)
+    bad_index = index_dir / "search-bad.sqlite"
+    bad_index.write_bytes(b"not a sqlite database")
+    config.set("scan.index_path", str(bad_index))
+
+    state = AppState(config)
+    failed = []
+    state.searchIndexFailed.connect(failed.append)
+    qtbot.waitUntil(lambda: bool(failed), timeout=5000)
+
+    assert state.last_result is None
+    # O banco inválido não é apagado de imediato: ele fica preservado para
+    # inspeção/recuperação e só pode ser removido pelo GC após a carência.
+    assert bad_index.exists()
+    assert config.get("scan.index_path", "") == ""
+    state.shutdown()
+
+
+def test_state_builds_search_index_in_background(
+    qapp, qtbot, tmp_path: Path
+) -> None:
     config = AppConfig(tmp_path / "config")
     state = AppState(config)
     root = Node(path="C:/raiz", name="raiz", is_dir=True, dirs=1)
@@ -87,4 +350,382 @@ def test_state_builds_search_index_in_background(
     qtbot.waitUntil(lambda: bool(ready), timeout=5000)
 
     assert ready[0].search("agulha").matches == 1
+    state.shutdown()
+
+
+def _index_result(root: Path, name: str = "arquivo.bin", size: int = 10) -> ScanResult:
+    node = Node(
+        path=str(root),
+        name=root.name,
+        is_dir=True,
+        size=size,
+        files=1,
+        dirs=1,
+    )
+    node.children = [
+        Node(
+            path=str(root / name),
+            name=name,
+            is_dir=False,
+            size=size,
+            files=1,
+        )
+    ]
+    return ScanResult(
+        roots=[node],
+        total_size=size,
+        total_files=1,
+        total_dirs=1,
+    )
+
+
+def test_index_publish_failure_keeps_previous_snapshot(
+    qapp, tmp_path: Path, monkeypatch
+) -> None:
+    config = AppConfig(tmp_path / "config")
+    state = AppState(config)
+    base = config.path.parent / "index"
+    old_root = tmp_path / "antiga"
+    new_root = tmp_path / "nova"
+    old_root.mkdir()
+    new_root.mkdir()
+    old = SearchIndex.create(base)
+    old.write(_index_result(old_root, "antigo.bin"))
+    config.set("scan.index_path", str(old.path), save=False)
+    config.set("scan.indexed_roots", [str(old_root)], save=False)
+    config.save()
+    state.search_index = old
+    new = SearchIndex.create(base)
+    new.write(_index_result(new_root, "novo.bin"))
+    failed = []
+    state.searchIndexFailed.connect(failed.append)
+    state._index_generation = 1
+
+    def fail_save() -> None:
+        raise OSError("disco cheio simulado")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(config, "save", fail_save)
+        state._on_index_ready(1, new)
+
+    assert state.search_index is None
+    assert old.path.exists()
+    assert config.get("scan.index_path", "") == str(old.path)
+    assert config.get("scan.indexed_roots", []) == [str(old_root)]
+    assert not new.path.exists()
+    assert failed == ["falha ao publicar o índice de busca"]
+    state.shutdown()
+
+
+def test_restore_falls_back_to_previous_snapshot(
+    qapp, qtbot, tmp_path: Path
+) -> None:
+    config = AppConfig(tmp_path / "config")
+    base = tmp_path / "index"
+    root = tmp_path / "valida"
+    root.mkdir()
+    valid = SearchIndex.create(base)
+    valid.write(_index_result(root))
+    broken = base / f"search-{'f' * 32}.sqlite"
+    broken.write_bytes(b"nao e sqlite")
+    config.set("scan.index_path", str(broken), save=False)
+    config.set("scan.index_previous_path", str(valid.path), save=False)
+    config.set("scan.indexed_roots", [str(root)], save=False)
+    config.save()
+
+    state = AppState(config)
+    restored = []
+    state.scanFinished.connect(restored.append)
+    qtbot.waitUntil(lambda: bool(restored), timeout=5000)
+
+    assert state.search_index is not None
+    assert state.search_index.path == valid.path
+    assert config.get("scan.index_path", "") == str(valid.path)
+    assert config.get("scan.index_previous_path", "") == ""
+    assert broken.exists()
+    state.shutdown()
+
+
+def test_missing_persisted_index_clears_reference(
+    qapp, qtbot, tmp_path: Path
+) -> None:
+    config = AppConfig(tmp_path / "config")
+    missing = (
+        config.path.parent / "index" / f"search-{'e' * 32}.sqlite"
+    )
+    config.set("scan.index_path", str(missing))
+    state = AppState(config)
+    failed = []
+    state.searchIndexFailed.connect(failed.append)
+
+    qtbot.waitUntil(lambda: bool(failed), timeout=5000)
+
+    assert failed == ["índice persistido ausente"]
+    assert config.get("scan.index_path", "") == ""
+    state.shutdown()
+
+
+def test_restored_snapshot_reports_pending_roots(
+    qapp, qtbot, tmp_path: Path
+) -> None:
+    first = tmp_path / "primeira"
+    second = tmp_path / "segunda"
+    first.mkdir()
+    second.mkdir()
+    config = AppConfig(tmp_path / "config")
+    index = SearchIndex.create(tmp_path / "index")
+    index.write(_index_result(first))
+    config.roots = [str(first), str(second)]
+    config.set("scan.index_path", str(index.path), save=False)
+    config.set("scan.indexed_roots", [str(first)], save=False)
+    config.save()
+
+    state = AppState(config)
+    restored = []
+    pending = []
+    state.scanFinished.connect(restored.append)
+    state.rootsPending.connect(pending.append)
+    qtbot.waitUntil(lambda: bool(restored), timeout=5000)
+
+    assert [path_key(path) for path in state.pending_roots] == [
+        path_key(str(second))
+    ]
+    assert pending
+    assert [path_key(path) for path in pending[-1]] == [
+        path_key(str(second))
+    ]
+    state.shutdown()
+
+
+def test_scan_task_honors_the_shared_budget(qapp, tmp_path: Path) -> None:
+    base = tmp_path / "dados"
+    base.mkdir()
+    for number in range(10):
+        (base / f"arquivo_{number}.bin").write_bytes(b"x")
+
+    task = ScanTask([str(base)], threading.Event(), max_entries=3)
+    result = task.execute()
+
+    assert result.truncated is True
+    assert result.total_files + result.total_dirs <= 3
+    assert len(result.roots) == 1
+
+
+def test_index_gc_protects_active_previous_and_recent_orphans(
+    qapp, tmp_path: Path
+) -> None:
+    config = AppConfig(tmp_path / "config")
+    state = AppState(config)
+    base = config.path.parent / "index"
+    active = SearchIndex.create(base)
+    active.write(_index_result(tmp_path / "ativa"))
+    previous = SearchIndex.create(base)
+    previous.write(_index_result(tmp_path / "anterior"))
+    orphan = base / f"search-{'c' * 32}.sqlite"
+    orphan.write_bytes(b"x")
+    old = time.time() - 3 * 24 * 60 * 60
+    os.utime(orphan, (old, old))
+    config.set("scan.index_path", str(active.path), save=False)
+    config.set("scan.index_previous_path", str(previous.path), save=False)
+    config.save()
+    state.search_index = active
+
+    state._collect_index_garbage(
+        protected_paths=[str(active.path), str(previous.path)]
+    )
+
+    assert active.path.exists()
+    assert previous.path.exists()
+    assert not orphan.exists()
+    state.shutdown()
+
+
+def test_clear_results_removes_managed_snapshots(
+    qapp, tmp_path: Path
+) -> None:
+    config = AppConfig(tmp_path / "config")
+    state = AppState(config)
+    base = config.path.parent / "index"
+    active = SearchIndex.create(base)
+    active.write(_index_result(tmp_path / "ativa"))
+    config.set("scan.index_path", str(active.path), save=False)
+    config.set("scan.indexed_roots", [str(tmp_path / "ativa")], save=False)
+    config.save()
+    state.search_index = active
+
+    state.clear_results()
+
+    assert not active.path.exists()
+    assert config.get("scan.index_path", "") == ""
+    assert config.get("scan.indexed_roots", []) == []
+    state.shutdown()
+
+
+def test_index_prepare_failure_clears_stale_search_index(
+    qapp, tmp_path: Path, monkeypatch
+) -> None:
+    state = AppState(AppConfig(tmp_path / "config"))
+    state.search_index = object()
+    failed = []
+    state.searchIndexFailed.connect(failed.append)
+
+    def fail_create(_base):
+        raise OSError("disco cheio simulado")
+
+    monkeypatch.setattr(SearchIndex, "create", staticmethod(fail_create))
+    state._schedule_index(_index_result(tmp_path / "raiz"))
+
+    assert state.search_index is None
+    assert state.index_building is False
+    assert failed and "disco cheio" in failed[0]
+    state.shutdown()
+
+
+def test_scan_added_uses_the_remaining_auto_limit(
+    qapp, tmp_path: Path, monkeypatch
+) -> None:
+    state = AppState(AppConfig(tmp_path / "config"))
+    base_root = Node(
+        path=str(tmp_path),
+        name=tmp_path.name,
+        is_dir=True,
+        dirs=1,
+    )
+    state.roots = [str(tmp_path)]
+    state.last_result = ScanResult(
+        roots=[base_root],
+        total_files=1_400_000,
+        total_dirs=1,
+    )
+    state._current_limit_entries = 2_000_000
+    monkeypatch.setattr(state, "_can_merge_added", lambda _added: True)
+    captured = {}
+    monkeypatch.setattr(
+        state,
+        "start_scan",
+        lambda **kwargs: captured.update(kwargs),
+    )
+
+    state.scan_added([str(tmp_path / "nova")])
+
+    assert captured["merge"] is True
+    assert captured["max_entries"] == 599_999
+    state.shutdown()
+
+
+def test_memory_engine_keeps_full_tree_and_index(
+    qapp, qtbot, tmp_path: Path
+) -> None:
+    config = AppConfig(tmp_path / "config")
+    config.set("scan.engine", "memory")
+    state = AppState(config)
+    root = tmp_path / "dados"
+    root.mkdir()
+    (root / "a.bin").write_bytes(b"x" * 10)
+    results = []
+    ready = []
+    state.scanFinished.connect(results.append)
+    state.searchIndexReady.connect(ready.append)
+
+    state.add_roots([str(root)], autoscan=True)
+    qtbot.waitUntil(lambda: bool(results) and bool(ready), timeout=5000)
+
+    assert state.last_result is not None
+    assert state.last_result.lazy is False
+    assert state.last_result.roots[0].children_loaded is True
+    assert state.last_result.roots[0].children[0].name == "a.bin"
+    state.shutdown()
+
+
+def _retention_state(qapp, tmp_path: Path):
+    config = AppConfig(tmp_path / "config")
+    state = AppState(config)
+    base = config.path.parent / "index"
+    active = SearchIndex.create(base)
+    active.write(_index_result(tmp_path / "ativa"))
+    previous = SearchIndex.create(base)
+    previous.write(_index_result(tmp_path / "anterior"))
+    config.set("scan.index_path", str(active.path), save=False)
+    config.set("scan.index_previous_path", str(previous.path), save=False)
+    config.set("scan.index_verified_at", time.time(), save=False)
+    config.set("scan.index_previous_days", 7, save=False)
+    config.set("scan.index_max_gb", 8, save=False)
+    config.save()
+    state.search_index = active
+    return state, config, active, previous
+
+
+def test_previous_index_expires_after_retention(qapp, tmp_path: Path) -> None:
+    state, config, active, previous = _retention_state(qapp, tmp_path)
+    old = time.time() - 8 * 24 * 60 * 60
+    os.utime(previous.path, (old, old))
+
+    state._enforce_index_retention()
+
+    assert active.path.exists()
+    assert not previous.path.exists()
+    assert config.get("scan.index_previous_path", "") == ""
+    state.shutdown()
+
+
+def test_previous_index_is_kept_until_active_is_verified(
+    qapp, tmp_path: Path
+) -> None:
+    state, config, active, previous = _retention_state(qapp, tmp_path)
+    old = time.time() - 8 * 24 * 60 * 60
+    os.utime(previous.path, (old, old))
+    config.set("scan.index_verified_at", 0)
+    config.save()
+
+    state._enforce_index_retention()
+
+    assert previous.path.exists()
+    assert config.get("scan.index_previous_path", "") == str(previous.path)
+    state.shutdown()
+
+
+def test_index_quota_removes_previous_after_min_age(
+    qapp, tmp_path: Path
+) -> None:
+    state, config, active, previous = _retention_state(qapp, tmp_path)
+    old = time.time() - 2 * 24 * 60 * 60
+    os.utime(previous.path, (old, old))
+    config.set("scan.index_max_gb", 1e-9, save=True)
+
+    state._enforce_index_retention()
+
+    assert active.path.exists()
+    assert not previous.path.exists()
+    assert config.get("scan.index_previous_path", "") == ""
+    state.shutdown()
+
+
+def test_index_quota_never_deletes_active(qapp, tmp_path: Path) -> None:
+    config = AppConfig(tmp_path / "config")
+    state = AppState(config)
+    base = config.path.parent / "index"
+    active = SearchIndex.create(base)
+    active.write(_index_result(tmp_path / "ativa"))
+    config.set("scan.index_path", str(active.path), save=False)
+    config.set("scan.index_previous_path", "", save=False)
+    config.set("scan.index_max_gb", 1e-9, save=True)
+    state.search_index = active
+
+    state._enforce_index_retention()
+
+    assert active.path.exists()
+    assert config.get("scan.index_path", "") == str(active.path)
+    state.shutdown()
+
+
+def test_clear_previous_index_keeps_active(qapp, tmp_path: Path) -> None:
+    state, config, active, previous = _retention_state(qapp, tmp_path)
+
+    removed = state.clear_previous_index()
+
+    assert removed is True
+    assert active.path.exists()
+    assert not previous.path.exists()
+    assert config.get("scan.index_path", "") == str(active.path)
+    assert config.get("scan.index_previous_path", "") == ""
     state.shutdown()

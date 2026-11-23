@@ -349,6 +349,7 @@ class RecommendationsPage(BasePage):
         self.rescan_btn.setEnabled(not self.state.is_scanning)
         summary = self.state.summary
         has = bool(summary)
+        truncated = bool(summary.get("truncated")) if has else False
         suggestions = self.state.suggestions
         safe_total = (
             sum(s.savings for s in suggestions if s.confidence == "safe")
@@ -382,7 +383,11 @@ class RecommendationsPage(BasePage):
             self.header.subtitle.setText(
                 f"{n_suggestions} "
                 + ("recomendação" if n_suggestions == 1 else "recomendações")
-                + " · nada é removido automaticamente."
+                + (
+                    " · resultado parcial; os totais podem estar incompletos."
+                    if truncated
+                    else " · nada é removido automaticamente."
+                )
             )
         else:
             self.header.subtitle.setText(
@@ -413,9 +418,9 @@ class RecommendationsPage(BasePage):
             summary = self.state.summary
             if summary:
                 self._add_empty(
-                    "Detalhes disponíveis após nova análise",
-                    "Os totais da última análise foram preservados, mas os caminhos e detalhes por item "
-                    "são recalculados a cada varredura. Execute uma nova análise para vê-los.",
+                    "Nenhuma recomendação persistida",
+                    "A última análise não gerou recomendações de limpeza. "
+                    "Execute uma nova análise para recalcular os detalhes.",
                     "radar",
                 )
             else:

@@ -42,6 +42,9 @@ class ActionButton(QPushButton):
         self._icon_size = icon_size
         self._hover = False
         self.setCursor(Qt.PointingHandCursor)
+        # Clique de mouse não deve deixar o botão com o visual de foco/ativo.
+        # Tab continua funcionando para navegação por teclado.
+        self.setFocusPolicy(Qt.TabFocus)
         self.setIconSize(QSize(icon_size, icon_size))
         self.setMinimumHeight(34)
         self.set_kind(kind)
@@ -117,7 +120,9 @@ class IconButton(QPushButton):
         self._normal_color = "text"
         self.setObjectName(object_name)
         self.setToolTip(tooltip)
+        self.setAccessibleName(tooltip or icon_name)
         self.setCursor(Qt.PointingHandCursor)
+        self.setFocusPolicy(Qt.TabFocus)
         if isinstance(size, QSize):
             self.setFixedSize(size)
         else:
@@ -172,7 +177,7 @@ class NavButton(QWidget):
         self.setFixedHeight(46)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.setCursor(Qt.PointingHandCursor)
-        self.setFocusPolicy(Qt.StrongFocus)
+        self.setFocusPolicy(Qt.TabFocus)
         self.setToolTip(label)
         self.setAttribute(Qt.WA_Hover, True)
         get_theme().changed.connect(self.update)
@@ -393,5 +398,10 @@ class SelectButton(ActionButton):
             action.setIcon(icon(icon_name, color, 16))
             action.triggered.connect(lambda _=False, k=key: self.set_current(k))
             menu.addAction(action)
-        menu.exec(self.mapToGlobal(QPoint(0, self.height() + 5)))
-        menu.deleteLater()
+        try:
+            menu.exec(self.mapToGlobal(QPoint(0, self.height() + 5)))
+        finally:
+            # O menu executa um loop aninhado; o leaveEvent pode não chegar.
+            self._hover = False
+            self._sync_icon()
+            menu.deleteLater()

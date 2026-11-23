@@ -104,15 +104,31 @@ class TaskRunner(QObject):
         for task in list(self._tasks.values()):
             task.cancel.set()
 
-    def shutdown(self, wait_ms: int = 15000) -> None:
+    def shutdown(self, wait_ms: int = 15000) -> bool:
+        """Cancela e aguarda o pool; devolve ``False`` se ainda houver trabalho.
+
+        Em timeout, as tarefas e seus sinais são preservados: limpar as
+        referências enquanto uma thread pode emitir sinais destruiria QObjects
+        em uso. O chamador deve registrar o encerramento incompleto.
+        """
         self._closing = True
         self.cancel()
+        finished = False
         try:
-            self._pool.waitForDone(wait_ms)
+            result = self._pool.waitForDone(wait_ms)
+            finished = True if result is None else bool(result)
         except Exception:
             logger.exception("falha ao encerrar o pool de tarefas")
-        self._tasks.clear()
-        self.busyChanged.emit(False)
+        if finished or not self._tasks:
+            self._tasks.clear()
+            self.busyChanged.emit(False)
+        else:
+            logger.warning(
+                "shutdown_timeout wait_ms=%s tarefas_ativas=%s",
+                wait_ms,
+                len(self._tasks),
+            )
+        return finished
 
     @Slot()
     def _release_from_sender(self) -> None:

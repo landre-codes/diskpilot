@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import heapq
+import logging
 import os
 import unicodedata
 from collections import deque
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import (
@@ -55,8 +57,8 @@ from appshell.utils import (
     format_datetime,
     format_number,
     format_size,
+    normalize_path,
     open_in_explorer,
-    path_key,
 )
 
 
@@ -116,12 +118,14 @@ class _AuthorJob(QRunnable):
             pass
 
 MAX_CHILDREN = 1200
-MAX_RENDERED = 2800
+MAX_RENDERED = 5000
 MAX_RESULT_MATCHES = 5000
 EXPAND_BATCH = 120
 EXPAND_DEBOUNCE_MS = 60
 MB = 1024 * 1024
 GB = 1024 * MB
+
+logger = logging.getLogger("diskpilot.tree")
 
 
 def _fold(text: str) -> str:
@@ -149,31 +153,32 @@ def _node_matches(node: Node, query: str, filter_key: str) -> bool:
 def _sorted_children(
     node: Node, sort_key: str, limit: int | None = None
 ) -> list[Node]:
+    children = node.ensure_children()
     if sort_key == "size_asc":
         func = lambda n: (n.size, _fold(n.name))
         if limit is not None:
-            return heapq.nsmallest(limit, node.children, key=func)
-        return sorted(node.children, key=func)
+            return heapq.nsmallest(limit, children, key=func)
+        return sorted(children, key=func)
     if sort_key == "name_asc":
         func = lambda n: (not n.is_dir, _fold(n.name))
         if limit is not None:
-            return heapq.nsmallest(limit, node.children, key=func)
-        return sorted(node.children, key=func)
+            return heapq.nsmallest(limit, children, key=func)
+        return sorted(children, key=func)
     if sort_key == "name_desc":
         func = lambda n: (n.is_dir, _fold(n.name))
         if limit is not None:
-            return heapq.nlargest(limit, node.children, key=func)
-        names = sorted(node.children, key=lambda n: _fold(n.name), reverse=True)
+            return heapq.nlargest(limit, children, key=func)
+        names = sorted(children, key=lambda n: _fold(n.name), reverse=True)
         return sorted(names, key=lambda n: not n.is_dir)
     if sort_key == "recent":
         func = lambda n: n.mtime
         if limit is not None:
-            return heapq.nlargest(limit, node.children, key=func)
-        return sorted(node.children, key=func, reverse=True)
+            return heapq.nlargest(limit, children, key=func)
+        return sorted(children, key=func, reverse=True)
     func = lambda n: (n.size, _fold(n.name))
     if limit is not None:
-        return heapq.nlargest(limit, node.children, key=func)
-    return sorted(node.children, key=func, reverse=True)
+        return heapq.nlargest(limit, children, key=func)
+    return sorted(children, key=func, reverse=True)
 
 
 @dataclass(slots=True)
@@ -183,6 +188,7 @@ class _FilterResult:
     included: set[int]
     visited: int
     limited: bool
+    roots: list[Node] | None = None
 
 
 class _FilterTask(Task):
@@ -266,8 +272,49 @@ class _IndexFilterTask(Task):
             self.filter_key,
             self.sort_key,
             limit=MAX_RESULT_MATCHES,
+            cancel=self.cancel,
         )
-        target = {path_key(path) for path in hits.paths}
+        if self.result.lazy and getattr(self.result, "index", None) is not None:
+            paths: set[str] = set()
+            for hit in hits.paths:
+                normalized = normalize_path(hit)
+                paths.add(normalized)
+                parent = Path(normalized).parent
+                while True:
+                    paths.add(str(parent))
+                    if parent.parent == parent:
+                        break
+                    parent = parent.parent
+            for root in self.result.roots:
+                paths.add(normalize_path(root.path))
+            nodes = self.index.nodes_by_paths(paths)
+            by_path = {normalize_path(node.path): node for node in nodes}
+            root_order = {
+                normalize_path(root.path): index
+                for index, root in enumerate(self.result.roots)
+            }
+            partial_roots: list[Node] = []
+            for node in nodes:
+                normalized = normalize_path(node.path)
+                parent_node = by_path.get(str(Path(normalized).parent))
+                if parent_node is not None and parent_node is not node:
+                    parent_node.children.append(node)
+                elif normalized in root_order:
+                    partial_roots.append(node)
+            partial_roots.sort(
+                key=lambda node: root_order.get(
+                    normalize_path(node.path), len(root_order)
+                )
+            )
+            return _FilterResult(
+                generation=self.generation,
+                matches=hits.matches,
+                included=set(),
+                visited=len(nodes),
+                limited=hits.matches > len(hits.paths),
+                roots=partial_roots,
+            )
+        target = {normalize_path(path) for path in hits.paths}
         included: set[int] = set()
         visited = 0
         for root in self.result.roots:
@@ -282,7 +329,7 @@ class _IndexFilterTask(Task):
                     continue
                 path.append(node)
                 visited += 1
-                if path_key(node.path) in target:
+                if normalize_path(node.path) in target:
                     for ancestor in path:
                         included.add(id(ancestor))
                 stack.append((node, True))
@@ -567,7 +614,11 @@ class FileTree(QTreeWidget):
     # -------------------------------------------------------------- configuração
     def set_result(self, result: ScanResult | None) -> None:
         self._result = result
-        self._search_index = None
+        self._search_index = (
+            result.index
+            if result is not None and getattr(result, "lazy", False)
+            else None
+        )
         self.rebuild()
 
     def set_search_index(self, index: SearchIndex | None) -> None:
@@ -697,33 +748,39 @@ class FileTree(QTreeWidget):
             return
         node = self._node_at(item)
         if node is not None:
-            self._restore_paths.discard(os.path.normcase(node.path))
+            self._restore_paths.discard(normalize_path(node.path))
         for i in range(item.childCount()):
             child = item.child(i)
             child_node = self._node_at(child)
             if child_node is None:
                 continue
-            key = os.path.normcase(child_node.path)
+            key = normalize_path(child_node.path)
             if key in self._restore_paths:
                 self._restore_paths.discard(key)
                 child.setExpanded(True)
 
     def _expand_all_children(self, item: QTreeWidgetItem) -> None:
-        if self._expand_all_budget <= 0:
-            return
-        for i in range(item.childCount()):
-            child = item.child(i)
+        # Quadros (item, próximo filho) preservam a ordem da visita recursiva
+        # sem consumir a pilha do Python.
+        stack: list[tuple[QTreeWidgetItem, int]] = [(item, 0)]
+        while stack and self._expand_all_budget > 0:
+            current, index = stack[-1]
+            if index >= current.childCount():
+                stack.pop()
+                continue
+            stack[-1] = (current, index + 1)
+            child = current.child(index)
             node = self._node_at(child)
             if node is None or not node.is_dir:
                 continue
             if child.isExpanded():
                 if child.data(0, POPULATED_ROLE) is True:
-                    self._expand_all_children(child)
+                    stack.append((child, 0))
                 continue
             child.setExpanded(True)
             self._expand_all_budget -= 1
             if self._expand_all_budget <= 0:
-                break
+                return
 
     def _cancel_pending_expands(self) -> None:
         self._expand_timer.stop()
@@ -779,19 +836,22 @@ class FileTree(QTreeWidget):
             item = iterator.value()
             node = item.data(0, NODE_ROLE)
             if node is not None and item.isExpanded():
-                paths.add(os.path.normcase(node.path))
+                paths.add(normalize_path(node.path))
             iterator += 1
         return paths
 
     def _restore_expanded(self, item: QTreeWidgetItem, paths: set[str]) -> None:
-        node = item.data(0, NODE_ROLE)
-        if node is None or os.path.normcase(node.path) not in paths:
-            return
-        item.setExpanded(True)
-        for i in range(item.childCount()):
-            child = item.child(i)
-            if child.data(0, NODE_ROLE) is not None:
-                self._restore_expanded(child, paths)
+        stack = [item]
+        while stack:
+            current = stack.pop()
+            node = current.data(0, NODE_ROLE)
+            if node is None or normalize_path(node.path) not in paths:
+                continue
+            current.setExpanded(True)
+            for index in range(current.childCount() - 1, -1, -1):
+                child = current.child(index)
+                if child.data(0, NODE_ROLE) is not None:
+                    stack.append(child)
 
     def _count_items(self) -> int:
         count = 0
@@ -864,18 +924,26 @@ class FileTree(QTreeWidget):
         self.clear()
         rendered = 0
         truncated = False
+        total = self._result.total_size if self._result is not None else 0
 
-        def add(
-            parent: QTreeWidgetItem | None,
-            node: Node,
-            parent_size: int,
-        ) -> None:
-            nonlocal rendered, truncated
-            if id(node) not in result.included:
-                return
+        # Pilha explícita: a árvore pode ser mais profunda que o limite de
+        # recursão do Python, mesmo tendo sido varrida iterativamente.
+        stack: list[tuple[QTreeWidgetItem | None, Node, int]] = []
+        source_roots = (
+            result.roots
+            if result.roots is not None
+            else (self._result.roots if self._result is not None else [])
+        )
+        if self._result is not None:
+            for root in reversed(source_roots):
+                stack.append((None, root, total or 1))
+        while stack:
+            parent, node, parent_size = stack.pop()
+            if result.roots is None and id(node) not in result.included:
+                continue
             if rendered >= MAX_RENDERED:
                 truncated = True
-                return
+                break
             item = self._create_item(
                 parent, node, parent_size, is_root=parent is None, lazy=False
             )
@@ -883,18 +951,14 @@ class FileTree(QTreeWidget):
                 self.addTopLevelItem(item)
             item.setData(0, POPULATED_ROLE, True)
             rendered += 1
-            for child in _sorted_children(node, self._sort):
-                add(item, child, node.size or 1)
+            for child in reversed(_sorted_children(node, self._sort)):
+                stack.append((item, child, node.size or 1))
 
-        total = self._result.total_size if self._result is not None else 0
-        if self._result is not None:
-            for root in self._result.roots:
-                add(None, root, total or 1)
         if truncated or result.limited:
             suffix = (
-                f"{result.matches} correspond?ncia"
+                f"{result.matches} correspondência"
                 if result.matches == 1
-                else f"{result.matches} correspond?ncias"
+                else f"{result.matches} correspondências"
             )
             info = QTreeWidgetItem(
                 [f"  {suffix}; exibindo {rendered}. Refine a busca para ver mais."]
@@ -914,6 +978,8 @@ class FileTree(QTreeWidget):
         self._fit_columns()
 
     def _sorted_children(self, node: Node, limit: int | None = None) -> list[Node]:
+        if not node.children_loaded and node.children_loader is not None:
+            return node.children_loader(node, self._sort, limit)
         return _sorted_children(node, self._sort, limit)
 
     def _node_tooltip(self, node: Node) -> str:
@@ -940,7 +1006,7 @@ class FileTree(QTreeWidget):
             return
         item.setText(COL_AUTHOR, "…")
         item.setToolTip(COL_AUTHOR, "Consultando autor…")
-        key = os.path.normcase(node.path)
+        key = normalize_path(node.path)
         items = self._author_pending.get(key)
         if items is None:
             self._author_pending[key] = [item]
@@ -949,7 +1015,7 @@ class FileTree(QTreeWidget):
             items.append(item)
 
     def _author_resolved(self, path: str, author: str) -> None:
-        key = os.path.normcase(path)
+        key = normalize_path(path)
         items = self._author_pending.pop(key, [])
         text = author or "—"
         for item in items:
@@ -1010,7 +1076,9 @@ class FileTree(QTreeWidget):
         self._apply_icon(item, node, is_root)
         if parent is not None:
             parent.addChild(item)
-        if node.is_dir and node.children and lazy:
+        if node.is_dir and lazy and (
+            not node.children_loaded or node.children
+        ):
             placeholder = QTreeWidgetItem([""])
             placeholder.setData(0, PLACEHOLDER_ROLE, True)
             placeholder.setFlags(Qt.NoItemFlags)
@@ -1084,8 +1152,26 @@ class FileTree(QTreeWidget):
                 while item.childCount():
                     child = item.takeChild(0)
                     del child
-                children = self._sorted_children(node, limit=MAX_CHILDREN)
-                self._expand_active = [item, node, children, 0, len(node.children)]
+                try:
+                    children = self._sorted_children(node, limit=MAX_CHILDREN)
+                except Exception as exc:
+                    logger.exception("falha ao carregar filhos indexados")
+                    error = QTreeWidgetItem(
+                        [f"  Falha ao carregar: {exc}"]
+                    )
+                    error.setFirstColumnSpanned(True)
+                    error.setFlags(Qt.NoItemFlags)
+                    error.setForeground(
+                        0, QColor(get_theme().color("danger"))
+                    )
+                    item.addChild(error)
+                    item.setData(0, POPULATED_ROLE, True)
+                    self._expand_active = None
+                    if self._expand_queue:
+                        self._expand_timer.start(0)
+                    return
+                total = node.children_total or len(children)
+                self._expand_active = [item, node, children, 0, total]
                 break
             active = self._expand_active
             if active is None:

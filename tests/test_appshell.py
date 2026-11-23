@@ -1,8 +1,17 @@
 from __future__ import annotations
 
+import threading
 import time
 
+from PySide6.QtCore import Qt
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QBoxLayout
+
+from app.config import AppConfig
 from appshell.tasks import Task, TaskCancelled, TaskRunner
+from appshell.theme import init_theme
+from appshell.widgets.buttons import ActionButton, IconButton
+from appshell.widgets.common import PageHeader
 
 
 class _ValueTask(Task):
@@ -61,3 +70,88 @@ def test_task_runner_cancels_task(qtbot) -> None:
 
     assert cancelled == [True]
     assert not runner.busy
+
+
+def test_icon_button_exposes_accessible_name(qapp, tmp_path) -> None:
+    init_theme(qapp, AppConfig(tmp_path / "config"))
+    button = IconButton("close", "Fechar painel", None, 16)
+
+    assert button.accessibleName() == "Fechar painel"
+
+
+def test_action_buttons_accept_keyboard_focus(qapp, tmp_path) -> None:
+    init_theme(qapp, AppConfig(tmp_path / "config"))
+    primary = ActionButton("Executar", "play", "primary")
+    ghost = ActionButton("Cancelar", "close", "ghost")
+
+    assert primary.focusPolicy() & Qt.StrongFocus
+    assert ghost.focusPolicy() & Qt.StrongFocus
+
+
+def test_mouse_click_does_not_leave_action_button_focused(
+    qapp, qtbot, tmp_path
+) -> None:
+    init_theme(qapp, AppConfig(tmp_path / "config"))
+    button = ActionButton("Executar", "play", "primary")
+    qtbot.addWidget(button)
+    button.show()
+    qtbot.waitExposed(button)
+
+    QTest.mouseClick(button, Qt.LeftButton)
+
+    assert button.hasFocus() is False
+    assert button.isDown() is False
+
+
+def test_mouse_click_does_not_leave_icon_button_focused(
+    qapp, qtbot, tmp_path
+) -> None:
+    init_theme(qapp, AppConfig(tmp_path / "config"))
+    button = IconButton("cog", "Configurações")
+    qtbot.addWidget(button)
+    button.show()
+    qtbot.waitExposed(button)
+
+    QTest.mouseClick(button, Qt.LeftButton)
+
+    assert button.hasFocus() is False
+    assert button.isDown() is False
+
+
+def test_page_header_wraps_actions_when_narrow(qapp) -> None:
+    header = PageHeader("Análise de diretórios", "subtítulo")
+    for number in range(4):
+        header.add_action(IconButton("close", f"Ação {number}", None, 16))
+
+    header.resize(500, 220)
+    header.show()
+    qapp.processEvents()
+    assert header.row.direction() == QBoxLayout.Direction.TopToBottom
+
+    header.resize(1600, 220)
+    qapp.processEvents()
+    assert header.row.direction() == QBoxLayout.Direction.LeftToRight
+    header.close()
+
+
+def test_task_runner_shutdown_reports_timeout_and_keeps_task(qtbot) -> None:
+    runner = TaskRunner()
+    started = threading.Event()
+    release = threading.Event()
+
+    class _BlockingTask(Task):
+        def execute(self) -> int:
+            started.set()
+            release.wait(5)
+            return 1
+
+    runner.submit(_BlockingTask())
+    assert started.wait(2)
+    try:
+        assert runner.shutdown(wait_ms=10) is False
+        assert runner.busy is True
+    finally:
+        release.set()
+
+    qtbot.waitUntil(lambda: not runner.busy, timeout=5000)
+    assert runner.shutdown(wait_ms=1000) is True

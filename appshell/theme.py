@@ -49,7 +49,7 @@ PALETTES: dict[str, dict[str, Any]] = {
         "hover_border": "#2a4d5a",
         "placeholder": "#8babb4",
         "muted": "#8babb4",
-        "faint": "#5f818b",
+        "faint": "#7398a2",
         "primary": "#21ccdc",
         "primary_hover": "#54e3f0",
         "primary_pressed": "#12b4c3",
@@ -77,20 +77,20 @@ PALETTES: dict[str, dict[str, Any]] = {
         "hover": "#d8ebef",
         "hover_border": "#8fbac2",
         "placeholder": "#1f4d57",
-        "muted": "#5c7b84",
-        "faint": "#88a2a9",
-        "primary": "#008e9c",
-        "primary_hover": "#00a8b8",
-        "primary_pressed": "#007681",
+        "muted": "#4f6b74",
+        "faint": "#58747d",
+        "primary": "#007a86",
+        "primary_hover": "#00818f",
+        "primary_pressed": "#006d78",
         "on_primary": "#ffffff",
         "success": "#108a5b",
-        "warn": "#b37400",
-        "danger": "#d64550",
+        "warn": "#946000",
+        "danger": "#c93a45",
         "info": "#1478c9",
-        "selection": "rgba(0, 142, 156, 0.14)",
+        "selection": "rgba(0, 122, 134, 0.14)",
         "tree_alt": "rgba(16, 48, 57, 0.025)",
         "shadow": "#5c7b84",
-        "charts": ["#008e9c", "#2f7ed8", "#7059d6", "#108a5b", "#b37400", "#c94f76"],
+        "charts": ["#007a86", "#2f7ed8", "#7059d6", "#108a5b", "#946000", "#c94f76"],
     },
 }
 
@@ -148,6 +148,7 @@ QPushButton {
 }
 QPushButton:hover { background: $hover; border-color: $hover_border; }
 QPushButton:pressed { background: $surface; }
+QPushButton:focus { border-color: $primary; }
 QPushButton:disabled { color: $faint; border-color: $border; background: $surface; }
 QPushButton#Primary {
     background: $primary;
@@ -159,6 +160,7 @@ QPushButton#Primary {
 }
 QPushButton#Primary:hover { background: $primary_hover; border-color: $primary_hover; }
 QPushButton#Primary:pressed { background: $primary_pressed; border-color: $primary_pressed; }
+QPushButton#Primary:focus { border-color: $on_primary; }
 QPushButton#Primary:disabled { background: $surface_3; color: $faint; border-color: $border; }
 QPushButton#Ghost {
     background: transparent;
@@ -190,6 +192,7 @@ QPushButton#Link {
     text-align: left;
 }
 QPushButton#Link:hover { color: $primary_hover; text-decoration: underline; }
+QPushButton#Link:focus { color: $primary_hover; text-decoration: underline; }
 QPushButton#ThemeOption {
     background: $surface;
     border: 1px solid $border;
@@ -214,6 +217,10 @@ QPushButton#IconButton {
 }
 QPushButton#IconButton:hover { background: $hover; }
 QPushButton#IconButton:pressed { background: $surface_3; }
+QPushButton#IconButton:focus {
+    background: transparent;
+    border: 1px solid $primary;
+}
 QPushButton#IconButton:disabled { background: transparent; }
 QPushButton#WindowButton {
     background: transparent;
@@ -348,6 +355,11 @@ QLabel#Eyebrow {
 }
 QLabel#Muted { color: $muted; }
 QLabel#Faint { color: $faint; font-size: 12px; }
+QLabel#SidebarCredit {
+    color: $faint;
+    font-size: 10px;
+    text-transform: none;
+}
 QLabel#Value { font-size: 23px; font-weight: 700; }
 QLabel#ValueSmall { font-size: 17px; font-weight: 600; }
 QLabel#Unit { color: $muted; font-size: 12px; font-weight: 500; }
@@ -433,6 +445,9 @@ QTreeWidget, QTreeView, QListWidget {
     padding: 2px;
     selection-background-color: $selection;
     selection-color: $text;
+}
+QTreeWidget:focus, QTreeView:focus, QListWidget:focus {
+    border-color: $primary;
 }
 QTreeWidget::item, QTreeView::item { min-height: 33px; border: none; }
 QTreeWidget::item:hover, QTreeView::item:hover { background: $hover; }
@@ -571,7 +586,7 @@ QLabel#ImagePreviewCanvas {
     border-radius: 10px;
     color: $faint;
 }
-QPlainTextEdit#LogTerminal {
+QPlainTextEdit#LogTerminal, QTextEdit#LogTerminal {
     background: #080c0f;
     color: #7ee787;
     border: 1px solid $border_strong;

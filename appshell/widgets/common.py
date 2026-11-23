@@ -7,6 +7,7 @@ from typing import Any
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QFontMetrics
 from PySide6.QtWidgets import (
+    QBoxLayout,
     QFrame,
     QGraphicsOpacityEffect,
     QHBoxLayout,
@@ -109,7 +110,7 @@ class PageHeader(QWidget):
         self.subtitle.setWordWrap(True)
         self.subtitle.setVisible(bool(subtitle))
         root.addWidget(self.eyebrow)
-        row = QHBoxLayout()
+        row = QBoxLayout(QBoxLayout.Direction.LeftToRight)
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(16)
         left = QVBoxLayout()
@@ -122,7 +123,51 @@ class PageHeader(QWidget):
         self.actions.setContentsMargins(0, 0, 0, 0)
         self.actions.setSpacing(8)
         row.addLayout(self.actions, 0)
+        row.setAlignment(self.actions, Qt.AlignRight | Qt.AlignVCenter)
         root.addLayout(row)
+        self.row = row
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._reflow(event.size().width())
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        self._reflow(self.width())
+
+    def _actions_width(self) -> int:
+        widths = []
+        for index in range(self.actions.count()):
+            item = self.actions.itemAt(index)
+            widget = item.widget() if item is not None else None
+            if widget is not None:
+                widths.append(widget.sizeHint().width())
+        if not widths:
+            return self.actions.sizeHint().width()
+        return sum(widths) + self.actions.spacing() * (len(widths) - 1)
+
+    def _reflow(self, width: int) -> None:
+        """Move as ações para a linha de baixo quando o título ficaria cortado."""
+        actions_width = self._actions_width()
+        title_width = self.title.fontMetrics().horizontalAdvance(
+            self.title.full_text()
+        )
+        compact = width < actions_width + title_width + 80
+        direction = (
+            QBoxLayout.Direction.TopToBottom
+            if compact
+            else QBoxLayout.Direction.LeftToRight
+        )
+        if self.row.direction() != direction:
+            self.row.setDirection(direction)
+        if compact:
+            self.row.setSpacing(10)
+            self.row.setAlignment(self.actions, Qt.AlignLeft)
+        else:
+            self.row.setSpacing(16)
+            self.row.setAlignment(
+                self.actions, Qt.AlignRight | Qt.AlignVCenter
+            )
 
     def add_action(self, widget: QWidget) -> None:
         self.actions.addWidget(widget)

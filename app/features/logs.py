@@ -9,13 +9,16 @@ import sys
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QTimer, Qt, qVersion
+from PySide6.QtCore import QTimer, Qt, QUrl, qVersion
 from PySide6.QtGui import (
     QColor,
     QFont,
     QFontDatabase,
     QSyntaxHighlighter,
     QTextCharFormat,
+    QTextDocument,
+    QTextImageFormat,
+    QPixmap,
 )
 from PySide6.QtWidgets import (
     QApplication,
@@ -24,11 +27,11 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
-    QPlainTextEdit,
+    QTextEdit,
     QVBoxLayout,
 )
 
-from .. import APP_NAME, __version__
+from .. import APP_AUTHOR, APP_NAME, __version__
 from ..logging_setup import (
     active_log_dir,
     active_log_file,
@@ -38,6 +41,7 @@ from ..logging_setup import (
     migrate_logs,
     prune_logs,
 )
+from appshell.icons import icon
 from appshell.utils import copy_to_clipboard, format_bytes, format_datetime, format_duration, open_in_explorer
 from appshell.widgets.buttons import ActionButton, IconButton, SearchField, SelectButton
 from appshell.widgets.common import IconLabel, PageHeader
@@ -50,39 +54,64 @@ _LEVEL_RE = re.compile(r"\b(ERROR|CRITICAL|WARNING|WARN|INFO|DEBUG)\b")
 _ISO_PREFIX_RE = re.compile(
     r"^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})(?:,\d+)?\s+(.*)$"
 )
-_LEVEL_ICONS = {
-    "INFO": "ℹ",
-    "WARNING": "⚠",
-    "WARN": "⚠",
-    "ERROR": "✖",
-    "CRITICAL": "✖",
-    "DEBUG": "·",
+_LEVEL_ICON_NAMES = {
+    "INFO": "information-outline",
+    "WARNING": "alert-outline",
+    "ERROR": "alert-octagon-outline",
+    "DEBUG": "bug-outline",
+    "THREAD": "call-split",
 }
+_LEVEL_COLORS = {
+    "INFO": "#7ee787",
+    "WARNING": "#e3b341",
+    "ERROR": "#ff7b72",
+    "DEBUG": "#8b949e",
+    "THREAD": "#7ee787",
+}
+_LEVEL_ALIASES = {"WARN": "WARNING", "CRITICAL": "ERROR"}
 
 
-def _display_line(line: str, crash: bool = False) -> str:
-    """Formata a linha para o terminal sem alterar o arquivo original."""
+def _display_parts(line: str, crash: bool = False) -> tuple[str, str]:
+    """Separa a linha em nível (para ícone) e texto puro."""
     if crash:
         if line.startswith("Windows fatal exception"):
-            return "✖ " + line
+            return "ERROR", line
         if line.startswith("Thread 0x") or line.startswith("Current thread"):
-            return "▸ " + line
-        return "  " + line
+            return "THREAD", line
+        return "", "  " + line
     match = _ISO_PREFIX_RE.match(line)
     if not match:
-        return "  " + line
+        return "", "  " + line
     date = (
         f"{match.group(3)}/{match.group(2)}/{match.group(1)} "
         f"{match.group(4)}:{match.group(5)}:{match.group(6)}"
     )
     rest = match.group(7)
-    level = rest.split(" ", 1)[0]
-    icon = _LEVEL_ICONS.get(level, " ")
-    return f"{icon} {date} {rest}"
+    raw_level = rest.split(" ", 1)[0]
+    level = _LEVEL_ALIASES.get(raw_level, raw_level)
+    if level not in _LEVEL_ICON_NAMES:
+        level = ""
+    return level, f"{date} {rest}"
+
+
+def _display_line(line: str, crash: bool = False) -> str:
+    """Formata a linha para cópia/diagnóstico sem alterar o arquivo original."""
+    return _display_parts(line, crash)[1]
 
 
 def _display_text(text: str, crash: bool = False) -> str:
     return "\n".join(_display_line(line, crash) for line in text.splitlines())
+
+
+class _LogView(QTextEdit):
+    """Terminal somente leitura que copia texto puro, sem imagens de ícone."""
+
+    def copy(self) -> None:
+        selected = self.textCursor().selectedText()
+        if not selected:
+            return
+        selected = selected.replace("\ufffc", "").replace("\u2029", "\n")
+        QApplication.clipboard().setText(selected)
 
 
 class _TerminalHighlighter(QSyntaxHighlighter):
@@ -92,31 +121,21 @@ class _TerminalHighlighter(QSyntaxHighlighter):
         super().__init__(document)
         self._formats: dict[str, QTextCharFormat] = {}
         for names, color in (
-            (("ERROR", "CRITICAL"), "#ff7b72"),
-            (("WARNING", "WARN"), "#e3b341"),
-            (("INFO",), "#7ee787"),
-            (("DEBUG",), "#8b949e"),
+            (("ERROR", "CRITICAL"), _LEVEL_COLORS["ERROR"]),
+            (("WARNING", "WARN"), _LEVEL_COLORS["WARNING"]),
+            (("INFO",), _LEVEL_COLORS["INFO"]),
+            (("DEBUG",), _LEVEL_COLORS["DEBUG"]),
         ):
             fmt = QTextCharFormat()
             fmt.setForeground(QColor(color))
             fmt.setFontWeight(QFont.Bold)
             for name in names:
                 self._formats[name] = fmt
-        self._icons = {
-            "✖": self._formats["ERROR"],
-            "⚠": self._formats["WARNING"],
-            "ℹ": self._formats["INFO"],
-            "·": self._formats["DEBUG"],
-        }
 
     def highlightBlock(self, text: str) -> None:  # noqa: N802
         if "Windows fatal exception" in text:
             self.setFormat(0, len(text), self._formats["ERROR"])
             return
-        if text:
-            fmt = self._icons.get(text[0])
-            if fmt is not None:
-                self.setFormat(0, 1, fmt)
         for match in _LEVEL_RE.finditer(text):
             fmt = self._formats.get(match.group(1))
             if fmt is not None:
@@ -212,9 +231,9 @@ class LogsPage(BasePage):
         self.level_btn.set_options(
             [
                 ("all", "Todos", "filter-variant"),
-                ("info", "INFO", "information-outline"),
-                ("warning", "WARNING", "alert-outline"),
-                ("error", "ERRO", "alert-octagon-outline"),
+                ("info", "INFO", _LEVEL_ICON_NAMES["INFO"]),
+                ("warning", "WARNING", _LEVEL_ICON_NAMES["WARNING"]),
+                ("error", "ERRO", _LEVEL_ICON_NAMES["ERROR"]),
             ],
             "all",
         )
@@ -232,15 +251,33 @@ class LogsPage(BasePage):
         tb.addWidget(self.refresh_btn)
         root.addWidget(toolbar)
 
-        self.terminal = QPlainTextEdit(self)
+        self.terminal = _LogView(self)
         self.terminal.setObjectName("LogTerminal")
         self.terminal.setAccessibleName("Terminal de logs")
         self.terminal.setReadOnly(True)
         self.terminal.setUndoRedoEnabled(False)
-        self.terminal.setLineWrapMode(QPlainTextEdit.NoWrap)
+        self.terminal.setLineWrapMode(QTextEdit.NoWrap)
         font = QFontDatabase.systemFont(QFontDatabase.FixedFont)
         font.setPointSize(10)
         self.terminal.setFont(font)
+        self._level_formats: dict[str, QTextImageFormat] = {}
+        self._level_pixmaps: dict[str, QPixmap] = {}
+        for level, icon_name in _LEVEL_ICON_NAMES.items():
+            pixmap = icon(
+                icon_name, _LEVEL_COLORS[level], 15
+            ).pixmap(15, 15)
+            url = QUrl(f"level:{level.lower()}")
+            self.terminal.document().addResource(
+                QTextDocument.ImageResource, url, pixmap
+            )
+            self._level_pixmaps[level] = pixmap
+            fmt = QTextImageFormat()
+            fmt.setName(url.toString())
+            fmt.setWidth(15)
+            fmt.setHeight(15)
+            fmt.setVerticalAlignment(QTextCharFormat.AlignMiddle)
+            self._level_formats[level] = fmt
+        self._plain_text = ""
         self._highlighter = _TerminalHighlighter(self.terminal.document())
         root.addWidget(self.terminal, 1)
 
@@ -334,6 +371,32 @@ class LogsPage(BasePage):
         return result
 
     # ------------------------------------------------------------- terminal
+    def _render_lines(self, lines: list[str], crash: bool) -> None:
+        self.terminal.clear()
+        document = self.terminal.document()
+        for level, pixmap in self._level_pixmaps.items():
+            document.addResource(
+                QTextDocument.ImageResource,
+                QUrl(f"level:{level.lower()}"),
+                pixmap,
+            )
+        cursor = self.terminal.textCursor()
+        cursor.beginEditBlock()
+        plain: list[str] = []
+        for index, line in enumerate(lines):
+            if index:
+                cursor.insertBlock()
+            level, text = _display_parts(line, crash)
+            plain.append(text)
+            fmt = self._level_formats.get(level)
+            if fmt is not None:
+                cursor.insertImage(fmt)
+                cursor.insertText(" " + text)
+            else:
+                cursor.insertText(text)
+        cursor.endEditBlock()
+        self._plain_text = "\n".join(plain)
+
     def _refresh(self, force: bool = False) -> None:
         if not force and self.terminal.textCursor().hasSelection():
             return
@@ -358,10 +421,9 @@ class LogsPage(BasePage):
         raw = log_tail(path, 8000)
         lines = raw.splitlines()
         shown = self._filter_lines(lines, crash)
-        displayed = [_display_line(line, crash) for line in shown]
         bar = self.terminal.verticalScrollBar()
         at_bottom = bar.value() >= max(0, bar.maximum() - 4)
-        self.terminal.setPlainText("\n".join(displayed))
+        self._render_lines(shown, crash)
         if at_bottom or force:
             bar.setValue(bar.maximum())
 
@@ -402,7 +464,7 @@ class LogsPage(BasePage):
             self.toast(f"Não foi possível abrir a pasta: {folder}", "danger")
 
     def _copy_terminal(self) -> None:
-        text = self.terminal.toPlainText()
+        text = self._plain_text.strip()
         if not text:
             self.toast("Não há linhas para copiar.", "info")
             return
@@ -421,12 +483,19 @@ class LogsPage(BasePage):
             )
         else:
             scan = "(nenhuma análise nesta sessão)"
+        warning_block = ""
+        if result is not None and result.warnings:
+            warning_block = "Avisos por categoria:\n" + "\n".join(
+                f"  - {warning.category} ({warning.operation}): {warning.count}"
+                for warning in result.warnings
+            )
         tail = _display_text(
             log_tail(path, 200), self.file_btn.current() == "crash"
         ).rstrip()
         lines = [
             f"{APP_NAME} — diagnóstico",
             f"Versão: {__version__}",
+            f"Desenvolvido por: {APP_AUTHOR}",
             f"SO: {platform.platform()}",
             f"Python: {sys.version.split()[0]}",
             f"Qt: {qVersion()}",
@@ -436,6 +505,7 @@ class LogsPage(BasePage):
             "Raízes:",
             roots,
             f"Última análise: {scan}",
+            *([warning_block] if warning_block else []),
             "",
             f"--- últimas linhas ({path.name}) ---",
             tail,

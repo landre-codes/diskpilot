@@ -443,7 +443,7 @@ class ShellWindow(QWidget):
         self._maximized = True
         self._apply_window_state()
         self._set_geometry_exact(self._max_area())
-        self.log.info("maximizar: %s", self.geometry().getRect())
+        self.log.debug("maximizar: %s", self.geometry().getRect())
 
     def _restore_normal(self) -> None:
         if not self._maximized:
@@ -467,7 +467,7 @@ class ShellWindow(QWidget):
             else self._default_geometry(avail)
         )
         self._set_geometry_exact(self._fit_rect(rect, avail, min_w, min_h))
-        self.log.info("restaurar: %s", self.geometry().getRect())
+        self.log.debug("restaurar: %s", self.geometry().getRect())
 
     def _set_geometry_exact(self, rect: QRect) -> None:
         """Aplica a geometria e vigia saltos do layout por alguns instantes.
@@ -503,7 +503,7 @@ class ShellWindow(QWidget):
             self._pending_geometry = None
             return
         self._geometry_fixes += 1
-        self.log.info("geometria corrigida: %s -> %s", current.getRect(), target.getRect())
+        self.log.debug("geometria corrigida: %s -> %s", current.getRect(), target.getRect())
         self.setGeometry(target)
 
     def _reapply_maximized(self) -> None:
@@ -572,7 +572,7 @@ class ShellWindow(QWidget):
             if screen is not None:
                 geo = screen.geometry()
                 avail = screen.availableGeometry()
-                self.log.info(
+                self.log.debug(
                     "janela: tela=%sx%s avail=%sx%s escala=%.2f dpr=%.2f "
                     "geometria=%s minimo=%sx%s",
                     geo.width(),
@@ -588,9 +588,15 @@ class ShellWindow(QWidget):
             if self._start_fullscreen:
                 self._start_fullscreen = False
                 self.showFullScreen()
+            QTimer.singleShot(0, self._focus_window)
             prewarm = getattr(self.theme, "prewarm", None)
             if callable(prewarm):
                 QTimer.singleShot(2500, prewarm)
+
+    def _focus_window(self) -> None:
+        """Evita que o primeiro IconButton da barra de título nasça focado."""
+        self.setFocusPolicy(Qt.StrongFocus)
+        self.setFocus(Qt.OtherFocusReason)
 
     # ---------------------------------------------------------------- drag
     def _start_drag(self, global_pos: QPoint) -> None:

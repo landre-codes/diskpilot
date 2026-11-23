@@ -16,7 +16,7 @@ from appshell.widgets.common import Toast
 from appshell.widgets.sidebar import Sidebar
 from appshell.widgets.title_bar import TitleBar
 
-from . import APP_NAME, APP_TAGLINE
+from . import APP_AUTHOR, APP_COPYRIGHT, APP_NAME, APP_TAGLINE
 from .config import AppConfig
 from .services.state import AppState
 from .widgets.dialogs import ProfileDialog
@@ -64,6 +64,8 @@ class MainWindow(ShellWindow):
                 parent,
                 brand_title=APP_NAME,
                 brand_tagline=APP_TAGLINE,
+                brand_author=APP_AUTHOR,
+                brand_credit=APP_COPYRIGHT,
                 brand_icon="harddisk",
             ),
             toast_factory=lambda parent: Toast(parent),
@@ -88,11 +90,10 @@ class MainWindow(ShellWindow):
             QTimer.singleShot(60, analyzer.focus_search)
 
     def _shortcut_rescan(self) -> None:
-        if self.state.roots:
-            self.navigate("analyzer")
-            self.state.start_scan(force=True)
-        else:
-            self._shortcut_add()
+        self.navigate("analyzer")
+        analyzer = self._pages.get("analyzer")
+        if analyzer is not None and hasattr(analyzer, "request_rescan"):
+            analyzer.request_rescan()
 
     # ------------------------------------------------------------ identidade
     def _refresh_settings_identity(self) -> None:

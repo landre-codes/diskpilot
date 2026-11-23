@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import logging
 import shutil
 import tempfile
 from datetime import datetime
@@ -12,6 +13,9 @@ from typing import Any
 from .. import APP_NAME
 from appshell.utils import file_author_fast, format_bytes, format_datetime
 from .model import Node, ScanResult
+
+
+logger = logging.getLogger("diskpilot.exporter")
 
 
 def default_export_dir() -> str:
@@ -26,6 +30,30 @@ def default_export_dir() -> str:
 def default_export_path(prefix: str, extension: str) -> str:
     stamp = datetime.now().strftime("%Y%m%d-%H%M")
     return str(Path(default_export_dir()) / f"DiskPilot-{prefix}-{stamp}.{extension}")
+
+
+_RISKY_PREFIXES = ("=", "+", "-", "@")
+
+
+def safe_spreadsheet_text(value: Any) -> Any:
+    """Neutraliza texto que planilhas possam interpretar como fórmula.
+
+    Aplica-se apenas à saída; o modelo em memória mantém o nome original.
+    O prefixo apostrofo é a forma documentada e testada para CSV.
+    """
+    if not isinstance(value, str) or not value:
+        return value
+    if value[0] in "\t\r\n" or value.lstrip(" \t\r\n")[:1] in _RISKY_PREFIXES:
+        return "'" + value
+    return value
+
+
+def _force_text_cells(ws) -> None:
+    """Garante que strings do XLSX sejam células de texto, não fórmulas."""
+    for row in ws.iter_rows():
+        for cell in row:
+            if isinstance(cell.value, str):
+                cell.data_type = "s"
 
 
 def item_rows(
@@ -102,22 +130,21 @@ def write_csv(
             ]
         )
         for row in item_rows(dirs, files, result.total_size):
-            writer.writerow(
-                [
-                    row["categoria"],
-                    row["ranking"],
-                    row["caminho"],
-                    row["nome"],
-                    row["bytes"],
-                    row["formatado"],
-                    f"{row['percentual']:.2f}".replace(".", ","),
-                    row["arquivos"],
-                    row["pastas"],
-                    row["modificado"],
-                    row["autor"],
-                    row["erro"],
-                ]
-            )
+            values = [
+                row["categoria"],
+                row["ranking"],
+                row["caminho"],
+                row["nome"],
+                row["bytes"],
+                row["formatado"],
+                f"{row['percentual']:.2f}".replace(".", ","),
+                row["arquivos"],
+                row["pastas"],
+                row["modificado"],
+                row["autor"],
+                row["erro"],
+            ]
+            writer.writerow([safe_spreadsheet_text(value) for value in values])
 
 
 def _style_header(ws, row: int, count: int) -> None:
@@ -155,7 +182,7 @@ def write_xlsx(
         ("Total em bytes", payload.get("total_bytes", 0)),
         ("Arquivos", payload.get("arquivos", 0)),
         ("Pastas", payload.get("pastas", 0)),
-        ("Avisos de acesso", payload.get("erros", 0)),
+        ("Avisos", payload.get("erros", 0)),
         ("Duração (s)", payload.get("duracao_s", 0)),
         ("Início", payload.get("iniciado_em", "")),
         ("Varredura limitada", payload.get("truncado", "Não")),
@@ -189,6 +216,7 @@ def write_xlsx(
                 root["autor"],
             ]
         )
+    _force_text_cells(summary)
     for column, width in (
         ("A", 52),
         ("B", 24),
@@ -235,6 +263,7 @@ def write_xlsx(
                 row["erro"],
             ]
         )
+    _force_text_cells(top)
     for column, width in (
         ("A", 12),
         ("B", 9),
@@ -286,6 +315,7 @@ def write_xlsx(
                 "\n".join(suggestion.paths),
             ]
         )
+    _force_text_cells(suggestions)
     for column, width in (
         ("A", 20),
         ("B", 34),
@@ -334,4 +364,11 @@ def write_xlsb(
         finally:
             pythoncom.CoUninitialize()
     finally:
-        shutil.rmtree(temp_dir, ignore_errors=True)
+        try:
+            shutil.rmtree(temp_dir)
+        except OSError as exc:
+            logger.warning(
+                "temporário da exportação não removido: %s (%s)",
+                temp_dir,
+                exc,
+            )

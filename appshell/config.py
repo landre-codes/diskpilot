@@ -90,7 +90,24 @@ class JsonSettings:
         self.defaults = merge_defaults(GENERIC_CONFIG, defaults or {})
         self.data: dict[str, Any] = copy.deepcopy(self.defaults)
         self.data["user"]["name"] = logical_user()
+        self._prune_corrupt_backups()
         self._loaded_ok = self._load()
+
+    def _prune_corrupt_backups(self, keep: int = 5) -> None:
+        """Mantém apenas os backups de configuração corrompida mais recentes."""
+        try:
+            backups = sorted(
+                self.path.parent.glob(f"{self.path.stem}.corrompido-*.json"),
+                key=lambda path: path.stat().st_mtime,
+                reverse=True,
+            )
+        except OSError:
+            return
+        for old in backups[max(1, keep) :]:
+            try:
+                old.unlink()
+            except OSError:
+                continue
 
     # ------------------------------------------------------------------ I/O
     def _load(self) -> bool:
@@ -115,6 +132,7 @@ class JsonSettings:
             )
             try:
                 shutil.copy2(self.path, backup)
+                self._prune_corrupt_backups()
             except Exception:
                 pass
             self.data = copy.deepcopy(self.defaults)
@@ -125,8 +143,15 @@ class JsonSettings:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_suffix(".json.tmp")
         payload = json.dumps(self.data, ensure_ascii=False, indent=2)
-        tmp.write_text(payload, encoding="utf-8")
-        os.replace(tmp, self.path)
+        try:
+            tmp.write_text(payload, encoding="utf-8")
+            os.replace(tmp, self.path)
+        except Exception:
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+            raise
 
     # ------------------------------------------------------------- helpers
     def get(self, dotted: str, default: Any = None) -> Any:

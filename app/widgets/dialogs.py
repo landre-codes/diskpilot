@@ -62,6 +62,7 @@ from ..services.model import ScanResult, top_items
 from appshell.theme import get_theme
 from appshell.utils import (
     avatar_photo,
+    copy_to_clipboard,
     format_bytes,
     format_datetime,
     normalize_path,
@@ -2058,3 +2059,134 @@ class ProfileDialog(SheetDialog):
         self.config.set("user.avatar_zoom", zoom, save=False)
         self.config.save()
         self.accept()
+
+
+class WarningsDialog(SheetDialog):
+    """Resumo categorizado dos avisos sem expor caminhos completos."""
+
+    CATEGORY_LABELS = {
+        "permission_denied": "Permissão negada",
+        "not_found": "Item removido durante a análise",
+        "path_too_long": "Caminho longo demais",
+        "io_error": "Erro de I/O",
+    }
+    OPERATION_LABELS = {
+        "stat_root": "Ler raiz",
+        "list_root": "Listar raiz",
+        "iterate_dir": "Percorrer pasta",
+        "list_dir": "Listar subpasta",
+        "read_entry": "Ler item",
+    }
+
+    def __init__(self, parent: QWidget | None, result: ScanResult) -> None:
+        super().__init__(
+            parent,
+            "Avisos da análise",
+            "Itens que não puderam ser lidos por completo.",
+            720,
+            460,
+            min_width=540,
+            min_height=340,
+        )
+        self.result = result
+        if result.errors == 1:
+            summary_text = "1 item não pôde ser lido por completo."
+        else:
+            summary_text = (
+                f"{result.errors} itens não puderam ser lidos por completo."
+            )
+        summary_text += (
+            " A varredura continuou; os totais podem estar incompletos."
+        )
+        summary = QLabel(summary_text)
+        summary.setObjectName("Muted")
+        summary.setWordWrap(True)
+        self.body.addWidget(summary)
+
+        self.tree = QTreeWidget(self)
+        self.tree.setColumnCount(3)
+        self.tree.setHeaderLabels(["Categoria", "Operação", "Quantidade"])
+        self.tree.setRootIsDecorated(False)
+        self.tree.setIndentation(0)
+        self.tree.setUniformRowHeights(True)
+        self.tree.setAlternatingRowColors(True)
+        self.tree.setSelectionMode(QAbstractItemView.NoSelection)
+        self.tree.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        header = self.tree.header()
+        header.setSectionResizeMode(0, QHeaderView.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        for warning in result.warnings:
+            category = self.CATEGORY_LABELS.get(
+                warning.category, warning.category
+            )
+            operation = self.OPERATION_LABELS.get(
+                warning.operation, warning.operation
+            )
+            item = QTreeWidgetItem([category, operation, str(warning.count)])
+            item.setTextAlignment(2, Qt.AlignRight | Qt.AlignVCenter)
+            self.tree.addTopLevelItem(item)
+        categorized = sum(warning.count for warning in result.warnings)
+        if not result.warnings:
+            self.tree.addTopLevelItem(
+                QTreeWidgetItem(["Não categorizado", "-", str(result.errors)])
+            )
+        elif categorized < result.errors:
+            self.tree.addTopLevelItem(
+                QTreeWidgetItem(
+                    [
+                        "Não categorizado",
+                        "-",
+                        str(result.errors - categorized),
+                    ]
+                )
+            )
+        self.body.addWidget(self.tree, 1)
+
+        note = QLabel(
+            "Por privacidade, este resumo não inclui caminhos completos. "
+            "O log registra categorias e hashes, não nomes de arquivos."
+        )
+        note.setObjectName("Faint")
+        note.setWordWrap(True)
+        self.body.addWidget(note)
+
+        self.copy_btn = ActionButton("Copiar resumo", "content-copy", "ghost", self)
+        self.copy_btn.clicked.connect(self._copy_summary)
+        close_btn = ActionButton("Fechar", "close", "soft", self)
+        close_btn.clicked.connect(self.accept)
+        self.footer.addStretch(1)
+        self.footer.addWidget(self.copy_btn)
+        self.footer.addWidget(close_btn)
+
+    def summary_text(self) -> str:
+        lines = [
+            "DiskPilot — avisos da análise",
+            f"Total: {self.result.errors}",
+        ]
+        for warning in self.result.warnings:
+            category = self.CATEGORY_LABELS.get(
+                warning.category, warning.category
+            )
+            operation = self.OPERATION_LABELS.get(
+                warning.operation, warning.operation
+            )
+            lines.append(f"- {category} ({operation}): {warning.count}")
+        categorized = sum(
+            warning.count for warning in self.result.warnings
+        )
+        if not self.result.warnings:
+            lines.append(f"- Não categorizado: {self.result.errors}")
+        elif categorized < self.result.errors:
+            lines.append(
+                f"- Não categorizado: {self.result.errors - categorized}"
+            )
+        lines.append("")
+        lines.append(
+            "Caminhos completos não são armazenados por privacidade."
+        )
+        return "\n".join(lines)
+
+    def _copy_summary(self) -> None:
+        copy_to_clipboard(self.summary_text())
+        self.copy_btn.setText("Resumo copiado")

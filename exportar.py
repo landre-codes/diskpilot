@@ -54,6 +54,10 @@ def copy_source(destination: Path) -> None:
         "requirements.txt",
         "requirements-dev.txt",
         "README.md",
+        "LICENSE",
+        "THIRD-PARTY.md",
+        "diagnostico.py",
+        "pyproject.toml",
         "iniciar.cmd",
         "exportar.py",
         ".gitignore",
@@ -244,7 +248,10 @@ def main() -> int:
         print(f"[ok] hashes: {DIST / 'SHA256SUMS.txt'}")
         return 0
     finally:
-        shutil.rmtree(staging, ignore_errors=True)
+        try:
+            shutil.rmtree(staging)
+        except OSError as exc:
+            print(f"[aviso] temporário não removido: {staging} ({exc})")
 
 
 if __name__ == "__main__":

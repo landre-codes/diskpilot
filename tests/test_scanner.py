@@ -55,6 +55,19 @@ def test_parallel_budget_is_shared(tmp_path: Path) -> None:
     assert result.total_files + result.total_dirs <= 25
 
 
+def test_budget_does_not_count_unreserved_roots(tmp_path: Path) -> None:
+    roots = []
+    for index in range(3):
+        root = tmp_path / f"root_{index}"
+        _make_tree(root, files=2)
+        roots.append(str(root))
+
+    result = scan_paths(roots, max_entries=1)
+
+    assert result.truncated
+    assert result.total_files + result.total_dirs <= 1
+
+
 def test_parallel_progress_aggregates_roots(tmp_path: Path) -> None:
     roots = []
     for index in range(3):
@@ -98,6 +111,10 @@ def test_permission_error_on_subfolder_is_counted_and_scan_continues(
 
     assert result.errors == 1
     assert result.total_files == 1
+    assert [
+        (warning.operation, warning.category, warning.count)
+        for warning in result.warnings
+    ] == [("list_dir", "permission_denied", 1)]
     blocked_node = next(
         node for node in all_nodes(result) if node.path == str(blocked)
     )
@@ -128,6 +145,10 @@ def test_inaccessible_root_does_not_abort_other_roots(
 
     assert result.errors == 1
     assert result.total_files == 1
+    assert [
+        (warning.operation, warning.category, warning.count)
+        for warning in result.warnings
+    ] == [("list_root", "permission_denied", 1)]
     blocked_node = next(
         node for node in all_nodes(result) if node.path == str(blocked)
     )

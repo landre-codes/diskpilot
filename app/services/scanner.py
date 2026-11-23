@@ -7,20 +7,44 @@ e evita estouro de pilha em árvores muito profundas.
 
 from __future__ import annotations
 
+import logging
 import os
+import sqlite3
 import stat as stat_module
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
-from .model import Node, ScanProgress, ScanResult
+from appshell.tasks import TaskCancelled
+
+from .model import Node, ScanProgress, ScanResult, ScanWarning
 from .suggestions import build_suggestions
+
+
+logger = logging.getLogger("diskpilot.scanner")
+MAX_ENTRIES = 1_500_000
 
 
 class ScanCancelled(Exception):
     pass
+
+
+def _warning_category(exc: OSError) -> str:
+    if isinstance(exc, PermissionError):
+        return "permission_denied"
+    if isinstance(exc, FileNotFoundError):
+        return "not_found"
+    errno = getattr(exc, "errno", None)
+    winerror = getattr(exc, "winerror", None)
+    if errno in (13, 5) or winerror == 5:
+        return "permission_denied"
+    if errno == 2 or winerror in (2, 3):
+        return "not_found"
+    if errno == 36 or winerror == 206:
+        return "path_too_long"
+    return "io_error"
 
 
 def _display_name(path: str) -> str:
@@ -129,20 +153,28 @@ class _Scanner:
         roots: list[str],
         cancel: threading.Event,
         progress_cb: Callable[[ScanProgress], None] | None = None,
-        max_entries: int = 1_500_000,
+        max_entries: int = MAX_ENTRIES,
         budget: _ScanBudget | None = None,
+        sink: Any = None,
     ) -> None:
         self.roots = roots
         self.cancel = cancel
         self.progress_cb = progress_cb
         self.max_entries = max_entries
         self.budget = budget or _ScanBudget(max_entries)
+        self.sink = sink
         self.progress = ScanProgress(roots_total=len(roots))
         self.visited = 0
         self.errors = 0
+        self.warning_counts: dict[tuple[str, str], int] = {}
         self.truncated = False
         self._last_emit = 0.0
         self._started = time.monotonic()
+
+    def _record_warning(self, operation: str, exc: OSError) -> None:
+        key = (operation, _warning_category(exc))
+        self.warning_counts[key] = self.warning_counts.get(key, 0) + 1
+        self.errors += 1
 
     def _reserve(self) -> bool:
         if self.budget.reserve():
@@ -176,6 +208,10 @@ class _Scanner:
             if self.truncated:
                 break
         elapsed = time.monotonic() - self._started
+        warnings = [
+            ScanWarning(operation=operation, category=category, count=count)
+            for (operation, category), count in sorted(self.warning_counts.items())
+        ]
         result = ScanResult(
             roots=nodes,
             total_size=sum(n.size for n in nodes),
@@ -185,9 +221,11 @@ class _Scanner:
             elapsed=elapsed,
             started_at=started_wall,
             truncated=self.truncated or self.budget.truncated,
+            warnings=warnings,
         )
         self._check()
-        result.suggestions = build_suggestions(result)
+        if self.sink is None:
+            result.suggestions = build_suggestions(result)
         self._check()
         return result
 
@@ -208,8 +246,17 @@ class _Scanner:
         try:
             st = os.stat(path, follow_symlinks=False)
         except OSError as exc:
-            self.errors += 1
-            return Node(path=path, name=_display_name(path), is_dir=True, error=str(exc))
+            self._record_warning("stat_root", exc)
+            node = Node(
+                path=path,
+                name=_display_name(path),
+                is_dir=True,
+                error=str(exc),
+            )
+            if self.sink is not None:
+                self.sink.start_root(node)
+                self.sink.finish_dir(node.node_id, 0, 0, 0)
+            return node
 
         node = Node(
             path=path,
@@ -219,52 +266,79 @@ class _Scanner:
             dirs=1,
         )
         if not self._reserve():
+            # A raiz não entrou no orçamento; não pode inflar os totais.
+            node.dirs = 0
+            if self.sink is not None:
+                self.sink.start_root(node)
+                self.sink.finish_dir(node.node_id, 0, 0, 0)
             return node
         self.progress.dirs += 1
+        if self.sink is not None:
+            self.sink.start_root(node)
 
         seen: set[tuple[int, int]] = set()
         root_id = _file_id(st)
         if root_id is not None:
             seen.add(root_id)
         self._walk(node, seen)
+        if self.sink is not None:
+            self.sink.finish_dir(
+                node.node_id, node.size, node.files, node.dirs
+            )
         return node
 
     def _walk(self, root: Node, seen: set[tuple[int, int]]) -> None:
         try:
             root_iterator = os.scandir(root.path)
         except OSError as exc:
-            self.errors += 1
+            self._record_warning("list_root", exc)
             root.error = str(exc)
             return
 
-        # (diretório pai, iterator do diretório, nó pai para agregação)
-        stack: list[tuple[Node, object, Node | None]] = [(root, root_iterator, None)]
+        # (diretório, iterator, pai para agregação, profundidade)
+        stack: list[tuple[Node, Any, Node | None, int]] = [
+            (root, root_iterator, None, 0)
+        ]
         try:
             while stack:
                 self._check()
-                node, iterator, parent = stack[-1]
+                node, iterator, parent, depth = stack[-1]
                 try:
-                    entry = next(iterator)  # type: ignore[arg-type]
+                    entry = next(iterator)
                 except StopIteration:
                     try:
-                        iterator.close()  # type: ignore[attr-defined]
+                        iterator.close()
                     except Exception:
                         pass
                     stack.pop()
                     if parent is not None:
+                        if self.sink is not None:
+                            self.sink.finish_dir(
+                                node.node_id,
+                                node.size,
+                                node.files,
+                                node.dirs,
+                            )
                         parent.size += node.size
                         parent.files += node.files
                         parent.dirs += node.dirs
                     continue
                 except OSError as exc:
-                    self.errors += 1
+                    self._record_warning("iterate_dir", exc)
                     node.error = str(exc)
                     try:
-                        iterator.close()  # type: ignore[attr-defined]
+                        iterator.close()
                     except Exception:
                         pass
                     stack.pop()
                     if parent is not None:
+                        if self.sink is not None:
+                            self.sink.finish_dir(
+                                node.node_id,
+                                node.size,
+                                node.files,
+                                node.dirs,
+                            )
                         parent.size += node.size
                         parent.files += node.files
                         parent.dirs += node.dirs
@@ -292,18 +366,33 @@ class _Scanner:
                             mtime=getattr(child_st, "st_mtime", 0.0),
                             dirs=1,
                         )
-                        node.children.append(child)
+                        node.children_total += 1
+                        if self.sink is not None:
+                            self.sink.start_dir(
+                                child,
+                                node.node_id,
+                                root.node_id,
+                                depth + 1,
+                            )
+                        else:
+                            node.children.append(child)
                         self.progress.dirs += 1
                         if child_id is not None:
                             seen.add(child_id)
                         try:
                             child_iterator = os.scandir(entry.path)
                         except OSError as exc:
-                            self.errors += 1
+                            self._record_warning("list_dir", exc)
                             child.error = str(exc)
+                            if self.sink is not None:
+                                self.sink.finish_dir(
+                                    child.node_id, 0, 0, child.dirs
+                                )
                             node.dirs += child.dirs
                             continue
-                        stack.append((child, child_iterator, node))
+                        stack.append(
+                            (child, child_iterator, node, depth + 1)
+                        )
                     elif entry.is_file(follow_symlinks=False):
                         fst = entry.stat(follow_symlinks=False)
                         if not self._reserve():
@@ -316,33 +405,49 @@ class _Scanner:
                             mtime=getattr(fst, "st_mtime", 0.0),
                             files=1,
                         )
-                        node.children.append(child)
+                        node.children_total += 1
+                        if self.sink is not None:
+                            self.sink.add_file(
+                                child,
+                                node.node_id,
+                                root.node_id,
+                                depth + 1,
+                            )
+                        else:
+                            node.children.append(child)
                         node.size += child.size
                         node.files += 1
                         self.progress.files += 1
                         self.progress.bytes_seen += child.size
-                except OSError:
-                    self.errors += 1
+                except OSError as exc:
+                    self._record_warning("read_entry", exc)
                     continue
                 self._emit()
             if stack and self.truncated:
                 # Fecha/agrega o que estava aberto para que os totais parciais
                 # reflitam tudo o que foi visitado até o limite.
                 while stack:
-                    node, iterator, parent = stack.pop()
+                    node, iterator, parent, _depth = stack.pop()
                     try:
-                        iterator.close()  # type: ignore[attr-defined]
+                        iterator.close()
                     except Exception:
                         pass
                     if parent is not None:
+                        if self.sink is not None:
+                            self.sink.finish_dir(
+                                node.node_id,
+                                node.size,
+                                node.files,
+                                node.dirs,
+                            )
                         parent.size += node.size
                         parent.files += node.files
                         parent.dirs += node.dirs
         finally:
             # Em cancelamento/truncamento, fecha iteradores que ficaram abertos.
-            for _node, iterator, _parent in stack:
+            for _node, iterator, _parent, _depth in stack:
                 try:
-                    iterator.close()  # type: ignore[attr-defined]
+                    iterator.close()
                 except Exception:
                     pass
 
@@ -354,7 +459,7 @@ def _parallel_root(
     aggregator: _ProgressAggregator,
     max_entries: int,
     budget: _ScanBudget,
-) -> tuple[int, Node, int, bool]:
+) -> tuple[int, Node, dict[tuple[str, str], int], bool]:
     scanner = _Scanner(
         [root],
         token,
@@ -363,7 +468,7 @@ def _parallel_root(
         budget=budget,
     )
     node = scanner.scan_single()
-    return index, node, scanner.errors, scanner.truncated
+    return index, node, dict(scanner.warning_counts), scanner.truncated
 
 
 def _scan_parallel(
@@ -378,6 +483,7 @@ def _scan_parallel(
     budget = _ScanBudget(max_entries)
     results: dict[int, Node] = {}
     errors = 0
+    warning_counts: dict[tuple[str, str], int] = {}
     truncated = False
     workers = min(len(roots), max(1, min(4, os.cpu_count() or 2)))
     with ThreadPoolExecutor(
@@ -397,9 +503,11 @@ def _scan_parallel(
         }
         try:
             for future in as_completed(futures):
-                index, node, child_errors, child_truncated = future.result()
+                index, node, child_warnings, child_truncated = future.result()
                 results[index] = node
-                errors += child_errors
+                for key, count in child_warnings.items():
+                    warning_counts[key] = warning_counts.get(key, 0) + count
+                    errors += count
                 truncated = truncated or child_truncated
                 aggregator.finish(index)
                 if token.is_set():
@@ -412,6 +520,10 @@ def _scan_parallel(
     if token.is_set():
         raise ScanCancelled()
     nodes = [results[index] for index in range(len(roots)) if index in results]
+    warnings = [
+        ScanWarning(operation=operation, category=category, count=count)
+        for (operation, category), count in sorted(warning_counts.items())
+    ]
     result = ScanResult(
         roots=nodes,
         total_size=sum(node.size for node in nodes),
@@ -421,6 +533,7 @@ def _scan_parallel(
         elapsed=time.monotonic() - started,
         started_at=started_wall,
         truncated=truncated or budget.truncated,
+        warnings=warnings,
     )
     result.suggestions = build_suggestions(result)
     if token.is_set():
@@ -432,11 +545,62 @@ def scan_paths(
     roots: list[str],
     cancel: threading.Event | None = None,
     progress_cb: Callable[[ScanProgress], None] | None = None,
-    max_entries: int = 1_500_000,
+    max_entries: int = MAX_ENTRIES,
+    sink: Any = None,
 ) -> ScanResult:
     """Varre raízes independentes em paralelo quando há mais de uma."""
     token = cancel or threading.Event()
+    if sink is not None:
+        # A escrita em um único SQLite é sequencial por desenho.
+        return _Scanner(
+            roots, token, progress_cb, max_entries=max_entries, sink=sink
+        ).run()
     if len(roots) > 1 and (os.cpu_count() or 1) > 1:
         return _scan_parallel(roots, token, progress_cb, max_entries)
     scanner = _Scanner(roots, token, progress_cb, max_entries=max_entries)
     return scanner.run()
+
+
+def stream_scan_paths(
+    roots: list[str],
+    index: Any,
+    cancel: threading.Event | None = None,
+    progress_cb: Callable[[ScanProgress], None] | None = None,
+    max_entries: int = MAX_ENTRIES,
+    suggestions: bool = True,
+) -> ScanResult:
+    """Varre e grava os nós diretamente no índice, sem árvore completa."""
+    from .index_store import IndexWriter
+
+    token = cancel or threading.Event()
+    writer = IndexWriter(index, cancel=token)
+    try:
+        scanner = _Scanner(
+            roots,
+            token,
+            progress_cb,
+            max_entries=max_entries,
+            sink=writer,
+        )
+        result = scanner.run()
+        writer.finish(result, writer.rows, token)
+        result.lazy = True
+        result.index_path = str(index.path)
+        result.index = index
+        if suggestions:
+            try:
+                result.suggestions = build_suggestions(result)
+            except Exception:
+                logger.exception("falha ao calcular sugestões indexadas")
+                result.suggestions = []
+        return result
+    except sqlite3.OperationalError as exc:
+        writer.abort()
+        if token.is_set():
+            raise TaskCancelled() from exc
+        raise
+    except BaseException:
+        writer.abort()
+        raise
+    finally:
+        writer.close()

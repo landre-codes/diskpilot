@@ -41,8 +41,8 @@ O projeto nasceu como um "Everything gerencial e enxuto": em vez de apenas local
 - Seleção de **uma ou várias pastas** pelo seletor próprio (Ctrl+clique), por arrastar e soltar ou por múltiplas adições.
 - O seletor de pastas mostra o **caminho completo** da pasta atual ou da pasta selecionada, com botão de copiar; cada linha também exibe o caminho integral em tooltip, útil para caminhos longos e unidades de rede.
 - Chips das raízes selecionadas, com o **nome da pasta** visível e o caminho completo no tooltip; remoção individual. Ao adicionar pastas com um resultado já existente, apenas as novas raízes são varridas e o resultado anterior é preservado; raízes aninhadas ou resultados truncados disparam uma reanálise completa.
-- Falhas de permissão não interrompem a análise: a pasta ou entrada inacessível é registrada como aviso, o restante da árvore continua e o total de avisos aparece ao final.
-- Varredura em segundo plano com `QThreadPool`, progresso agregado, cancelamento e tolerância a erros de permissão. Várias raízes são varridas em paralelo (até 4 workers) com um limite compartilhado de 1,5 milhão de entradas; o progresso combina arquivos, pastas e bytes das raízes ativas. Logs em `~/DiskPilot/logs/diskpilot.log` e `diskpilot-crash.log` por padrão, com pasta configurável pela página **Logs**.
+- Falhas de permissão não interrompem a análise: a pasta ou entrada inacessível é registrada como aviso categorizado (permissão negada, item removido, caminho longo ou erro de I/O), o restante da árvore continua e o total aparece no cabeçalho, com detalhes sob demanda. Caminhos completos não são persistidos nesse resumo.
+- Varredura em segundo plano com `QThreadPool`, progresso agregado, cancelamento e tolerância a erros de permissão. Várias raízes são varridas em paralelo (até 4 workers) quando o motor é memória. O motor indexado grava os nós diretamente no SQLite durante a varredura e mantém somente a raiz e os diretórios abertos em RAM; a árvore é carregada sob demanda. O limite é compartilhado e calculado pela memória disponível (piso de 250 mil, teto de 5 milhões de entradas; `scan.max_entries` pode reduzir o valor). O progresso combina arquivos, pastas e bytes das raízes ativas. Logs em `~/DiskPilot/logs/diskpilot.log` e `diskpilot-crash.log` por padrão, com pasta configurável pela página **Logs**.
 - Botão **Top 100**: ranking dos 100 maiores diretórios e dos 100 maiores arquivos da análise, com filtro por tamanho (todos, > 100 MB, > 1 GB), tamanho, percentual, caminho completo, cópia do caminho e abertura no Explorer. O ranking é calculado em uma thread de trabalho; o diálogo abre imediatamente e mostra “Carregando ranking…”.
 - Coluna **Autor** na árvore: mostra o autor gravado nos metadados do arquivo (o campo “Authors” do Windows — funciona para Office, PDF e outros formatos que guardam essa informação). A consulta roda em segundo plano, com cache por caminho, para não travar a interface; o nome também aparece no tooltip e na linha copiada. Pastas e formatos sem metadados de autor aparecem como `—`.
 - Colunas com mínimos maiores: **Nome** 280 px, **Tamanho** 124, **% do pai** 90, **Itens** 100, **Modificado** 150, **Autor** 200, **Tipo** 100 e **Caminho completo** 600. Quando a janela não comporta todos os mínimos, a tabela usa rolagem horizontal em vez de esmagar o conteúdo.
@@ -56,8 +56,12 @@ O projeto nasceu como um "Everything gerencial e enxuto": em vez de apenas local
   - quantidade de arquivos, data de modificação e tipo;
   - barras proporcionais na coluna de tamanho;
   - limite de itens por pasta para manter a interface responsiva.
-- Busca com **debounce de 260 ms** e limpeza rápida. A varredura da busca roda em segundo plano, percorre a árvore inteira e conta todas as correspondências; a renderização é limitada para manter a interface fluida. O campo fica alinhado à esquerda e o contador de resultados ocupa o espaço restante, sem elidir o texto quando há largura suficiente.
-- Em análises grandes (a partir de 50 mil entradas), um **índice SQLite com FTS5** é construído em segundo plano. A busca usa o índice; se ele ainda não estiver pronto, a busca em memória continua funcionando como fallback.
+- Busca com **debounce de 260 ms** e limpeza rápida. No motor indexado, a busca usa FTS5/trigram diretamente no SQLite e monta apenas os ramos correspondentes; no modo memória, a varredura percorre a árvore em segundo plano. A renderização é limitada para manter a interface fluida. O campo fica alinhado à esquerda e o contador de resultados ocupa o espaço restante, sem elidir o texto quando há largura suficiente.
+- Toda análise concluída mantém um **índice SQLite com FTS5** usado para busca, top 100, resumo e persistência. No motor indexado, o próprio scanner grava os nós no SQLite e a árvore é lazy; no modo memória, o índice é construído depois da varredura. A busca cai para memória se o índice não estiver disponível. O índice usa identidade exata do caminho (preservando maiúsculas/minúsculas) e uma chave normalizada separada; caminhos literalmente repetidos são reportados como `duplicate_path`.
+- Diagnóstico local opt-in do índice: defina `DISKPILOT_INDEX_DIAGNOSTICS=1` (ou uma pasta) para gravar um JSON com caminhos completos quando houver colisão. Fica desativado por padrão por privacidade; os logs normais só registram categorias, contagens e hashes.
+- Índices persistentes criados por versões anteriores, sem `path_exact`, continuam aceitos: as sugestões indexadas usam `path` como fallback e o merge de raízes lê o esquema legado. Falhas de SQL no cálculo de sugestões agora são registradas no log em vez de sumirem silenciosamente.
+- As sugestões indexadas consultam apenas os candidatos acima dos limiares (antigos, duplicatas, compactados e temporários) e filtram os milhares de caches/builds em Python; não varrem 1,4 milhão de nós nem estouram o limite de variáveis/expressão do SQLite. No índice real de 1,37 milhão de entradas, o cálculo caiu de ~71 s para ~1,4 s.
+- **Reanalisar** (botão ou `Ctrl+R`) com uma análise em andamento pede confirmação antes de cancelar a atual.
 - Estados vazios com descrição responsiva: a largura acompanha o cartão (até 520 px) e a altura mínima é calculada pelo texto, com margens compactas em janelas baixas — a mensagem “Analisando pastas…” não é cortada.
 - Filtros: tudo, pastas, arquivos, arquivos > 100 MB e > 1 GB.
 - Conversor de unidade na tabela: automático, KB, MB, GB ou TB.
@@ -79,7 +83,8 @@ O projeto nasceu como um "Everything gerencial e enxuto": em vez de apenas local
 - Nenhuma exclusão automática: o texto de cada card explica o risco e o que verificar antes.
 
 ### Logs e diagnóstico
-- Página **Logs** com terminal monoespaçado em **verde**, ícones por nível (`ℹ` INFO, `⚠` WARNING, `✖` ERROR), datas no formato **dd/mm/aaaa HH:MM:SS** e texto selecionável.
+- Página **Logs** com terminal monoespaçado em **verde**, ícones Material coerentes por nível (`information-outline` INFO, `alert-outline` WARNING, `alert-octagon-outline` ERROR, `bug-outline` DEBUG), datas no formato **dd/mm/aaaa HH:MM:SS** e texto selecionável.
+- Reajustes internos de geometria/maximizar/restaurar são registrados em **DEBUG** e não aparecem no log normal (INFO), mantendo o terminal focado em eventos da aplicação.
 - Alternância entre o log do aplicativo e o **crash log**, filtro por nível, busca por texto (inclusive pela data brasileira) e acompanhamento em tempo real.
 - Botões **Copiar terminal** e **Copiar diagnóstico** (versão, SO, Python, Qt, raízes, última análise e últimas linhas).
 - Pasta padrão `~/DiskPilot/logs`; **Alterar pasta…** migra o log e o crash log atuais sem reiniciar, e **Padrão** volta ao diretório do usuário.
@@ -88,6 +93,7 @@ O projeto nasceu como um "Everything gerencial e enxuto": em vez de apenas local
 ### Configurações
 - Troca de tema em tempo real e persistência.
 - Alteração do perfil (nome e foto), com cópia da imagem para a pasta de configuração.
+- Crédito **© 2026 Landre Codes** no rodapé da barra lateral, no cartão **Sobre** e no diagnóstico copiável; o rodapé tem tooltip “Desenvolvido por Landre Codes”.
 - Resumo do armazenamento, última análise e local da configuração.
 - Limpeza explícita dos resultados armazenados, mantendo as pastas escolhidas.
 - Lista de atalhos de teclado.
@@ -118,8 +124,10 @@ A suíte usa **pytest + QtBot** e roda com o plugin offscreen, sem abrir janelas
 
 ```powershell
 py -3.14 -m pip install -r requirements-dev.txt
-py -3.14 -m pytest tests -q
+py -3.14 -m pytest -q
 ```
+
+O `pyproject.toml` limita a coleta a `tests/`; o template em `templates/basic` deve ser validado como projeto gerado independente.
 
 Ela cobre a ordenação do Top 100, a varredura paralela com orçamento compartilhado, o seletor de pastas, a exportação CSV, o seletor de imagens em segundo plano e o carregamento assíncrono do Top 100.
 
@@ -218,9 +226,51 @@ São persistidos:
 - estado do menu lateral;
 - nome e avatar do usuário;
 - pastas selecionadas;
-- resumo da última análise (tamanhos, contagens, sugestões e data).
+- resumo da última análise (tamanhos, contagens, data e as sugestões completas para o dashboard e a página de recomendações);
+- o índice SQLite da última análise (`scan.index_path`), o snapshot anterior para rollback (`scan.index_previous_path`) e as raízes efetivamente persistidas (`scan.indexed_roots`);
+- o motor de análise (`scan.engine`: `auto`/`stream`/`memory`), o limite manual opcional (`scan.max_entries`), a retenção do índice anterior (`scan.index_previous_days`) e a quota (`scan.index_max_gb`).
+
+Ao abrir o app, o índice ativo é carregado em segundo plano. No motor indexado, o `ScanResult` é montado apenas com as raízes e os totais; os filhos são consultados no SQLite quando a pasta é expandida, então a árvore, o Top 100, a exportação e a busca voltam sem reexecutar a varredura e sem reconstruir milhões de nós em RAM. As sugestões persistidas no resumo são reutilizadas no restore quando a data e as raízes coincidem, evitando recalcular todos os arquivos; se não houver resumo compatível, o cálculo é refeito. O modo memória reconstrói o `ScanResult` completo. Se o índice ativo estiver ausente ou inválido, o app tenta o snapshot anterior e só então limpa a referência. O banco inválido não é apagado imediatamente: ele permanece disponível para inspeção e pode ser removido pelo GC depois da carência.
+
+A publicação do índice é uma operação com rollback: o banco novo só passa a ser o ativo depois que `config.json` é gravado com sucesso. Se essa gravação falhar, o snapshot anterior continua referenciado e o banco novo não publicado é descartado. O índice anterior é mantido como rollback; a limpeza de órfãos só ocorre depois da publicação, com proteção explícita do ativo, do anterior e de bancos em construção. A remoção automática só aceita arquivos `search-<uuid>.sqlite` dentro da pasta gerenciada pelo DiskPilot.
+
+O índice grava `schema_version`, `complete`, `node_count` e as raízes em uma tabela `meta`. Na restauração, o app rejeita snapshots incompletos, versões incompatíveis, hierarquias com `parent_id` inexistente, `root_id` inconsistente e contagens divergentes. No modo indexado, a validação é feita por consultas de contagem e integridade, sem materializar a árvore; no modo memória, a leitura usa lotes. O cancelamento é cooperativo, inclusive durante consultas SQLite. O resumo em JSON continua disponível como fallback para o dashboard e as configurações.
+
+Se uma pasta foi adicionada mas o novo índice ainda não foi publicado, a reabertura mantém o snapshot anterior e sinaliza a raiz como pendente no cabeçalho da análise; os totais exibidos são os do snapshot, não uma mistura com a pasta ainda não indexada.
 
 A imagem do avatar é copiada para `assets/` ao lado do `config.json`. Mover ou apagar a imagem original não quebra o perfil; a marca do app é fixa.
+
+### Índices em disco
+
+O índice fica em `<pasta de configurações>/index`, por exemplo
+`C:\Users\<usuario>\AppData\Local\DiskPilot\DiskPilot\index`, com arquivos
+`search-<uuid>.sqlite` (e auxiliares `-wal`/`-shm` durante a escrita).
+
+- O índice **ativo** é mantido no fechamento normal e restaurado na próxima
+  abertura.
+- O índice **anterior** é mantido como rollback (`scan.index_previous_path`)
+  por até **7 dias** (`scan.index_previous_days`) ou até a quota de espaço
+  (`scan.index_max_gb`, padrão **8 GB**) ser pressionada, desde que o ativo já
+  tenha sido restaurado com sucesso e o anterior tenha pelo menos 24 horas.
+- Índices órfãos, não referenciados por ativo/anterior e com mais de 24 horas,
+  são removidos após uma publicação/restauração bem-sucedida e também por um
+  timer diário de retenção.
+- Ao limpar os resultados, os índices ativo e anterior são removidos e as
+  referências são zeradas.
+- O botão **Limpar índice anterior** nas Configurações remove apenas o
+  snapshot de rollback, preservando o ativo.
+- Um índice inválido/ausente tem a referência limpa, mas o arquivo não é
+  apagado imediatamente: ele fica disponível para inspeção e só pode ser
+  removido pelo GC depois da carência.
+- O índice temporário usado na consolidação de raízes é removido assim que o
+  merge termina ou falha.
+
+O tamanho do banco é proporcional ao **número de nós e ao texto dos
+caminhos/FTS5**, não ao volume de bytes analisado. Em análises com milhões de
+entradas, alguns GB são esperados; o planejamento de disco deve considerar
+ativo + anterior (e, transitoriamente, o índice em construção/merge).
+
+Configurações corrompidas são copiadas para `config.corrompido-<data>.json`; o app mantém apenas os cinco backups mais recentes. Staging de exportação (`diskpilot-xlsb-*`, `diskpilot-export-*`) é removido na saída normal e, após 24 horas, na inicialização seguinte. A limpeza só atua em diretórios com esses prefixos no diretório temporário do sistema.
 
 ---
 
@@ -279,7 +329,7 @@ diskpilot/
    ├─ services/
    │  ├─ model.py               # Node, ScanResult, Suggestion
    │  ├─ scanner.py             # varredura recursiva cancelável
-   │  ├─ index_store.py         # índice SQLite/FTS5 para análises grandes
+   │  ├─ index_store.py         # índice SQLite/FTS5 e persistência
    │  ├─ suggestions.py         # heurísticas de limpeza
    │  └─ state.py               # estado compartilhado + TaskRunner
    └─ features/
@@ -391,7 +441,7 @@ class ClientesPage(BasePage):
 
 ## Notas de implementação
 
-- A varredura usa `os.scandir`, ignora links simbólicos para evitar ciclos e contabiliza erros de acesso sem interromper a análise. Quando há várias raízes, elas são distribuídas em um `ThreadPoolExecutor` com até 4 workers; um `_ScanBudget` compartilhado garante que o limite de 1,5 milhão de entradas valha para o conjunto, e um agregador combina o progresso sem regredir os contadores.
+- A varredura usa `os.scandir`, ignora links simbólicos para evitar ciclos e contabiliza erros de acesso sem interromper a análise. Quando há várias raízes, elas são distribuídas em um `ThreadPoolExecutor` com até 4 workers; um `_ScanBudget` compartilhado garante que o limite efetivo valha para o conjunto, e um agregador combina o progresso sem regredir os contadores. O limite é automático (250 mil a 5 milhões, conforme a memória disponível) e pode ser reduzido por `scan.max_entries`.
 - Os tamanhos são **lógicos** (`st_size`), que é o valor esperado em um gerenciador de arquivos. Arquivos esparsos, comprimidos ou com hard links podem ocupar menos espaço físico do que o valor exibido.
 - A árvore é preguiçosa: os filhos de uma pasta só são criados quando ela é expandida, com limite de 1.200 itens por pasta e busca global limitada para manter a responsividade.
 - As estimativas de limpeza não são destrutivas e podem se sobrepor; os cálculos já evitam contar arquivos de cache duas vezes e mostram "seguro" separado de "revisar".
@@ -406,7 +456,7 @@ class ClientesPage(BasePage):
 - O banner de progresso e a lista de caminhos das recomendações mostram o caminho integral: o banner usa quebra de linha e a lista usa rolagem horizontal. A função `short_path` foi removida do projeto.
 - Unidades mapeadas são resolvidas via `QStorageInfo.device()`: quando o `\\servidor\compartilhamento` equivalente está acessível, o seletor, as raízes e o banner passam a usar o caminho UNC em vez de `W:\`/`Z:\`.
 - O ranking **Top 100** percorre a árvore em memória uma única vez, mantendo dois heaps (`heapq.nlargest`) para diretórios e arquivos, sem ordenar todos os nós. No diálogo, o cálculo roda em um worker próprio e a tabela mostra “Carregando ranking…” até o resultado chegar. Percentuais de diretórios são cumulativos e podem se sobrepor.
-- **Memória**: diálogos transitórios são destruídos com `deleteLater`, menus e animações são liberados/reutilizados, e o resultado grande anterior é descartado antes de uma nova varredura (`RELEASE_RESULT_THRESHOLD`). A varredura tem limite de 1,5 milhão de entradas; o resumo persistido guarda apenas os 6 maiores diretórios, calculados com `heapq.nlargest`.
+- **Memória**: diálogos transitórios são destruídos com `deleteLater`, menus e animações são liberados/reutilizados, e o resultado grande anterior é descartado antes de uma nova varredura (`RELEASE_RESULT_THRESHOLD`). A varredura usa limite automático de 250 mil a 5 milhões de entradas, calculado pela memória física disponível; o resumo persistido guarda apenas os 6 maiores diretórios, calculados com `heapq.nlargest`.
 - **Expansão da árvore**: os filhos de uma pasta são carregados em lotes de 120 itens, com debounce de 60 ms. A árvore mostra “Carregando…” enquanto isso, mantém a contagem incremental e restaura as pastas expandidas após uma reordenação. Ícones de arquivo são cacheados por extensão, e a ordenação dos filhos usa `heapq.nlargest/nsmallest` com o limite de 1.200 itens exibidos.
 - `qt-material` fornece a base do tema; o QSS em `appshell/theme.py` sobrescreve o que é necessário (especialmente `text-transform`, hovers e cores semânticas) para manter a identidade do app.
 - A geometria inicial e a restaurada são limitadas à área útil da tela: em notebooks pequenos (ou com escala de 125%/150%) a janela não nasce maior que o monitor, então a barra de título e os botões de janela continuam clicáveis. O tamanho mínimo também se adapta ao monitor.
@@ -417,7 +467,7 @@ class ClientesPage(BasePage):
 - O seletor de imagens usa `_ImageScanTask` + sinais para listar a pasta fora da GUI e adiciona os itens da grade em lotes de 120. O Top 100 usa `_TopItemsTask`; nenhum dos dois calcula a pasta/ranking no construtor do diálogo.
 - A suíte de testes fica em `tests/` e é opcional em produção: `requirements-dev.txt` adiciona pytest, pytest-qt e ruff, e `tests/conftest.py` força `QT_QPA_PLATFORM=offscreen` e a raiz do projeto no `sys.path`.
 - Maximizar e restaurar são controlados pelo próprio app, e não por `showMaximized()`: em janelas sem moldura o `normalGeometry()` do Qt pode crescer a cada ciclo e devolver um retângulo maior que a tela. O estado salvo (geometria e maximizado) é aplicado antes do primeiro `show`, para a janela não piscar em tamanhos intermediários.
-- A janela tem **tamanho máximo igual à área útil da tela** (e a posição é limitada para manter a barra de título alcançável), então nenhum salto de layout consegue empurrar os botões para fora do monitor. O log registra tela, escala e geometria em cada maximizar/restaurar para diagnóstico.
+- A janela tem **tamanho máximo igual à área útil da tela** (e a posição é limitada para manter a barra de título alcançável), então nenhum salto de layout consegue empurrar os botões para fora do monitor. O log de depuração registra tela, escala e geometria em cada maximizar/restaurar; no nível INFO esses reajustes não poluem o terminal.
 - A troca de tema usa **cache de QSS por tema** e uma única chamada a `setStyleSheet`. A geração de ícones do `qt_material` (que reescrevia centenas de SVG em `~/.qt_material` a cada troca) é desativada — o app usa apenas qtawesome —, e o QSS do outro tema é pré-montado em segundo plano após a abertura.
 - A árvore desenha as **setas de expandir/recolher** e as guias de hierarquia em `drawBranches`, com a cor do tema, porque o QSS de `::branch` desliga o indicador nativo. O clique na seta alterna o nó.
 - A árvore aceita `Ctrl+C` e menu de contexto para copiar **linha(s)** (Nome, Tamanho, %, Itens, Modificado, Autor, Tipo e Caminho, separados por tabulação), **tamanho** ou **caminho**. A seleção múltipla copia todas as linhas escolhidas.
@@ -430,9 +480,9 @@ class ClientesPage(BasePage):
 - A página de recomendações não refaz a análise ao ser aberta: os cards são atualizados pelos sinais de varredura e a criação não faz `os.path.isdir` por caminho. Antes, cada navegação recriava os cards e consultava até 60 caminhos por sugestão, o que congelava a UI em shares de rede.
 - O seletor de pastas não usa `QFileSystemModel`: as subpastas são enumeradas em um `QThreadPool` com `os.scandir` e exibidas em um `QListView` com `QAbstractListModel`. A GUI não cria um widget por pasta nem faz `stat` ao rolar; a lista de unidades é montada após o `show` e a resolução de UNC para os locais não verifica `isdir`, então unidades de rede desconectadas não bloqueiam a abertura. `activated`/Enter e duplo clique navegam sem disparar a navegação duas vezes.
 - A adição de pastas pelo seletor usa `add_roots(..., trusted=True)`: o caminho já foi validado/enumerado pelo diálogo, então não há `os.path.isdir` extra em cada pasta de rede ao confirmar.
-- `top_items` faz uma única travessia com dois heaps (diretórios e arquivos), em vez de varrer a árvore duas vezes. O cálculo do Top 100 da exportação roda na thread de escrita.
+- `top_items` faz uma única travessia com dois heaps no modo memória; no modo indexado, consulta diretamente `nodes` por `size DESC LIMIT`. O cálculo do Top 100 da exportação roda na thread de escrita.
 - A duração da análise é exibida ao usuário como `hh:mm:ss` por `appshell.utils.format_duration`; a exportação mantém a coluna numérica em segundos para planilhas.
-- O índice SQLite é um sidecar opcional: `IndexTask` o constrói em background, `SearchIndex` abre uma conexão por consulta e o `FileTree` escolhe entre busca em memória e busca indexada. Arquivos antigos são podados e o índice atual é descartado ao limpar a análise ou fechar o app.
+- O índice SQLite é persistente e, no motor indexado, é construído **durante** a varredura: `IndexWriter` reserva o id do diretório, grava arquivos em lotes e atualiza os agregados ao fechar cada pasta. `SearchIndex` abre conexões curtas por consulta; a árvore usa `children_for_node()` sob demanda. `AppState` publica `scan.index_path`, `scan.index_previous_path` e `scan.indexed_roots` só depois de gravar a configuração. No fechamento, o índice ativo é mantido; ao reabrir, `RestoreTask` monta apenas as raízes e os filhos são carregados ao expandir. A adição de raiz no motor indexado varre só a nova raiz e consolida os dois bancos por SQL (`merge_indexes`), sem reindexar os arquivos antigos. Índices órfãos são removidos apenas depois da carência e com proteção do ativo/anterior.
 - O núcleo `appshell/` não importa `app`: `AppContext`, `BasePage`/`PageSpec`, `TaskRunner` e `ShellWindow` formam o contrato reutilizável. O `MainWindow` do DiskPilot é uma composição fina que injeta `TitleBar`, `Sidebar`, `Toast`, atalhos e o estado de disco.
 - `AppState` usa o `TaskRunner` genérico para a varredura: a tarefa só implementa `execute()`, e o runner cuida do pool, dos sinais, do cancelamento e da liberação da tarefa. O mesmo contrato pode ser usado por exportação, carregamento de pastas e Top 100.
 - `app/features/base.py` reexporta `BasePage` e `PageSpec` de `appshell.pages` para manter compatibilidade com as páginas existentes.
@@ -449,10 +499,10 @@ class ClientesPage(BasePage):
 - Não há exclusão em massa; isso é intencional por segurança.
 - Duplicatas são comparadas por nome + tamanho, sem abrir/ler o conteúdo dos arquivos. A lista é ordenada pelo espaço potencialmente recuperável, e os caminhos são exibidos para revisão manual antes de qualquer remoção.
 - O redimensionamento nativo por `WM_NCHITTEST` é específico do Windows; o fallback manual cobre outras plataformas.
-- A varredura paralela distribui raízes independentes, não subpastas de uma mesma raiz. Um disco lento ainda limita o ganho, e o limite de 1,5 milhão de entradas é compartilhado por todas as raízes.
-- A busca/filtro percorre a árvore inteira em segundo plano e conta todas as correspondências. Para renderizar, mantém até 5.000 correspondências e exibe no máximo 2.800 itens; em buscas muito amplas, o contador indica que há mais resultados e pede para refinar o termo.
-- Para volumes muito grandes (milhões de itens), o índice SQLite/FTS5 cobre a busca; a árvore e o resumo ainda ficam em memória nesta fase. A próxima evolução é transmitir os nós direto para o SQLite e carregar a árvore sob demanda.
-- O índice é um arquivo SQLite separado, criado em segundo plano; em 500 mil entradas ele ocupou cerca de 125 MB e levou ~5,5 s em SSD (o tempo varia com o disco). O app continua responsivo durante a indexação.
+- A varredura paralela distribui raízes independentes, não subpastas de uma mesma raiz. Um disco lento ainda limita o ganho, e o limite automático é compartilhado por todas as raízes.
+- No motor indexado, a busca/filtro usa FTS5 no SQLite e materializa apenas os ramos correspondentes (até 5.000 correspondências). No modo memória, percorre a árvore inteira em segundo plano. A renderização é limitada para manter a interface fluida; em buscas muito amplas, o contador indica que há mais resultados e pede para refinar o termo.
+- Para volumes muito grandes, o motor indexado (`scan.engine=auto`, padrão) grava direto no SQLite, carrega a árvore sob demanda e consolida raízes por SQL. O modo `scan.engine=memory` mantém o caminho antigo, útil para diagnóstico ou para funcionalidades que dependem da árvore completa. O limite automático continua protegendo contra OOM; mesmo no motor indexado, o SQLite e o disco crescem com o número de nós, e a validação real de 2–5 milhões no `F:\` ainda precisa ser executada.
+- O índice é um arquivo SQLite separado. Medições do caminho em memória (Windows, Python 3.14, `synchronous=FULL` e checkpoint) indexaram ~110.111 nós em ~1,27 s e 46 MB, ~500.501 em ~9,84 s e 198 MB, e ~1.500.501 em ~38,5 s e 589 MB. A restauração em processo limpo levou ~0,26 s / ~2,47 s / ~7,54 s, com working set de ~81 MB / ~217 MB / ~564 MB. No motor indexado, 100.000 arquivos reais em 100 pastas foram varridos e gravados em ~3,0 s, com pico de ~52 MB; a restauração lazy levou ~0,07 s. Um índice sintético de 1.500.000 nós foi restaurado em modo lazy em ~0,71 s, acrescentando ~1,2 MB ao working set. O tempo e o tamanho variam com o disco, o cache e a versão do SQLite.
 - O shell pode receber novas páginas sem alterações na janela principal.
 
 ---

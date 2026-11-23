@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint, QSize, Qt
+from PySide6.QtCore import QPoint, QSize, Qt, QTimer
 from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPen
 from PySide6.QtWidgets import (
     QDialog,
@@ -43,6 +43,7 @@ class _DialogHeader(QFrame):
         lay.addLayout(texts, 1)
         close = IconButton("close", "Fechar", self, 17, 30, "danger")
         close.clicked.connect(dialog.reject)
+        self.close_btn = close
         lay.addWidget(close)
 
     def mousePressEvent(self, event) -> None:  # noqa: N802
@@ -206,6 +207,16 @@ class SheetDialog(QDialog):
             self.move(x, y)
         self.raise_()
         self.activateWindow()
+        QTimer.singleShot(0, self._focus_initial)
+
+    def _focus_initial(self) -> None:
+        """Evita que o botão de fechar do cabeçalho receba o foco inicial."""
+        for child in self.body_host.findChildren(QWidget):
+            if not child.isVisibleTo(self) or not child.isEnabled():
+                continue
+            if child.focusPolicy() & Qt.TabFocus:
+                child.setFocus(Qt.TabFocusReason)
+                return
 
 
 
