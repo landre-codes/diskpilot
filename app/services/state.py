@@ -27,7 +27,7 @@ from appshell.utils import (
     resolve_network_path,
 )
 from .index_store import IndexTask, SearchIndex, is_managed_index
-from .limits import DEFAULT_ENTRIES, MAX_ENTRIES, estimate_max_entries
+from .limits import DEFAULT_ENTRIES, MAX_ENTRIES, MIN_ENTRIES, estimate_max_entries
 from .model import ScanProgress, ScanResult, ScanWarning, Suggestion
 from .scanner import ScanCancelled, scan_paths
 from .suggestions import build_suggestions
@@ -431,7 +431,41 @@ class AppState(QObject):
             if isinstance(item, dict) and item.get("path")
         }
         result_roots = {path_key(root.path) for root in result.roots}
-        return bool(result_roots) and summary_roots == result_roots
+        if not result_roots or summary_roots != result_roots:
+            return False
+        stored_index = str(summary.get("index_path", "") or "")
+        result_index = str(getattr(result, "index_path", "") or "")
+        if stored_index:
+            if not result_index:
+                return False
+            if self._path_identity(stored_index) != self._path_identity(
+                result_index
+            ):
+                return False
+            try:
+                stored_entries = int(summary.get("index_entries", 0) or 0)
+            except (TypeError, ValueError):
+                return False
+            index = getattr(result, "index", None)
+            if (
+                stored_entries
+                and index is not None
+                and index.stats.rows != stored_entries
+            ):
+                return False
+        for key, value in (
+            ("total_size", result.total_size),
+            ("total_files", result.total_files),
+            ("total_dirs", result.total_dirs),
+        ):
+            if key not in summary:
+                continue
+            try:
+                if int(summary[key]) != int(value):
+                    return False
+            except (TypeError, ValueError):
+                return False
+        return True
 
     def _on_restored(self, generation: int, result: ScanResult | None) -> None:
         if (
@@ -683,11 +717,34 @@ class AppState(QObject):
             try:
                 stream_index = SearchIndex.create(self.index_dir)
             except Exception:
-                logger.exception(
-                    "falha ao preparar o índice; usando o motor em memória"
+                allow_fallback = bool(
+                    self.config.get("scan.allow_memory_fallback", False)
                 )
-                stream_index = None
+                if not allow_fallback:
+                    logger.exception(
+                        "falha ao preparar o índice; análise cancelada para "
+                        "evitar varredura em RAM"
+                    )
+                    self.index_building = False
+                    self._building_index_path = None
+                    self._pending_index = None
+                    self.last_error = (
+                        "não foi possível criar o índice de busca; a análise "
+                        "não foi iniciada para evitar consumo excessivo de "
+                        "memória. Verifique espaço/permissões e tente novamente."
+                    )
+                    self.scanFailed.emit(self.last_error)
+                    return
+                logger.exception(
+                    "falha ao preparar o índice; fallback explícito para RAM"
+                )
+                max_entries = min(max_entries, MIN_ENTRIES)
+                merge = False
                 merge_base_index = None
+                scan_roots = list(self.roots)
+                stream_index = None
+                self._scan_budget_total = max_entries
+                self._current_limit_entries = max_entries
         self._pending_index = stream_index
         self.index_building = stream_index is not None
         self._building_index_path = (
@@ -896,10 +953,21 @@ class AppState(QObject):
             "scan.index_verified_at": 0,
         }
         if not self._save_index_config(values):
-            logger.warning(
-                "análise indexada concluída, mas as referências não foram "
-                "publicadas; o índice continua disponível nesta sessão"
+            logger.error(
+                "análise indexada concluída, mas não foi possível publicar "
+                "as referências do índice; o snapshot anterior foi mantido"
             )
+            self.index_building = False
+            self._building_index_path = None
+            self._pending_index = None
+            if index is not self.search_index:
+                index.delete(managed_dir=self.index_dir)
+            self.last_error = (
+                "análise não persistida: falha ao publicar a configuração "
+                "do índice; o snapshot anterior foi preservado"
+            )
+            self.scanFailed.emit(self.last_error)
+            return
         self.search_index = index
         self.index_building = False
         self._building_index_path = None
@@ -1325,6 +1393,12 @@ class AppState(QObject):
                 _suggestion_payload(suggestion)
                 for suggestion in result.suggestions
             ],
+            "index_path": str(getattr(result, "index_path", "") or ""),
+            "index_entries": (
+                int(result.index.stats.rows)
+                if getattr(result, "index", None) is not None
+                else 0
+            ),
             "warnings": [
                 {
                     "operation": warning.operation,
@@ -1370,6 +1444,14 @@ class AppState(QObject):
                     _suggestion_payload(suggestion)
                     for suggestion in self.last_result.suggestions
                 ],
+                "index_path": str(
+                    getattr(self.last_result, "index_path", "") or ""
+                ),
+                "index_entries": (
+                    int(self.last_result.index.stats.rows)
+                    if getattr(self.last_result, "index", None) is not None
+                    else 0
+                ),
                 "warnings": [
                     {
                         "operation": warning.operation,

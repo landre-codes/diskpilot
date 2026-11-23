@@ -228,7 +228,7 @@ São persistidos:
 - pastas selecionadas;
 - resumo da última análise (tamanhos, contagens, data e as sugestões completas para o dashboard e a página de recomendações);
 - o índice SQLite da última análise (`scan.index_path`), o snapshot anterior para rollback (`scan.index_previous_path`) e as raízes efetivamente persistidas (`scan.indexed_roots`);
-- o motor de análise (`scan.engine`: `auto`/`stream`/`memory`), o limite manual opcional (`scan.max_entries`), a retenção do índice anterior (`scan.index_previous_days`) e a quota (`scan.index_max_gb`).
+- o motor de análise (`scan.engine`: `auto`/`stream`/`memory`), o limite manual opcional (`scan.max_entries`), a retenção do índice anterior (`scan.index_previous_days`) e a quota (`scan.index_max_gb`). O fallback para memória em falha do SQLite é controlado por `scan.allow_memory_fallback` e fica **desativado por padrão**; quando ativado, o orçamento é reduzido para o piso de 250 mil entradas.
 
 Ao abrir o app, o índice ativo é carregado em segundo plano. No motor indexado, o `ScanResult` é montado apenas com as raízes e os totais; os filhos são consultados no SQLite quando a pasta é expandida, então a árvore, o Top 100, a exportação e a busca voltam sem reexecutar a varredura e sem reconstruir milhões de nós em RAM. As sugestões persistidas no resumo são reutilizadas no restore quando a data e as raízes coincidem, evitando recalcular todos os arquivos; se não houver resumo compatível, o cálculo é refeito. O modo memória reconstrói o `ScanResult` completo. Se o índice ativo estiver ausente ou inválido, o app tenta o snapshot anterior e só então limpa a referência. O banco inválido não é apagado imediatamente: ele permanece disponível para inspeção e pode ser removido pelo GC depois da carência.
 

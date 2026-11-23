@@ -327,6 +327,82 @@ def test_corrupt_persisted_index_is_unpublished_without_deletion(
     state.shutdown()
 
 
+def test_stream_publish_failure_preserves_previous_snapshot(
+    qapp, tmp_path: Path, monkeypatch
+) -> None:
+    config = AppConfig(tmp_path / "config")
+    state = AppState(config)
+    old_root = tmp_path / "antiga"
+    new_root = tmp_path / "nova"
+    old_root.mkdir()
+    new_root.mkdir()
+    index_dir = config.path.parent / "index"
+    old = SearchIndex.create(index_dir)
+    old_result = _index_result(old_root)
+    old.write(old_result)
+    config.set("scan.index_path", str(old.path), save=False)
+    config.set("scan.indexed_roots", [str(old_root)], save=False)
+    config.set(
+        "scan.summary",
+        {"started_at": 1.0, "roots": [{"path": str(old_root)}]},
+        save=False,
+    )
+    config.save()
+    state.search_index = old
+    state.last_result = old_result
+    new = SearchIndex.create(index_dir)
+    new_result = _index_result(new_root)
+    new_result.index = new
+    new_result.index_path = str(new.path)
+    new.write(new_result)
+    failed: list[str] = []
+    finished: list[object] = []
+    ready: list[object] = []
+    state.scanFailed.connect(failed.append)
+    state.scanFinished.connect(finished.append)
+    state.searchIndexReady.connect(ready.append)
+    monkeypatch.setattr(
+        state, "_save_index_config", lambda _values: False
+    )
+
+    state._publish_stream_result(new_result)
+
+    assert state.search_index is old
+    assert state.last_result is old_result
+    assert finished == []
+    assert ready == []
+    assert failed and "não persistida" in failed[0]
+    assert old.path.exists()
+    assert not new.path.exists()
+    state.shutdown()
+    old.delete()
+
+
+def test_stream_index_failure_does_not_start_memory_scan(
+    qapp, tmp_path: Path, monkeypatch
+) -> None:
+    config = AppConfig(tmp_path / "config")
+    state = AppState(config)
+    state.roots = [str(tmp_path)]
+    failed: list[str] = []
+    state.scanFailed.connect(failed.append)
+
+    def fail_create(_base):
+        raise OSError("disco cheio simulado")
+
+    monkeypatch.setattr(
+        SearchIndex, "create", staticmethod(fail_create)
+    )
+
+    state.start_scan()
+
+    assert failed
+    assert "não foi possível criar o índice" in failed[0]
+    assert state.is_scanning is False
+    assert state._task is None
+    state.shutdown()
+
+
 def test_state_builds_search_index_in_background(
     qapp, qtbot, tmp_path: Path
 ) -> None:
