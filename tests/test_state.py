@@ -71,32 +71,50 @@ def test_adding_root_merges_previous_result(qapp, qtbot, tmp_path: Path) -> None
     state.shutdown()
 
 
-def test_summary_persists_suggestions_across_restart(tmp_path: Path) -> None:
+def test_summary_persists_suggestions_in_index_across_restart(
+    qapp, qtbot, tmp_path: Path
+) -> None:
     config = AppConfig(tmp_path / "config")
     state = AppState(config)
-    result = ScanResult(
-        total_size=1234,
-        total_files=2,
-        total_dirs=1,
-        suggestions=[
-            Suggestion(
-                key="caches",
-                title="Caches regeneráveis",
-                description="Pastas de cache que podem ser recriadas.",
-                savings=1234,
-                count=2,
-                confidence="safe",
-                icon="broom",
-                note="Revise antes de remover.",
-                paths=["C:/dados/cache-a", "C:/dados/cache-b"],
-            )
-        ],
-    )
-    state._store_summary(result)
+    root = tmp_path / "dados"
+    root.mkdir()
+    result = _index_result(root)
+    result.started_at = 1234.0
+    result.suggestions = [
+        Suggestion(
+            key="caches",
+            title="Caches regeneráveis",
+            description="Pastas de cache que podem ser recriadas.",
+            savings=1234,
+            count=2,
+            confidence="safe",
+            icon="broom",
+            note="Revise antes de remover.",
+            paths=["C:/dados/cache-a", "C:/dados/cache-b"],
+        )
+    ]
+    index = SearchIndex.create(config.path.parent / "index")
+    result.index = index
+    result.index_path = str(index.path)
+    index.write(result)
+
+    state._publish_stream_result(result)
+
+    stored = index.load_summary()
+    assert stored is not None
+    assert stored["suggestions"][0]["paths"] == [
+        "C:/dados/cache-a",
+        "C:/dados/cache-b",
+    ]
+    persisted = config.get("scan.summary")
+    assert "suggestions" not in persisted
+    assert "top_dirs" not in persisted
+    assert persisted["suggestion_count"] == 1
     state.shutdown()
 
     restored = AppState(config)
     try:
+        qtbot.waitUntil(lambda: restored.last_result is not None, timeout=5000)
         suggestions = restored.suggestions
         assert len(suggestions) == 1
         assert suggestions[0].key == "caches"
@@ -105,6 +123,59 @@ def test_summary_persists_suggestions_across_restart(tmp_path: Path) -> None:
         assert restored.summary["suggestion_count"] == 1
     finally:
         restored.shutdown()
+
+
+def test_legacy_config_summary_restores_and_is_migrated(
+    qapp, qtbot, tmp_path: Path
+) -> None:
+    config = AppConfig(tmp_path / "config")
+    root = tmp_path / "dados"
+    root.mkdir()
+    result = _index_result(root)
+    result.started_at = 1234.0
+    index = SearchIndex.create(config.path.parent / "index")
+    index.write(result)
+    config.set("scan.index_path", str(index.path), save=False)
+    config.set("scan.indexed_roots", [str(root)], save=False)
+    config.set(
+        "scan.summary",
+        {
+            "total_size": result.total_size,
+            "total_files": result.total_files,
+            "total_dirs": result.total_dirs,
+            "started_at": result.started_at,
+            "roots": [{"path": str(root)}],
+            "index_path": str(index.path),
+            "index_entries": 2,
+            "suggestion_count": 1,
+            "suggestions": [
+                {
+                    "key": "caches",
+                    "title": "Caches regeneráveis",
+                    "description": "Pastas de cache.",
+                    "savings": 99,
+                    "count": 1,
+                    "confidence": "safe",
+                    "icon": "broom",
+                    "note": "Revise.",
+                    "paths": ["C:/dados/cache-legado"],
+                }
+            ],
+        },
+        save=True,
+    )
+
+    state = AppState(config)
+    try:
+        qtbot.waitUntil(lambda: state.last_result is not None, timeout=5000)
+        suggestions = state.suggestions
+        assert [suggestion.key for suggestion in suggestions] == ["caches"]
+        assert suggestions[0].paths == ["C:/dados/cache-legado"]
+        assert index.load_summary() is not None
+        persisted = config.get("scan.summary")
+        assert "suggestions" not in persisted
+    finally:
+        state.shutdown()
 
 
 def test_merge_results_preserves_warning_categories() -> None:
@@ -376,6 +447,81 @@ def test_stream_publish_failure_preserves_previous_snapshot(
     assert not new.path.exists()
     state.shutdown()
     old.delete()
+
+
+def test_stream_summary_failure_preserves_previous_snapshot(
+    qapp, tmp_path: Path, monkeypatch
+) -> None:
+    config = AppConfig(tmp_path / "config")
+    state = AppState(config)
+    old_root = tmp_path / "antiga"
+    new_root = tmp_path / "nova"
+    old_root.mkdir()
+    new_root.mkdir()
+    index_dir = config.path.parent / "index"
+    old = SearchIndex.create(index_dir)
+    old_result = _index_result(old_root)
+    old.write(old_result)
+    config.set("scan.index_path", str(old.path), save=False)
+    config.set("scan.indexed_roots", [str(old_root)], save=False)
+    config.set("scan.summary", {"started_at": 1.0}, save=False)
+    config.save()
+    state.search_index = old
+    state.last_result = old_result
+    new = SearchIndex.create(index_dir)
+    new_result = _index_result(new_root)
+    new_result.index = new
+    new_result.index_path = str(new.path)
+    new.write(new_result)
+    failed: list[str] = []
+    finished: list[object] = []
+    ready: list[object] = []
+    state.scanFailed.connect(failed.append)
+    state.scanFinished.connect(finished.append)
+    state.searchIndexReady.connect(ready.append)
+    monkeypatch.setattr(
+        SearchIndex, "store_summary", lambda self, summary: False
+    )
+
+    state._publish_stream_result(new_result)
+
+    assert state.search_index is old
+    assert state.last_result is old_result
+    assert finished == []
+    assert ready == []
+    assert failed and "não persistida" in failed[0]
+    assert old.path.exists()
+    assert not new.path.exists()
+    state.shutdown()
+    old.delete()
+
+
+def test_save_index_config_rolls_back_summary(
+    qapp, tmp_path: Path, monkeypatch
+) -> None:
+    config = AppConfig(tmp_path / "config")
+    state = AppState(config)
+    previous = {"total_files": 1, "started_at": 10.0}
+    config.set("scan.summary", previous, save=True)
+    config.set("scan.index_path", "", save=True)
+
+    def fail_save() -> None:
+        raise OSError("disco cheio simulado")
+
+    monkeypatch.setattr(config, "save", fail_save)
+
+    assert (
+        state._save_index_config(
+            {
+                "scan.summary": {"total_files": 2, "started_at": 20.0},
+                "scan.index_path": "novo.sqlite",
+            }
+        )
+        is False
+    )
+    assert config.get("scan.summary") == previous
+    assert config.get("scan.index_path") == ""
+    state.shutdown()
 
 
 def test_stream_index_failure_does_not_start_memory_scan(
@@ -777,6 +923,12 @@ def test_memory_engine_keeps_full_tree_and_index(
     assert state.last_result.lazy is False
     assert state.last_result.roots[0].children_loaded is True
     assert state.last_result.roots[0].children[0].name == "a.bin"
+    index = state.search_index
+    assert index is not None
+    assert index.load_summary() is not None
+    persisted = config.get("scan.summary")
+    assert "suggestions" not in persisted
+    assert persisted["index_path"] == str(index.path)
     state.shutdown()
 
 

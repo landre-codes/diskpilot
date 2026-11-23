@@ -48,6 +48,16 @@ class AppConfig(JsonSettings):
             scan_cfg.pop("hash_duplicates", None)
         return loaded
 
+    def _sanitize_backup(self, data: dict[str, Any]) -> dict[str, Any]:
+        scan_cfg = data.get("scan")
+        summary = (
+            scan_cfg.get("summary") if isinstance(scan_cfg, dict) else None
+        )
+        if isinstance(summary, dict):
+            summary.pop("suggestions", None)
+            summary.pop("top_dirs", None)
+        return data
+
     @property
     def roots(self) -> list[str]:
         value = self.get("scan.roots", [])

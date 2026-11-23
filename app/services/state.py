@@ -81,6 +81,63 @@ def _suggestion_from_payload(payload: object) -> Suggestion | None:
     except (TypeError, ValueError):
         return None
 
+
+def _summary_payload(
+    result: ScanResult,
+    *,
+    include_paths: bool,
+    index_path: str = "",
+    index_entries: int = 0,
+) -> dict[str, Any]:
+    """Resumo do snapshot.
+
+    O resumo detalhado (com caminhos) fica na tabela ``meta`` do índice; a
+    configuração recebe apenas os agregados, sem ``suggestions``/``top_dirs``.
+    """
+    payload: dict[str, Any] = {
+        "total_size": result.total_size,
+        "total_files": result.total_files,
+        "total_dirs": result.total_dirs,
+        "errors": result.errors,
+        "elapsed": round(result.elapsed, 3),
+        "started_at": result.started_at,
+        "truncated": result.truncated,
+        "safe_savings": result.safe_savings,
+        "review_savings": result.review_savings,
+        "roots": [
+            {
+                "path": root.path,
+                "name": root.name,
+                "size": root.size,
+                "files": root.files,
+                "dirs": root.dirs,
+            }
+            for root in result.roots
+        ],
+        "suggestion_count": len(result.suggestions),
+        "index_path": str(index_path or ""),
+        "index_entries": int(index_entries or 0),
+        "warnings": [
+            {
+                "operation": warning.operation,
+                "category": warning.category,
+                "count": warning.count,
+            }
+            for warning in result.warnings
+        ],
+    }
+    if include_paths:
+        payload["top_dirs"] = [
+            {"path": node.path, "name": node.name, "size": node.size}
+            for node in result.largest_paths(6)
+        ]
+        payload["suggestions"] = [
+            _suggestion_payload(suggestion)
+            for suggestion in result.suggestions
+        ]
+    return payload
+
+
 INDEX_GC_AGE_SECONDS = 24 * 60 * 60
 
 
@@ -310,24 +367,9 @@ class AppState(QObject):
     def scan_engine(self) -> str:
         return self._scan_engine()
 
-    def _index_config_keys(self) -> tuple[str, ...]:
-        return (
-            "scan.index_path",
-            "scan.index_previous_path",
-            "scan.index_entries",
-            "scan.indexed_roots",
-            "scan.index_verified_at",
-        )
-
-    def _snapshot_index_config(self) -> dict[str, object]:
-        return {
-            key: self.config.get(key, None)
-            for key in self._index_config_keys()
-        }
-
     def _save_index_config(self, values: dict[str, object]) -> bool:
-        """Publica referências com rollback em memória se o save falhar."""
-        previous = self._snapshot_index_config()
+        """Publica referências e resumo com rollback em memória."""
+        previous = {key: self.config.get(key, None) for key in values}
         for key, value in values.items():
             self.config.set(key, value, save=False)
         try:
@@ -440,8 +482,14 @@ class AppState(QObject):
         )
         self._flush_pending_added()
 
-    def _stored_suggestions(self) -> list[Suggestion]:
-        stored = self.config.get("scan.summary", {})
+    def _stored_suggestions(
+        self, summary: object | None = None
+    ) -> list[Suggestion]:
+        stored = (
+            summary
+            if summary is not None
+            else self.config.get("scan.summary", {})
+        )
         if not isinstance(stored, dict):
             return []
         raw = stored.get("suggestions", [])
@@ -454,8 +502,9 @@ class AppState(QObject):
                 restored.append(suggestion)
         return restored
 
-    def _summary_matches_result(self, result: ScanResult) -> bool:
-        summary = self.config.get("scan.summary", {})
+    def _summary_matches_result(
+        self, summary: object, result: ScanResult
+    ) -> bool:
         if not isinstance(summary, dict):
             return False
         if not isinstance(summary.get("suggestions"), list):
@@ -529,8 +578,23 @@ class AppState(QObject):
             return
         self._restore_index = None
         self._restoring = False
-        if self._summary_matches_result(result):
-            result.suggestions = self._stored_suggestions()
+        index_summary: object | None = None
+        try:
+            index_summary = index.load_summary()
+        except Exception:
+            logger.exception("falha ao ler o resumo persistido no índice")
+        stored = index_summary
+        if stored is None:
+            legacy_summary = self.config.get("scan.summary", {})
+            if isinstance(legacy_summary, dict) and isinstance(
+                legacy_summary.get("suggestions"), list
+            ):
+                stored = legacy_summary
+        matched = stored is not None and self._summary_matches_result(
+            stored, result
+        )
+        if matched:
+            result.suggestions = self._stored_suggestions(stored)
             logger.info(
                 "sugestões restauradas do resumo: %s",
                 len(result.suggestions),
@@ -541,6 +605,18 @@ class AppState(QObject):
             except Exception:
                 logger.exception("falha ao recalcular sugestões restauradas")
                 result.suggestions = []
+        if index_summary is None or not matched:
+            try:
+                index.store_summary(
+                    _summary_payload(
+                        result,
+                        include_paths=True,
+                        index_path=str(index.path),
+                        index_entries=index.stats.rows,
+                    )
+                )
+            except Exception:
+                logger.exception("falha ao atualizar o resumo no índice")
         self.search_index = index
         from_previous = self._path_identity(index.path) != self._path_identity(
             self._restore_active_path
@@ -553,6 +629,13 @@ class AppState(QObject):
                 or [root.path for root in result.roots]
             ),
             "scan.index_verified_at": time.time(),
+            "scan.summary": _summary_payload(
+                result,
+                include_paths=False,
+                index_path=str(index.path),
+                index_entries=index.stats.rows,
+            ),
+            "scan.last_scan": time.time(),
         }
         if from_previous:
             values["scan.index_previous_path"] = ""
@@ -1016,6 +1099,55 @@ class AppState(QObject):
         if index is not None and index is not self.search_index:
             index.delete(managed_dir=self.index_dir)
 
+    def _summary_publication_values(
+        self,
+        result: ScanResult,
+        index: SearchIndex,
+        previous: str,
+    ) -> dict[str, object]:
+        """Publica o resumo detalhado no índice e devolve os valores da config."""
+        stored = index.store_summary(
+            _summary_payload(
+                result,
+                include_paths=True,
+                index_path=str(index.path),
+                index_entries=index.stats.rows,
+            )
+        )
+        if not stored:
+            raise OSError("falha ao gravar o resumo no índice")
+        return {
+            "scan.index_path": str(index.path),
+            "scan.index_previous_path": previous,
+            "scan.index_entries": index.stats.rows,
+            "scan.indexed_roots": list(
+                index.snapshot_roots or [root.path for root in result.roots]
+            ),
+            "scan.index_verified_at": 0,
+            "scan.summary": _summary_payload(
+                result,
+                include_paths=False,
+                index_path=str(index.path),
+                index_entries=index.stats.rows,
+            ),
+            "scan.last_scan": time.time(),
+        }
+
+    def _abort_stream_publication(
+        self, index: SearchIndex, message: str
+    ) -> None:
+        logger.error(message)
+        self.index_building = False
+        self._building_index_path = None
+        self._pending_index = None
+        if index is not self.search_index:
+            index.delete(managed_dir=self.index_dir)
+        self.last_error = (
+            "análise não persistida: falha ao publicar o índice e o resumo; "
+            "o snapshot anterior foi preservado"
+        )
+        self.scanFailed.emit(self.last_error)
+
     def _publish_stream_result(self, result: ScanResult) -> None:
         index = result.index
         if index is None:
@@ -1028,28 +1160,21 @@ class AppState(QObject):
         new_previous = (
             old_path if old_path and old_path != str(index.path) else previous
         )
-        values: dict[str, object] = {
-            "scan.index_path": str(index.path),
-            "scan.index_previous_path": new_previous,
-            "scan.index_entries": index.stats.rows,
-            "scan.indexed_roots": [root.path for root in result.roots],
-            "scan.index_verified_at": 0,
-        }
+        try:
+            values = self._summary_publication_values(
+                result, index, new_previous
+            )
+        except Exception:
+            self._abort_stream_publication(
+                index, "falha ao preparar o resumo do novo índice"
+            )
+            return
         if not self._save_index_config(values):
-            logger.error(
+            self._abort_stream_publication(
+                index,
                 "análise indexada concluída, mas não foi possível publicar "
-                "as referências do índice; o snapshot anterior foi mantido"
+                "as referências do índice; o snapshot anterior foi mantido",
             )
-            self.index_building = False
-            self._building_index_path = None
-            self._pending_index = None
-            if index is not self.search_index:
-                index.delete(managed_dir=self.index_dir)
-            self.last_error = (
-                "análise não persistida: falha ao publicar a configuração "
-                "do índice; o snapshot anterior foi preservado"
-            )
-            self.scanFailed.emit(self.last_error)
             return
         self.search_index = index
         self.index_building = False
@@ -1057,10 +1182,6 @@ class AppState(QObject):
         self._pending_index = None
         clear_author_cache()
         self.last_result = result
-        try:
-            self._store_summary(result)
-        except Exception:
-            logger.exception("falha ao persistir o resumo da análise")
         logger.info(
             "scan done (stream) files=%s dirs=%s size=%s elapsed_s=%.3f "
             "suggestions=%s truncated=%s",
@@ -1162,13 +1283,31 @@ class AppState(QObject):
         expected_roots = list(index.snapshot_roots)
         if not expected_roots and self.last_result is not None:
             expected_roots = [root.path for root in self.last_result.roots]
-        values: dict[str, object] = {
-            "scan.index_path": str(index.path),
-            "scan.index_previous_path": new_previous,
-            "scan.index_entries": index.stats.rows,
-            "scan.indexed_roots": expected_roots,
-            "scan.index_verified_at": 0,
-        }
+        result = self.last_result
+        if result is not None:
+            try:
+                values = self._summary_publication_values(
+                    result, index, new_previous
+                )
+            except Exception:
+                logger.exception("falha ao preparar o resumo do índice")
+                self.index_building = False
+                self._building_index_path = None
+                self.search_index = None
+                index.delete(managed_dir=self.index_dir)
+                self.searchIndexFailed.emit(
+                    "falha ao gravar o resumo no índice de busca"
+                )
+                self._emit_pending_roots()
+                return
+        else:
+            values = {
+                "scan.index_path": str(index.path),
+                "scan.index_previous_path": new_previous,
+                "scan.index_entries": index.stats.rows,
+                "scan.indexed_roots": expected_roots,
+                "scan.index_verified_at": 0,
+            }
         if not self._save_index_config(values):
             self.index_building = False
             self._building_index_path = None
@@ -1447,50 +1586,17 @@ class AppState(QObject):
         self.scanFailed.emit(message)
 
     def _store_summary(self, result: ScanResult) -> None:
-        summary = {
-            "total_size": result.total_size,
-            "total_files": result.total_files,
-            "total_dirs": result.total_dirs,
-            "errors": result.errors,
-            "elapsed": round(result.elapsed, 3),
-            "started_at": result.started_at,
-            "truncated": result.truncated,
-            "safe_savings": result.safe_savings,
-            "review_savings": result.review_savings,
-            "roots": [
-                {
-                    "path": root.path,
-                    "name": root.name,
-                    "size": root.size,
-                    "files": root.files,
-                    "dirs": root.dirs,
-                }
-                for root in result.roots
-            ],
-            "top_dirs": [
-                {"path": node.path, "name": node.name, "size": node.size}
-                for node in result.largest_paths(6)
-            ],
-            "suggestion_count": len(result.suggestions),
-            "suggestions": [
-                _suggestion_payload(suggestion)
-                for suggestion in result.suggestions
-            ],
-            "index_path": str(getattr(result, "index_path", "") or ""),
-            "index_entries": (
+        """Persiste só os agregados; o detalhe com caminhos fica no índice."""
+        summary = _summary_payload(
+            result,
+            include_paths=False,
+            index_path=str(getattr(result, "index_path", "") or ""),
+            index_entries=(
                 int(result.index.stats.rows)
                 if getattr(result, "index", None) is not None
                 else 0
             ),
-            "warnings": [
-                {
-                    "operation": warning.operation,
-                    "category": warning.category,
-                    "count": warning.count,
-                }
-                for warning in result.warnings
-            ],
-        }
+        )
         self.config.set("scan.last_scan", time.time(), save=False)
         self.config.set("scan.summary", summary, save=True)
 
@@ -1498,52 +1604,17 @@ class AppState(QObject):
     @property
     def summary(self) -> dict[str, Any]:
         if self.last_result is not None:
-            return {
-                "total_size": self.last_result.total_size,
-                "total_files": self.last_result.total_files,
-                "total_dirs": self.last_result.total_dirs,
-                "errors": self.last_result.errors,
-                "elapsed": self.last_result.elapsed,
-                "started_at": self.last_result.started_at,
-                "truncated": self.last_result.truncated,
-                "safe_savings": self.last_result.safe_savings,
-                "review_savings": self.last_result.review_savings,
-                "roots": [
-                    {
-                        "path": root.path,
-                        "name": root.name,
-                        "size": root.size,
-                        "files": root.files,
-                        "dirs": root.dirs,
-                    }
-                    for root in self.last_result.roots
-                ],
-                "top_dirs": [
-                    {"path": node.path, "name": node.name, "size": node.size}
-                    for node in self.last_result.largest_paths(6)
-                ],
-                "suggestion_count": len(self.last_result.suggestions),
-                "suggestions": [
-                    _suggestion_payload(suggestion)
-                    for suggestion in self.last_result.suggestions
-                ],
-                "index_path": str(
+            index = getattr(self.last_result, "index", None)
+            return _summary_payload(
+                self.last_result,
+                include_paths=True,
+                index_path=str(
                     getattr(self.last_result, "index_path", "") or ""
                 ),
-                "index_entries": (
-                    int(self.last_result.index.stats.rows)
-                    if getattr(self.last_result, "index", None) is not None
-                    else 0
+                index_entries=(
+                    int(index.stats.rows) if index is not None else 0
                 ),
-                "warnings": [
-                    {
-                        "operation": warning.operation,
-                        "category": warning.category,
-                        "count": warning.count,
-                    }
-                    for warning in self.last_result.warnings
-                ],
-            }
+            )
         stored = self.config.get("scan.summary", {})
         return stored if isinstance(stored, dict) else {}
 
@@ -1551,18 +1622,15 @@ class AppState(QObject):
     def suggestions(self) -> list[Suggestion]:
         if self.last_result is not None:
             return self.last_result.suggestions
-        stored = self.config.get("scan.summary", {})
-        if not isinstance(stored, dict):
-            return []
-        raw = stored.get("suggestions", [])
-        if not isinstance(raw, list):
-            return []
-        restored: list[Suggestion] = []
-        for item in raw:
-            suggestion = _suggestion_from_payload(item)
-            if suggestion is not None:
-                restored.append(suggestion)
-        return restored
+        index = self.search_index
+        if index is not None:
+            try:
+                restored = self._stored_suggestions(index.load_summary())
+            except Exception:
+                restored = []
+            if restored:
+                return restored
+        return self._stored_suggestions()
 
     @property
     def busy(self) -> bool:

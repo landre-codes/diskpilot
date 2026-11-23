@@ -117,6 +117,47 @@ def test_search_index_load_result_roundtrip(tmp_path: Path) -> None:
         index.delete()
 
 
+def test_search_index_summary_roundtrip(tmp_path: Path) -> None:
+    result = _result()
+    index = SearchIndex.create(tmp_path / "index")
+    try:
+        index.write(result)
+        assert index.load_summary() is None
+
+        summary = {
+            "started_at": 1234.0,
+            "suggestions": [{"key": "caches", "paths": ["C:/cache"]}],
+        }
+        assert index.store_summary(summary) is True
+        assert index.load_summary() == summary
+
+        index.delete()
+        assert index.load_summary() is None
+    finally:
+        index.delete()
+
+
+def test_search_index_ignores_invalid_summary(tmp_path: Path) -> None:
+    result = _result()
+    index = SearchIndex.create(tmp_path / "index")
+    try:
+        index.write(result)
+        conn = sqlite3.connect(index.path)
+        try:
+            conn.execute(
+                "INSERT OR REPLACE INTO meta(key, value) "
+                "VALUES ('summary_json', ?)",
+                ("{invalido",),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        assert index.load_summary() is None
+    finally:
+        index.delete()
+
+
 def _flat_result(root_path: Path, names: list[str]) -> ScanResult:
     root = Node(path=str(root_path), name=root_path.name, is_dir=True, dirs=1)
     root.children = [

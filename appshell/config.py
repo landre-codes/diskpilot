@@ -157,6 +157,10 @@ class JsonSettings:
             self.data["user"]["name"] = logical_user()
             return False
 
+    def _sanitize_backup(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Permite à aplicação remover dados sensíveis da cópia de segurança."""
+        return data
+
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_suffix(".json.tmp")
@@ -167,7 +171,13 @@ class JsonSettings:
                 try:
                     current = json.loads(self.path.read_text(encoding="utf-8"))
                     if isinstance(current, dict):
-                        shutil.copy2(self.path, good)
+                        backup = self._sanitize_backup(
+                            copy.deepcopy(current)
+                        )
+                        good.write_text(
+                            json.dumps(backup, ensure_ascii=False, indent=2),
+                            encoding="utf-8",
+                        )
                 except Exception:
                     pass
             tmp.write_text(payload, encoding="utf-8")

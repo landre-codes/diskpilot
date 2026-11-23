@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import time
 from pathlib import Path
@@ -62,6 +63,39 @@ def test_save_keeps_last_good_config(tmp_path: Path) -> None:
     good = config_dir / "config.good.json"
     assert good.is_file()
     assert '"theme": "dark"' in good.read_text(encoding="utf-8")
+
+
+def test_good_config_drops_detailed_summary_paths(tmp_path: Path) -> None:
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "config.json").write_text(
+        json.dumps(
+            {
+                "theme": "dark",
+                "scan": {
+                    "summary": {
+                        "started_at": 1.0,
+                        "suggestions": [
+                            {"key": "caches", "paths": ["C:/segredo"]}
+                        ],
+                        "top_dirs": [{"path": "C:/segredo"}],
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    config = AppConfig(config_dir)
+    config.set("theme", "light")
+
+    stored = json.loads(
+        (config_dir / "config.good.json").read_text(encoding="utf-8")
+    )
+    summary = stored["scan"]["summary"]
+    assert "suggestions" not in summary
+    assert "top_dirs" not in summary
+    assert stored["theme"] == "dark"
 
 
 def test_cleanup_stale_temp_dirs_only_removes_old_prefixes(

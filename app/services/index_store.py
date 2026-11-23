@@ -1,9 +1,10 @@
 """Índice SQLite opcional para buscas em análises grandes.
 
 O índice não substitui a árvore em memória nesta fase: ele funciona como um
-sidecar para consultas de nome. A árvore e o resumo continuam no ``ScanResult``;
-quando o volume cresce, a busca deixa de percorrer ``Node.name`` em Python e
-passa a usar o FTS5 do SQLite.
+sidecar para consultas de nome. A árvore continua no ``ScanResult`` e o resumo
+detalhado é persistido na tabela ``meta`` para restaurar sugestões sem
+recalcular todos os arquivos. Quando o volume cresce, a busca deixa de
+percorrer ``Node.name`` em Python e passa a usar o FTS5 do SQLite.
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ import unicodedata
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Iterable
+from typing import Any, Callable, Iterable
 
 from appshell.tasks import Task, TaskCancelled
 from appshell.utils import normalize_path, path_key
@@ -1237,6 +1238,60 @@ class SearchIndex:
                     except sqlite3.Error:
                         pass
                 conn.close()
+
+    def store_summary(self, summary: dict[str, Any]) -> bool:
+        """Grava o resumo detalhado na metadata do índice concluído."""
+        if not isinstance(summary, dict) or not summary:
+            return False
+        if not self.path.is_file():
+            return False
+        payload = json.dumps(summary, ensure_ascii=False)
+        conn = sqlite3.connect(self.path)
+        try:
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS meta ("
+                "key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+            )
+            conn.execute(
+                "INSERT OR REPLACE INTO meta(key, value) "
+                "VALUES ('summary_json', ?)",
+                (payload,),
+            )
+            conn.commit()
+            try:
+                conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            except sqlite3.Error as exc:
+                logger.warning(
+                    "checkpoint do resumo não concluído: %s", exc
+                )
+        except sqlite3.Error:
+            logger.exception("falha ao gravar o resumo no índice")
+            return False
+        finally:
+            conn.close()
+        return True
+
+    def load_summary(self) -> dict[str, Any] | None:
+        """Lê o resumo detalhado persistido na metadata, se existir."""
+        if not self.path.is_file():
+            return None
+        conn = sqlite3.connect(self.path)
+        try:
+            row = conn.execute(
+                "SELECT value FROM meta WHERE key = 'summary_json'"
+            ).fetchone()
+        except sqlite3.Error:
+            return None
+        finally:
+            conn.close()
+        if not row:
+            return None
+        try:
+            payload = json.loads(str(row[0]))
+        except (TypeError, ValueError):
+            logger.warning("resumo persistido no índice é inválido")
+            return None
+        return payload if isinstance(payload, dict) else None
 
     def _row_to_node(self, row: tuple) -> Node:
         return Node(
