@@ -116,6 +116,12 @@ Na IDE, basta configurar/executar `main.py`. O `run.py` continua disponível com
 iniciar.cmd
 ```
 
+> Não execute arquivos internos como `app/features/settings.py` diretamente.
+> Imports como `from .. import APP_NAME` exigem que o módulo seja importado como
+> parte do pacote; rodar o arquivo como script gera
+> `attempted relative import with no known parent package`.
+> Mantenha o *working directory* da IDE na raiz do projeto.
+
 > Se a IDE estiver usando um ambiente virtual próprio, instale as dependências no interpretador selecionado: `python -m pip install -r requirements.txt`.
 
 ### Testes automatizados
