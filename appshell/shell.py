@@ -125,6 +125,9 @@ class ShellWindow(QWidget):
         drop_handler: Callable[[list[str]], None] | None = None,
     ) -> None:
         super().__init__(None, self.WINDOW_FLAGS)
+        # A janela só é revelada depois do primeiro frame montado. Isso evita
+        # que o handle nativo apareça vazio ou com moldura transitória.
+        self.setWindowOpacity(0.0)
         self.config = config
         self.theme = theme
         self.page_specs = page_specs
@@ -170,6 +173,10 @@ class ShellWindow(QWidget):
         self._geometry_ticks = 0
         self._moving_guard = False
         self._toast: QWidget | None = None
+        self._reveal_timer = QTimer(self)
+        self._reveal_timer.setSingleShot(True)
+        self._reveal_timer.setInterval(80)
+        self._reveal_timer.timeout.connect(self._reveal_first_frame)
         self._geometry_timer = QTimer(self)
         self._geometry_timer.setInterval(120)
         self._geometry_timer.timeout.connect(self._watch_geometry)
@@ -651,6 +658,10 @@ class ShellWindow(QWidget):
             prewarm = getattr(self.theme, "prewarm", None)
             if callable(prewarm):
                 QTimer.singleShot(2500, prewarm)
+            self._reveal_timer.start()
+
+    def _reveal_first_frame(self) -> None:
+        self.setWindowOpacity(1.0)
 
     def _focus_window(self) -> None:
         """Evita que o primeiro IconButton da barra de título nasça focado."""

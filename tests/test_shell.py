@@ -52,6 +52,21 @@ def test_main_window_builds_and_navigates(qapp, qtbot, tmp_path: Path) -> None:
     window.close()
 
 
+def test_first_show_reveals_window(qapp, qtbot, tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    theme = init_theme(qapp, config)
+    pages = [
+        PageSpec("inicio", "Início", "Página inicial", "home", _SamplePage),
+    ]
+    window = MainWindow(config, theme, pages)
+    qtbot.addWidget(window)
+    initial = window.windowOpacity()
+    window.show()
+    if initial < 1.0:
+        qtbot.waitUntil(lambda: window.windowOpacity() >= 0.99, timeout=2000)
+    window.close()
+
+
 def test_smooth_minimize_fades_and_restores(qapp, qtbot, tmp_path: Path) -> None:
     config = _config(tmp_path)
     theme = init_theme(qapp, config)
