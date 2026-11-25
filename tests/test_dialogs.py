@@ -17,7 +17,7 @@ from app.widgets.dialogs import (
     TopItemsDialog,
     WarningsDialog,
 )
-from appshell.widgets.dialogs import SheetDialog
+from appshell.widgets.dialogs import ConfirmDialog, SheetDialog
 
 
 def _config(tmp_path: Path) -> AppConfig:
@@ -143,6 +143,28 @@ def test_sheet_dialog_focuses_body_not_close_button(
     dialog.show()
 
     qtbot.waitUntil(lambda: QApplication.focusWidget() is edit, timeout=2000)
+    assert dialog.header.close_btn.hasFocus() is False
+    dialog.close()
+
+
+def test_confirm_dialog_focuses_cancel_not_close(
+    qapp, qtbot, tmp_path: Path
+) -> None:
+    config = _config(tmp_path)
+    init_theme(qapp, config)
+    dialog = ConfirmDialog(
+        None,
+        "Limpar resultados da análise",
+        "O resumo e as recomendações serão apagados.",
+        "Limpar resultados",
+        danger=True,
+    )
+    qtbot.addWidget(dialog)
+    dialog.show()
+
+    qtbot.waitUntil(
+        lambda: dialog.cancel_button.hasFocus(), timeout=2000
+    )
     assert dialog.header.close_btn.hasFocus() is False
     dialog.close()
 

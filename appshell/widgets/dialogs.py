@@ -211,12 +211,17 @@ class SheetDialog(QDialog):
 
     def _focus_initial(self) -> None:
         """Evita que o botão de fechar do cabeçalho receba o foco inicial."""
-        for child in self.body_host.findChildren(QWidget):
-            if not child.isVisibleTo(self) or not child.isEnabled():
-                continue
-            if child.focusPolicy() & Qt.TabFocus:
-                child.setFocus(Qt.TabFocusReason)
-                return
+        hosts = [self.body_host]
+        footer = getattr(self, "_footer_frame", None)
+        if footer is not None:
+            hosts.append(footer)
+        for host in hosts:
+            for child in host.findChildren(QWidget):
+                if not child.isVisibleTo(self) or not child.isEnabled():
+                    continue
+                if child.focusPolicy() & Qt.TabFocus:
+                    child.setFocus(Qt.TabFocusReason)
+                    return
 
 
 
@@ -253,6 +258,7 @@ class ConfirmDialog(SheetDialog):
         self.body.addStretch(1)
         cancel = ActionButton("Cancelar", "", "ghost", self)
         cancel.clicked.connect(self.reject)
+        self.cancel_button = cancel
         self.footer.addStretch(1)
         self.footer.addWidget(cancel)
         confirm = ActionButton(
@@ -262,6 +268,7 @@ class ConfirmDialog(SheetDialog):
             self,
         )
         confirm.clicked.connect(self.accept)
+        self.confirm_button = confirm
         self.footer.addWidget(confirm)
 
 
