@@ -183,6 +183,7 @@ class DashboardPage(BasePage):
         self.state.resultsCleared.connect(self._refresh)
         self.state.scanCancelled.connect(self._refresh)
         self.state.scanFailed.connect(self._refresh)
+        self.state.rootRemovalFinished.connect(self._refresh)
         get_theme().changed.connect(lambda _key: self._refresh())
         self._refresh()
 

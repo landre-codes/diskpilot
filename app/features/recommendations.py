@@ -310,6 +310,7 @@ class RecommendationsPage(BasePage):
         self.state.scanCancelled.connect(self._rebuild)
         self.state.scanFailed.connect(self._rebuild)
         self.state.resultsCleared.connect(self._rebuild)
+        self.state.rootRemovalFinished.connect(self._rebuild)
         get_theme().changed.connect(lambda _key: self._rebuild())
         self._rebuild()
 

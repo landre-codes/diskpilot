@@ -216,12 +216,23 @@ class SheetDialog(QDialog):
         if footer is not None:
             hosts.append(footer)
         for host in hosts:
-            for child in host.findChildren(QWidget):
-                if not child.isVisibleTo(self) or not child.isEnabled():
-                    continue
-                if child.focusPolicy() & Qt.TabFocus:
-                    child.setFocus(Qt.TabFocusReason)
-                    return
+            candidates = [
+                child
+                for child in host.findChildren(QWidget)
+                if child.isVisibleTo(self)
+                and child.isEnabled()
+                and child.focusPolicy() & Qt.TabFocus
+            ]
+            if host is footer:
+                safe = [
+                    child
+                    for child in candidates
+                    if getattr(child, "_kind", "") != "danger"
+                ]
+                candidates = safe or candidates
+            if candidates:
+                candidates[0].setFocus(Qt.TabFocusReason)
+                return
 
 
 

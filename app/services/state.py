@@ -891,16 +891,17 @@ class AppState(QObject):
             return
         self._removing = False
         self._remove_cancel = None
-        self._remove_previous_roots = []
         if result is None or result.index is None:
             self._restore_roots_after_removal()
             self.rootRemovalFailed.emit(
                 "o snapshot restante não pôde ser restaurado"
             )
             return
+        self._remove_previous_roots = []
         index = result.index
         self.search_index = index
         self.last_result = result
+        self._persist_roots()
         previous = str(
             self.config.get("scan.index_previous_path", "") or ""
         )
@@ -1001,14 +1002,17 @@ class AppState(QObject):
         if len(new_roots) == len(self.roots):
             return
         self.roots = new_roots
-        self._persist_roots()
-        self.rootsChanged.emit()
         if not self.roots:
+            self._persist_roots()
+            self.rootsChanged.emit()
             self.cancel_scan()
             self.clear_results(persist=True)
             return
         if self._start_root_removal(path, previous_roots):
+            self.rootsChanged.emit()
             return
+        self._persist_roots()
+        self.rootsChanged.emit()
         if self._remove_root_incremental(path):
             return
         if autoscan:

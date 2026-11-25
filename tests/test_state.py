@@ -227,6 +227,30 @@ def test_remove_root_failure_restores_roots(
     state.shutdown()
 
 
+def test_root_removal_empty_result_restores_roots(
+    qapp, tmp_path: Path
+) -> None:
+    config = AppConfig(tmp_path / "config")
+    state = AppState(config)
+    first = str(tmp_path / "a")
+    second = str(tmp_path / "b")
+    state.roots = [second]
+    state._remove_previous_roots = [first, second]
+    state._remove_generation = 3
+    state._removing = True
+    state._remove_cancel = threading.Event()
+    failed: list[str] = []
+    state.rootRemovalFailed.connect(failed.append)
+
+    state._on_root_removal_finished(3, None)
+
+    assert failed
+    assert state.roots == [first, second]
+    assert config.get("scan.roots") == [first, second]
+    assert state._removing is False
+    state.shutdown()
+
+
 def test_removing_last_root_cancels_scan(qapp, tmp_path: Path) -> None:
     config = AppConfig(tmp_path / "config")
     state = AppState(config)

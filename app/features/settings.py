@@ -308,6 +308,7 @@ class SettingsPage(BasePage):
         self.state.scanStarted.connect(self._refresh_data)
         self.state.resultsCleared.connect(self._refresh_data)
         self.state.rootsChanged.connect(self._refresh_data)
+        self.state.rootRemovalFinished.connect(self._refresh_data)
         self.state.indexUsageChanged.connect(self._refresh_data)
         self.state.searchIndexReady.connect(self._refresh_data)
         self.state.searchIndexCleared.connect(self._refresh_data)
