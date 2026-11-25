@@ -171,12 +171,14 @@ class ShellWindow(QWidget):
         self._geometry_timer.setInterval(120)
         self._geometry_timer.timeout.connect(self._watch_geometry)
 
-        self.setWindowTitle(options.title)
-        if options.icon is not None:
-            self.setWindowIcon(options.icon)
+        # No Windows, título/ícone podem criar o handle nativo. Aplicamos o
+        # frameless antes disso para não exibir uma moldura nativa por um frame.
         self.setWindowFlags(
             Qt.Window | Qt.FramelessWindowHint | Qt.NoDropShadowWindowHint
         )
+        self.setWindowTitle(options.title)
+        if options.icon is not None:
+            self.setWindowIcon(options.icon)
         accepts_drops = bool(
             options.accept_drops and drop_filter is not None and drop_handler is not None
         )

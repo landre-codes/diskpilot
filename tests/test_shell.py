@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QDialog, QLabel
 
 from app import APP_AUTHOR, APP_COPYRIGHT
@@ -42,6 +43,8 @@ def test_main_window_builds_and_navigates(qapp, qtbot, tmp_path: Path) -> None:
     window.show()
     qtbot.wait(10)
 
+    assert window.windowFlags() & Qt.WindowType.FramelessWindowHint
+    assert window.windowTitle() == "DiskPilot"
     assert window._current_key == "inicio"
     window.navigate("dados", animate=False)
     assert window._current_key == "dados"
