@@ -1239,6 +1239,101 @@ class SearchIndex:
                         pass
                 conn.close()
 
+    def remove_root(self, root_path: str) -> bool:
+        """Remove uma raiz do snapshot sem reconstruir o índice."""
+        if not self.path.is_file():
+            return False
+        key = path_key(root_path)
+        conn = sqlite3.connect(self.path)
+        try:
+            row = conn.execute(
+                "SELECT id FROM nodes WHERE scan_id = 1 "
+                "AND parent_id IS NULL AND path_key = ? LIMIT 1",
+                (key,),
+            ).fetchone()
+            if row is None:
+                return False
+            root_id = int(row[0])
+            tables = {
+                str(item[0])
+                for item in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                )
+            }
+            if "nodes_fts" in tables:
+                fts_rows = conn.execute(
+                    "SELECT id, name_fold FROM nodes "
+                    "WHERE scan_id = 1 AND root_id = ?",
+                    (root_id,),
+                ).fetchall()
+                if fts_rows:
+                    conn.executemany(
+                        "INSERT INTO nodes_fts(nodes_fts, rowid, name_fold) "
+                        "VALUES ('delete', ?, ?)",
+                        fts_rows,
+                    )
+            conn.execute(
+                "DELETE FROM nodes WHERE scan_id = 1 AND root_id = ?",
+                (root_id,),
+            )
+            roots = conn.execute(
+                "SELECT path, size, files, dirs FROM nodes "
+                "WHERE scan_id = 1 AND parent_id IS NULL ORDER BY id"
+            ).fetchall()
+            if not roots:
+                conn.rollback()
+                return False
+            total_size = sum(int(item[1]) for item in roots)
+            total_files = sum(int(item[2]) for item in roots)
+            total_dirs = sum(int(item[3]) for item in roots)
+            paths = [str(item[0]) for item in roots]
+            node_count = int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM nodes WHERE scan_id = 1"
+                ).fetchone()[0]
+            )
+            conn.execute(
+                "UPDATE scans SET roots_json = ?, total_size = ?, "
+                "total_files = ?, total_dirs = ? WHERE id = 1",
+                (
+                    json.dumps(paths, ensure_ascii=False),
+                    total_size,
+                    total_files,
+                    total_dirs,
+                ),
+            )
+            if "meta" in tables:
+                conn.execute("DELETE FROM meta WHERE key = 'summary_json'")
+                conn.executemany(
+                    "INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)",
+                    (
+                        ("node_count", str(node_count)),
+                        (
+                            "roots_json",
+                            json.dumps(paths, ensure_ascii=False),
+                        ),
+                    ),
+                )
+            conn.commit()
+            try:
+                conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            except sqlite3.Error as exc:
+                logger.warning(
+                    "checkpoint após remover raiz não concluído: %s", exc
+                )
+            self.stats = IndexStats(rows=node_count)
+            self.snapshot_roots = paths
+            return True
+        except sqlite3.Error:
+            try:
+                conn.rollback()
+            except sqlite3.Error:
+                pass
+            logger.exception("falha ao remover raiz do índice")
+            return False
+        finally:
+            conn.close()
+
     def store_summary(self, summary: dict[str, Any]) -> bool:
         """Grava o resumo detalhado na metadata do índice concluído."""
         if not isinstance(summary, dict) or not summary:

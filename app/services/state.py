@@ -779,6 +779,63 @@ class AppState(QObject):
             )
         self.start_scan()
 
+    def _remove_root_incremental(self, path: str) -> bool:
+        """Remove a raiz do snapshot atual sem reexecutar a varredura."""
+        result = self.last_result
+        if result is None or self.is_scanning or self._restoring:
+            return False
+        key = path_key(path)
+        kept = [
+            root for root in result.roots if path_key(root.path) != key
+        ]
+        if len(kept) == len(result.roots):
+            return False
+        index = result.index if result.lazy else self.search_index
+        if result.lazy:
+            if index is None or not index.remove_root(path):
+                return False
+        result.roots = kept
+        result.total_size = sum(root.size for root in kept)
+        result.total_files = sum(root.files for root in kept)
+        result.total_dirs = sum(root.dirs for root in kept)
+        try:
+            result.suggestions = build_suggestions(result)
+        except Exception:
+            logger.exception("falha ao recalcular sugestões após remover raiz")
+            result.suggestions = []
+        self.last_result = result
+        if result.lazy and index is not None:
+            previous = str(
+                self.config.get("scan.index_previous_path", "") or ""
+            )
+            try:
+                values = self._summary_publication_values(
+                    result, index, previous
+                )
+            except Exception:
+                logger.exception("falha ao preparar o resumo após remover raiz")
+            else:
+                if not self._save_index_config(values):
+                    logger.warning(
+                        "raiz removida do índice, mas as referências não "
+                        "puderam ser publicadas"
+                    )
+            self.search_index = index
+            self.scanFinished.emit(result)
+            self.searchIndexReady.emit(index)
+        else:
+            try:
+                self._store_summary(result)
+            except Exception:
+                logger.exception(
+                    "falha ao persistir o resumo após remover raiz"
+                )
+            self.scanFinished.emit(result)
+            self._schedule_index(result)
+        self._emit_pending_roots()
+        logger.info("raiz removida sem revarredura: %s", path)
+        return True
+
     def remove_root(self, path: str, autoscan: bool = True) -> None:
         key = path_key(path)
         new_roots = [p for p in self.roots if path_key(p) != key]
@@ -790,6 +847,8 @@ class AppState(QObject):
         if not self.roots:
             self.clear_results(persist=True)
             self.cancel_scan()
+            return
+        if self._remove_root_incremental(path):
             return
         if autoscan:
             self.start_scan()

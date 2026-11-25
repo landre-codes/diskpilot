@@ -29,6 +29,74 @@ def _result() -> ScanResult:
     )
 
 
+def _two_roots(tmp_path: Path) -> ScanResult:
+    first = Node(
+        path=str(tmp_path / "a"),
+        name="a",
+        is_dir=True,
+        size=10,
+        files=1,
+        dirs=1,
+    )
+    first.children = [
+        Node(
+            path=str(tmp_path / "a" / "a.txt"),
+            name="a.txt",
+            is_dir=False,
+            size=10,
+            files=1,
+        )
+    ]
+    second = Node(
+        path=str(tmp_path / "b"),
+        name="b",
+        is_dir=True,
+        size=10,
+        files=1,
+        dirs=1,
+    )
+    second.children = [
+        Node(
+            path=str(tmp_path / "b" / "b.txt"),
+            name="b.txt",
+            is_dir=False,
+            size=10,
+            files=1,
+        )
+    ]
+    return ScanResult(
+        roots=[first, second],
+        total_size=20,
+        total_files=2,
+        total_dirs=2,
+    )
+
+
+def test_remove_root_updates_index_without_rebuild(tmp_path: Path) -> None:
+    index = SearchIndex.create(tmp_path / "index")
+    try:
+        result = _two_roots(tmp_path)
+        index.write(result)
+        index.store_summary({"roots": [root.path for root in result.roots]})
+
+        assert index.remove_root(str(tmp_path / "a")) is True
+
+        loaded = index.load_result(lazy=True)
+        assert loaded is not None
+        assert [root.path for root in loaded.roots] == [str(tmp_path / "b")]
+        assert loaded.total_size == 10
+        assert loaded.total_files == 1
+        assert loaded.total_dirs == 1
+        assert index.search("a.txt").matches == 0
+        assert index.search("b.txt").matches == 1
+        assert index.load_summary() is None
+        assert index.snapshot_roots == [str(tmp_path / "b")]
+        assert index.stats.rows == 2
+        assert index.remove_root(str(tmp_path / "inexistente")) is False
+    finally:
+        index.delete()
+
+
 def test_search_index_writes_and_queries(tmp_path: Path) -> None:
     index = SearchIndex.create(tmp_path / "index")
     try:
