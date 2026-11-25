@@ -269,6 +269,14 @@ class AnalyzerPage(BasePage):
         self.state.scanFinished.connect(self._on_scan_finished)
         self.state.scanCancelled.connect(self._on_scan_cancelled)
         self.state.scanFailed.connect(self._on_scan_failed)
+        self.state.rootRemovalStarted.connect(self._on_root_removal_started)
+        self.state.rootRemovalProgress.connect(
+            self._on_root_removal_progress
+        )
+        self.state.rootRemovalFinished.connect(
+            self._on_root_removal_finished
+        )
+        self.state.rootRemovalFailed.connect(self._on_root_removal_failed)
         self.state.resultsCleared.connect(self._on_results_cleared)
         self.state.searchIndexReady.connect(self._on_search_index_ready)
         self.state.searchIndexCleared.connect(self._on_search_index_cleared)
@@ -515,6 +523,50 @@ class AnalyzerPage(BasePage):
             )
 
     # ------------------------------------------------------------- progresso
+    def _on_root_removal_started(self, path: str) -> None:
+        self.banner.show()
+        self.banner_title.setText("Removendo pasta do índice…")
+        self.banner_path.setText(path)
+        self.scan_bar.setRange(0, 0)
+        self.cancel_btn.setEnabled(False)
+        self.rescan_btn.setEnabled(False)
+        self.top_btn.setEnabled(False)
+        self.export_btn.setEnabled(False)
+        self.search.setEnabled(False)
+        self.tree.setEnabled(False)
+        self.add_btn.setEnabled(False)
+        self.empty_add.setEnabled(False)
+        self.header.subtitle.setText("Removendo a pasta da análise…")
+
+    def _on_root_removal_progress(self, message: str) -> None:
+        self.banner_path.setText(message)
+
+    def _on_root_removal_finished(self, result: ScanResult) -> None:
+        self.banner.hide()
+        self.rescan_btn.setEnabled(True)
+        self.cancel_btn.setEnabled(True)
+        self.search.setEnabled(True)
+        self.tree.setEnabled(True)
+        self.add_btn.setEnabled(True)
+        self.empty_add.setEnabled(True)
+        self.tree.set_result(result)
+        self._update_header()
+        self._update_empty()
+        self._update_path_detail()
+        self.toast("Pasta removida da análise.", "success")
+
+    def _on_root_removal_failed(self, message: str) -> None:
+        self.banner.hide()
+        self.rescan_btn.setEnabled(True)
+        self.cancel_btn.setEnabled(True)
+        self.search.setEnabled(True)
+        self.tree.setEnabled(True)
+        self.add_btn.setEnabled(True)
+        self.empty_add.setEnabled(True)
+        self.toast(f"Não foi possível remover a pasta: {message}", "danger")
+        self._update_header()
+        self._update_empty()
+
     def _on_scan_started(self) -> None:
         self._index_fallback = False
         self._refresh_limit_banner()

@@ -126,7 +126,7 @@ def test_summary_persists_suggestions_in_index_across_restart(
 
 
 def test_remove_root_reuses_current_snapshot(
-    qapp, tmp_path: Path, monkeypatch
+    qapp, qtbot, tmp_path: Path, monkeypatch
 ) -> None:
     config = AppConfig(tmp_path / "config")
     state = AppState(config)
@@ -153,9 +153,16 @@ def test_remove_root_reuses_current_snapshot(
     monkeypatch.setattr(
         state, "start_scan", lambda **kwargs: started.append(kwargs)
     )
+    finished: list[object] = []
+    failed: list[str] = []
+    state.rootRemovalFinished.connect(finished.append)
+    state.rootRemovalFailed.connect(failed.append)
 
     state.remove_root(str(first))
+    qtbot.waitUntil(lambda: bool(finished) or bool(failed), timeout=5000)
 
+    assert failed == []
+    assert finished
     assert started == []
     assert [root.path for root in state.last_result.roots] == [str(second)]
     assert state.last_result.total_size == 10
@@ -164,6 +171,47 @@ def test_remove_root_reuses_current_snapshot(
     assert [root.path for root in loaded.roots] == [str(second)]
     assert config.get("scan.summary")["total_size"] == 10
     assert config.get("scan.roots") == [str(second)]
+    state.shutdown()
+
+
+def test_remove_root_failure_restores_roots(
+    qapp, qtbot, tmp_path: Path, monkeypatch
+) -> None:
+    config = AppConfig(tmp_path / "config")
+    state = AppState(config)
+    first = tmp_path / "a"
+    second = tmp_path / "b"
+    first.mkdir()
+    second.mkdir()
+    result = _index_result(first)
+    result.roots.append(_index_result(second).roots[0])
+    result.total_size = 20
+    result.total_files = 2
+    result.total_dirs = 2
+    index = SearchIndex.create(config.path.parent / "index")
+    result.index = index
+    result.index_path = str(index.path)
+    result.lazy = True
+    index.write(result)
+    state.roots = [str(first), str(second)]
+    state.search_index = index
+    state.last_result = result
+    config.set("scan.roots", [str(first), str(second)], save=True)
+    failed: list[str] = []
+    state.rootRemovalFailed.connect(failed.append)
+    monkeypatch.setattr(
+        SearchIndex,
+        "remove_root",
+        lambda self, path, cancel=None, progress=None: False,
+    )
+
+    state.remove_root(str(first))
+    qtbot.waitUntil(lambda: bool(failed), timeout=5000)
+
+    assert failed
+    assert state.roots == [str(first), str(second)]
+    assert config.get("scan.roots") == [str(first), str(second)]
+    assert state.last_result is result
     state.shutdown()
 
 

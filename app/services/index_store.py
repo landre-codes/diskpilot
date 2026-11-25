@@ -1239,13 +1239,26 @@ class SearchIndex:
                         pass
                 conn.close()
 
-    def remove_root(self, root_path: str) -> bool:
+    def remove_root(
+        self,
+        root_path: str,
+        cancel: threading.Event | None = None,
+        progress: Callable[[str], None] | None = None,
+    ) -> bool:
         """Remove uma raiz do snapshot sem reconstruir o índice."""
         if not self.path.is_file():
             return False
+        if cancel is not None and cancel.is_set():
+            raise TaskCancelled()
         key = path_key(root_path)
         conn = sqlite3.connect(self.path)
         try:
+            if cancel is not None:
+                conn.set_progress_handler(
+                    lambda: 1 if cancel.is_set() else 0, 1000
+                )
+            if progress is not None:
+                progress("Localizando pasta no índice…")
             row = conn.execute(
                 "SELECT id FROM nodes WHERE scan_id = 1 "
                 "AND parent_id IS NULL AND path_key = ? LIMIT 1",
@@ -1261,21 +1274,34 @@ class SearchIndex:
                 )
             }
             if "nodes_fts" in tables:
-                fts_rows = conn.execute(
+                if progress is not None:
+                    progress("Limpando índice de busca da pasta…")
+                cursor = conn.execute(
                     "SELECT id, name_fold FROM nodes "
                     "WHERE scan_id = 1 AND root_id = ?",
                     (root_id,),
-                ).fetchall()
-                if fts_rows:
+                )
+                while True:
+                    if cancel is not None and cancel.is_set():
+                        raise TaskCancelled()
+                    batch = cursor.fetchmany(5000)
+                    if not batch:
+                        break
                     conn.executemany(
                         "INSERT INTO nodes_fts(nodes_fts, rowid, name_fold) "
                         "VALUES ('delete', ?, ?)",
-                        fts_rows,
+                        batch,
                     )
+            if cancel is not None and cancel.is_set():
+                raise TaskCancelled()
+            if progress is not None:
+                progress("Removendo nós da pasta…")
             conn.execute(
                 "DELETE FROM nodes WHERE scan_id = 1 AND root_id = ?",
                 (root_id,),
             )
+            if cancel is not None and cancel.is_set():
+                raise TaskCancelled()
             roots = conn.execute(
                 "SELECT path, size, files, dirs FROM nodes "
                 "WHERE scan_id = 1 AND parent_id IS NULL ORDER BY id"
@@ -1314,21 +1340,27 @@ class SearchIndex:
                         ),
                     ),
                 )
+            if progress is not None:
+                progress("Publicando snapshot sem a pasta…")
             conn.commit()
-            try:
-                conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-            except sqlite3.Error as exc:
-                logger.warning(
-                    "checkpoint após remover raiz não concluído: %s", exc
-                )
+            # Sem checkpoint aqui: ele pode bloquear em índices grandes.
+            # O WAL é consolidado pelo próximo uso/publicação do índice.
             self.stats = IndexStats(rows=node_count)
             self.snapshot_roots = paths
             return True
+        except TaskCancelled:
+            try:
+                conn.rollback()
+            except sqlite3.Error:
+                pass
+            raise
         except sqlite3.Error:
             try:
                 conn.rollback()
             except sqlite3.Error:
                 pass
+            if cancel is not None and cancel.is_set():
+                raise TaskCancelled()
             logger.exception("falha ao remover raiz do índice")
             return False
         finally:

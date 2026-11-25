@@ -253,6 +253,39 @@ class RestoreTask(Task):
         return self.index.load_result(cancel=self.cancel, lazy=self.lazy)
 
 
+class RemoveRootTask(Task):
+    """Remove uma raiz do índice fora da thread da interface."""
+
+    def __init__(
+        self,
+        index: SearchIndex,
+        root_path: str,
+        cancel: threading.Event | None = None,
+    ) -> None:
+        super().__init__(cancel)
+        self.index = index
+        self.root_path = root_path
+
+    def execute(self) -> ScanResult:
+        self.signals.progress.emit("Removendo pasta do índice…")
+        if not self.index.remove_root(
+            self.root_path,
+            cancel=self.cancel,
+            progress=self.signals.progress.emit,
+        ):
+            raise RuntimeError("não foi possível remover a pasta do índice")
+        result = self.index.load_result(lazy=True)
+        if result is None:
+            raise RuntimeError("o snapshot restante não pôde ser restaurado")
+        self.signals.progress.emit("Recalculando sugestões…")
+        try:
+            result.suggestions = build_suggestions(result)
+        except Exception:
+            logger.exception("falha ao recalcular sugestões após remover raiz")
+            result.suggestions = []
+        return result
+
+
 class AppState(QObject):
     rootsChanged = Signal()
     scanStarted = Signal()
@@ -267,6 +300,10 @@ class AppState(QObject):
     searchIndexFailed = Signal(str)
     rootsPending = Signal(object)
     indexUsageChanged = Signal()
+    rootRemovalStarted = Signal(str)
+    rootRemovalProgress = Signal(str)
+    rootRemovalFinished = Signal(object)
+    rootRemovalFailed = Signal(str)
 
     def __init__(self, config: AppConfig) -> None:
         super().__init__()
@@ -286,8 +323,13 @@ class AppState(QObject):
         self._runner.busyChanged.connect(self.busyChanged.emit)
         self._index_runner = TaskRunner(self, max_threads=1)
         self._restore_runner = TaskRunner(self, max_threads=1)
+        self._remove_runner = TaskRunner(self, max_threads=1)
         self._index_generation = 0
         self._restore_generation = 0
+        self._removing = False
+        self._remove_generation = 0
+        self._remove_cancel: threading.Event | None = None
+        self._remove_previous_roots: list[str] = []
         self._restoring = False
         self.search_index: SearchIndex | None = None
         self.index_building = False
@@ -784,10 +826,143 @@ class AppState(QObject):
             )
         self.start_scan()
 
-    def _remove_root_incremental(self, path: str) -> bool:
-        """Remove a raiz do snapshot atual sem reexecutar a varredura."""
+    def _start_root_removal(
+        self, path: str, previous_roots: list[str]
+    ) -> bool:
         result = self.last_result
-        if result is None or self.is_scanning or self._restoring:
+        if (
+            result is None
+            or not result.lazy
+            or result.index is None
+            or self.is_scanning
+            or self._restoring
+            or self._removing
+            or self.index_building
+        ):
+            return False
+        index = result.index
+        self._removing = True
+        self._remove_generation += 1
+        generation = self._remove_generation
+        self._remove_cancel = threading.Event()
+        self._remove_previous_roots = list(previous_roots)
+        task = RemoveRootTask(index, path, self._remove_cancel)
+        signals = task.signals
+        signals.progress.connect(
+            lambda message: self.rootRemovalProgress.emit(str(message))
+        )
+        signals.finished.connect(
+            lambda value, gen=generation: self._on_root_removal_finished(
+                gen, value
+            )
+        )
+        signals.failed.connect(
+            lambda message, gen=generation: self._on_root_removal_failed(
+                gen, message
+            )
+        )
+        signals.cancelled.connect(
+            lambda gen=generation: self._on_root_removal_cancelled(gen)
+        )
+        try:
+            self._remove_runner.submit(task)
+        except Exception:
+            logger.exception("falha ao iniciar a remoção da raiz")
+            self._removing = False
+            self._remove_cancel = None
+            self._remove_previous_roots = []
+            return False
+        self.rootRemovalStarted.emit(path)
+        return True
+
+    def _restore_roots_after_removal(self) -> None:
+        if not self._remove_previous_roots:
+            return
+        self.roots = list(self._remove_previous_roots)
+        self._remove_previous_roots = []
+        self._persist_roots()
+        self.rootsChanged.emit()
+
+    @Slot(int, object)
+    def _on_root_removal_finished(
+        self, generation: int, result: ScanResult | None
+    ) -> None:
+        if generation != self._remove_generation or self._closing:
+            return
+        self._removing = False
+        self._remove_cancel = None
+        self._remove_previous_roots = []
+        if result is None or result.index is None:
+            self._restore_roots_after_removal()
+            self.rootRemovalFailed.emit(
+                "o snapshot restante não pôde ser restaurado"
+            )
+            return
+        index = result.index
+        self.search_index = index
+        self.last_result = result
+        previous = str(
+            self.config.get("scan.index_previous_path", "") or ""
+        )
+        try:
+            values = self._summary_publication_values(
+                result, index, previous
+            )
+        except Exception:
+            logger.exception(
+                "falha ao preparar o resumo após remover raiz"
+            )
+        else:
+            if not self._save_index_config(values):
+                logger.warning(
+                    "raiz removida do índice, mas as referências não "
+                    "puderam ser publicadas"
+                )
+        clear_author_cache()
+        self.rootRemovalFinished.emit(result)
+        self.searchIndexReady.emit(index)
+        self._emit_pending_roots()
+        logger.info(
+            "raiz removida em segundo plano: raízes=%s entradas=%s",
+            len(result.roots),
+            index.stats.rows,
+        )
+        if self._pending_restart:
+            self._pending_restart = False
+            QTimer.singleShot(0, self.start_scan)
+
+    @Slot(int, str)
+    def _on_root_removal_failed(self, generation: int, message: str) -> None:
+        if generation != self._remove_generation or self._closing:
+            return
+        self._removing = False
+        self._remove_cancel = None
+        self._restore_roots_after_removal()
+        logger.error("falha ao remover raiz: %s", message)
+        self.rootRemovalFailed.emit(message)
+        if self._pending_restart:
+            self._pending_restart = False
+            QTimer.singleShot(0, self.start_scan)
+
+    @Slot(int)
+    def _on_root_removal_cancelled(self, generation: int) -> None:
+        if generation != self._remove_generation or self._closing:
+            return
+        self._removing = False
+        self._remove_cancel = None
+        self._restore_roots_after_removal()
+        self.rootRemovalFailed.emit("remoção da pasta cancelada")
+
+    def _remove_root_incremental(self, path: str) -> bool:
+        """Remove a raiz do snapshot em memória sem reexecutar a varredura."""
+        result = self.last_result
+        if (
+            result is None
+            or result.lazy
+            or self.is_scanning
+            or self._restoring
+            or self._removing
+        ):
             return False
         key = path_key(path)
         kept = [
@@ -795,10 +970,6 @@ class AppState(QObject):
         ]
         if len(kept) == len(result.roots):
             return False
-        index = result.index if result.lazy else self.search_index
-        if result.lazy:
-            if index is None or not index.remove_root(path):
-                return False
         result.roots = kept
         result.total_size = sum(root.size for root in kept)
         result.total_files = sum(root.files for root in kept)
@@ -809,40 +980,23 @@ class AppState(QObject):
             logger.exception("falha ao recalcular sugestões após remover raiz")
             result.suggestions = []
         self.last_result = result
-        if result.lazy and index is not None:
-            previous = str(
-                self.config.get("scan.index_previous_path", "") or ""
+        try:
+            self._store_summary(result)
+        except Exception:
+            logger.exception(
+                "falha ao persistir o resumo após remover raiz"
             )
-            try:
-                values = self._summary_publication_values(
-                    result, index, previous
-                )
-            except Exception:
-                logger.exception("falha ao preparar o resumo após remover raiz")
-            else:
-                if not self._save_index_config(values):
-                    logger.warning(
-                        "raiz removida do índice, mas as referências não "
-                        "puderam ser publicadas"
-                    )
-            self.search_index = index
-            self.scanFinished.emit(result)
-            self.searchIndexReady.emit(index)
-        else:
-            try:
-                self._store_summary(result)
-            except Exception:
-                logger.exception(
-                    "falha ao persistir o resumo após remover raiz"
-                )
-            self.scanFinished.emit(result)
-            self._schedule_index(result)
+        self.scanFinished.emit(result)
+        self._schedule_index(result)
         self._emit_pending_roots()
         logger.info("raiz removida sem revarredura: %s", path)
         return True
 
     def remove_root(self, path: str, autoscan: bool = True) -> None:
+        if self._removing:
+            return
         key = path_key(path)
+        previous_roots = list(self.roots)
         new_roots = [p for p in self.roots if path_key(p) != key]
         if len(new_roots) == len(self.roots):
             return
@@ -853,12 +1007,17 @@ class AppState(QObject):
             self.clear_results(persist=True)
             self.cancel_scan()
             return
+        if self._start_root_removal(path, previous_roots):
+            return
         if self._remove_root_incremental(path):
             return
         if autoscan:
             self.start_scan()
 
     def clear_results(self, persist: bool = False) -> None:
+        if self._removing:
+            logger.warning("limpeza ignorada enquanto uma pasta é removida")
+            return
         self.last_result = None
         clear_author_cache()
         self._pending_restart = False
@@ -879,6 +1038,13 @@ class AppState(QObject):
         self._restore_runner.cancel()
         self._index_generation += 1
         self._index_runner.cancel()
+        self._remove_generation += 1
+        self._removing = False
+        if self._remove_cancel is not None:
+            self._remove_cancel.set()
+        self._remove_cancel = None
+        self._remove_previous_roots = []
+        self._remove_runner.cancel()
         self._discard_pending_index()
         self._drop_index(emit=True, clear_config=True)
         if persist:
@@ -898,6 +1064,9 @@ class AppState(QObject):
         max_entries: int | None = None,
     ) -> None:
         if self._closing or not self.roots:
+            return
+        if self._removing:
+            self._pending_restart = True
             return
         if self._task is not None:
             self._pending_restart = True
@@ -1761,7 +1930,7 @@ class AppState(QObject):
 
     @property
     def busy(self) -> bool:
-        return self._task is not None
+        return self._task is not None or self._removing
 
     def shutdown(self) -> None:
         self._closing = True
@@ -1776,6 +1945,9 @@ class AppState(QObject):
         logger.info("shutdown solicitado")
         if self._cancel is not None:
             self._cancel.set()
+        if self._remove_cancel is not None:
+            self._remove_cancel.set()
+            self._remove_cancel = None
         try:
             # O TaskRunner aguarda as threads e mantém os sinais vivos até o
             # término; não destruímos um QThread em execução.
@@ -1793,6 +1965,11 @@ class AppState(QObject):
                 logger.warning("encerramento com restauração ainda ativa")
         except Exception:
             logger.exception("falha ao encerrar o pool de restauração")
+        try:
+            if not self._remove_runner.shutdown():
+                logger.warning("encerramento com remoção ainda ativa")
+        except Exception:
+            logger.exception("falha ao encerrar o pool de remoção")
         self._index_generation += 1
         self._restore_generation += 1
         # Não apagar o índice: ele é a análise persistida para a próxima sessão.
