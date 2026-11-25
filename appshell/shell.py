@@ -145,6 +145,7 @@ class ShellWindow(QWidget):
         self._manual_drag = False
         self._drag_offset = QPoint()
         self._pending_restore_pos: QPoint | None = None
+        self._minimize_anim: QPropertyAnimation | None = None
         self._resize_manual = False
         self._resize_native = False
         self._resize_edges = Qt.Edges()
@@ -238,7 +239,7 @@ class ShellWindow(QWidget):
         shell_layout.addLayout(body, 1)
 
     def _connect(self) -> None:
-        self.title_bar.minimizeRequested.connect(self.showMinimized)
+        self.title_bar.minimizeRequested.connect(self.minimize_smooth)
         self.title_bar.maximizeRequested.connect(self.toggle_maximize)
         self.title_bar.closeRequested.connect(self.close)
         self.title_bar.themeRequested.connect(self._toggle_theme)
@@ -293,6 +294,56 @@ class ShellWindow(QWidget):
             self._profile_requested()
 
     # --------------------------------------------------------------- janela
+    def _stop_minimize_animation(self) -> None:
+        anim = self._minimize_anim
+        self._minimize_anim = None
+        if anim is not None:
+            anim.stop()
+            anim.deleteLater()
+
+    def minimize_smooth(self) -> None:
+        """Minimiza com fade curto em vez de sumir abruptamente."""
+        if self.isMinimized():
+            return
+        self._stop_minimize_animation()
+        anim = QPropertyAnimation(self, b"windowOpacity", self)
+        anim.setDuration(120)
+        anim.setStartValue(float(self.windowOpacity()))
+        anim.setEndValue(0.0)
+        anim.setEasingCurve(QEasingCurve.InCubic)
+        anim.finished.connect(lambda: self._finish_minimize(anim))
+        self._minimize_anim = anim
+        anim.start()
+
+    def _finish_minimize(self, anim: QPropertyAnimation) -> None:
+        if self._minimize_anim is not anim:
+            return
+        self._minimize_anim = None
+        self.showMinimized()
+        self.setWindowOpacity(1.0)
+        anim.deleteLater()
+
+    def _restore_fade_in(self) -> None:
+        if self.isMinimized() or not self.isVisible():
+            return
+        self._stop_minimize_animation()
+        self.setWindowOpacity(0.0)
+        anim = QPropertyAnimation(self, b"windowOpacity", self)
+        anim.setDuration(150)
+        anim.setStartValue(0.0)
+        anim.setEndValue(1.0)
+        anim.setEasingCurve(QEasingCurve.OutCubic)
+
+        def clear() -> None:
+            if self._minimize_anim is anim:
+                self._minimize_anim = None
+            self.setWindowOpacity(1.0)
+            anim.deleteLater()
+
+        anim.finished.connect(clear)
+        self._minimize_anim = anim
+        anim.start()
+
     def _repolish(self, widget: QWidget) -> None:
         widget.style().unpolish(widget)
         widget.style().polish(widget)
@@ -364,6 +415,12 @@ class ShellWindow(QWidget):
     def changeEvent(self, event: QEvent) -> None:  # noqa: N802
         if event.type() == QEvent.WindowStateChange and hasattr(self, "shell"):
             self._stop_geometry_watch()
+            try:
+                was_minimized = bool(event.oldState() & Qt.WindowMinimized)
+            except AttributeError:
+                was_minimized = False
+            if was_minimized and not self.isMinimized():
+                QTimer.singleShot(0, self._restore_fade_in)
             if self.isMaximized() and not self._maximized and not self._adopting_native:
                 # O Windows maximizou por fora (Win+↑, menu da barra de tarefas).
                 # Convertemos para a nossa maximização, que conhece a tela.

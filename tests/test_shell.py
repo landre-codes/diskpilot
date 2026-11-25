@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from PySide6.QtWidgets import QDialog, QLabel
 
 from app import APP_AUTHOR, APP_COPYRIGHT
@@ -45,6 +46,31 @@ def test_main_window_builds_and_navigates(qapp, qtbot, tmp_path: Path) -> None:
     window.navigate("dados", animate=False)
     assert window._current_key == "dados"
     assert window.stack.currentWidget() is window._pages["dados"]
+    window.close()
+
+
+def test_smooth_minimize_fades_and_restores(qapp, qtbot, tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    theme = init_theme(qapp, config)
+    pages = [
+        PageSpec("inicio", "Início", "Página inicial", "home", _SamplePage),
+    ]
+    window = MainWindow(config, theme, pages)
+    qtbot.addWidget(window)
+    window.show()
+    qtbot.wait(20)
+
+    window.minimize_smooth()
+    qtbot.wait(300)
+
+    assert window.isMinimized()
+    assert window.windowOpacity() == pytest.approx(1.0)
+
+    window.showNormal()
+    qtbot.wait(300)
+
+    assert not window.isMinimized()
+    assert window.windowOpacity() == pytest.approx(1.0)
     window.close()
 
 
