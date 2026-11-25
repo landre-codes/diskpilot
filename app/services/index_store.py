@@ -1276,22 +1276,12 @@ class SearchIndex:
             if "nodes_fts" in tables:
                 if progress is not None:
                     progress("Limpando índice de busca da pasta…")
-                cursor = conn.execute(
-                    "SELECT id, name_fold FROM nodes "
+                conn.execute(
+                    "INSERT INTO nodes_fts(nodes_fts, rowid, name_fold) "
+                    "SELECT 'delete', id, name_fold FROM nodes "
                     "WHERE scan_id = 1 AND root_id = ?",
                     (root_id,),
                 )
-                while True:
-                    if cancel is not None and cancel.is_set():
-                        raise TaskCancelled()
-                    batch = cursor.fetchmany(5000)
-                    if not batch:
-                        break
-                    conn.executemany(
-                        "INSERT INTO nodes_fts(nodes_fts, rowid, name_fold) "
-                        "VALUES ('delete', ?, ?)",
-                        batch,
-                    )
             if cancel is not None and cancel.is_set():
                 raise TaskCancelled()
             if progress is not None:

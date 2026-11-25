@@ -490,7 +490,12 @@ class SettingsPage(BasePage):
         if result != QDialog.Accepted:
             return
         self.state.cancel_scan()
-        self.state.clear_results(persist=True)
+        if not self.state.clear_results(persist=True):
+            self.toast(
+                "Aguarde a remoção da pasta terminar antes de limpar.",
+                "warn",
+            )
+            return
         self.toast("Resultados limpos. As pastas foram mantidas.", "info")
 
     def on_show(self) -> None:

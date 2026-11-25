@@ -13,6 +13,7 @@ import os
 import shutil
 import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -266,7 +267,7 @@ class RemoveRootTask(Task):
         self.index = index
         self.root_path = root_path
 
-    def execute(self) -> ScanResult:
+    def execute(self) -> "RootRemovalOutcome":
         self.signals.progress.emit("Removendo pasta do índice…")
         if not self.index.remove_root(
             self.root_path,
@@ -274,16 +275,37 @@ class RemoveRootTask(Task):
             progress=self.signals.progress.emit,
         ):
             raise RuntimeError("não foi possível remover a pasta do índice")
-        result = self.index.load_result(lazy=True)
-        if result is None:
-            raise RuntimeError("o snapshot restante não pôde ser restaurado")
-        self.signals.progress.emit("Recalculando sugestões…")
         try:
-            result.suggestions = build_suggestions(result)
-        except Exception:
-            logger.exception("falha ao recalcular sugestões após remover raiz")
-            result.suggestions = []
-        return result
+            result = self.index.load_result(lazy=True)
+            if result is None:
+                raise RuntimeError("o snapshot restante não pôde ser restaurado")
+            self.signals.progress.emit("Recalculando sugestões…")
+            try:
+                result.suggestions = build_suggestions(result)
+            except Exception:
+                logger.exception(
+                    "falha ao recalcular sugestões após remover raiz"
+                )
+                result.suggestions = []
+            return RootRemovalOutcome(result=result, committed=True)
+        except Exception as exc:
+            logger.exception(
+                "raiz removida do índice, mas o snapshot restante falhou"
+            )
+            return RootRemovalOutcome(
+                result=None,
+                committed=True,
+                message=str(exc) or exc.__class__.__name__,
+            )
+
+
+@dataclass(slots=True)
+class RootRemovalOutcome:
+    """Resultado de uma remoção que pode ter sido confirmada no SQLite."""
+
+    result: ScanResult | None
+    committed: bool = False
+    message: str = ""
 
 
 class AppState(QObject):
@@ -885,19 +907,43 @@ class AppState(QObject):
 
     @Slot(int, object)
     def _on_root_removal_finished(
-        self, generation: int, result: ScanResult | None
+        self, generation: int, outcome: RootRemovalOutcome | None
     ) -> None:
         if generation != self._remove_generation or self._closing:
             return
         self._removing = False
         self._remove_cancel = None
-        if result is None or result.index is None:
+        if not isinstance(outcome, RootRemovalOutcome):
             self._restore_roots_after_removal()
             self.rootRemovalFailed.emit(
                 "o snapshot restante não pôde ser restaurado"
             )
             return
+        if outcome.result is None:
+            if outcome.committed:
+                self._remove_previous_roots = []
+                self._persist_roots()
+                self.last_result = None
+                self.search_index = None
+                self.searchIndexCleared.emit()
+                self.resultsCleared.emit()
+                self.rootRemovalFailed.emit(
+                    outcome.message
+                    or "a pasta foi removida do índice, mas o snapshot "
+                    "restante não pôde ser aberto"
+                )
+                if self._pending_restart:
+                    self._pending_restart = False
+                    QTimer.singleShot(0, self.start_scan)
+            else:
+                self._restore_roots_after_removal()
+                self.rootRemovalFailed.emit(
+                    outcome.message
+                    or "o snapshot restante não pôde ser restaurado"
+                )
+            return
         self._remove_previous_roots = []
+        result = outcome.result
         index = result.index
         self.search_index = index
         self.last_result = result
@@ -1018,10 +1064,10 @@ class AppState(QObject):
         if autoscan:
             self.start_scan()
 
-    def clear_results(self, persist: bool = False) -> None:
+    def clear_results(self, persist: bool = False) -> bool:
         if self._removing:
             logger.warning("limpeza ignorada enquanto uma pasta é removida")
-            return
+            return False
         was_scanning = self.is_scanning or self._task is not None
         self.last_result = None
         clear_author_cache()
@@ -1061,6 +1107,7 @@ class AppState(QObject):
         if was_scanning:
             self.scanCancelled.emit()
         self.resultsCleared.emit()
+        return True
 
     # -------------------------------------------------------------- varredura
     def start_scan(

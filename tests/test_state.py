@@ -9,7 +9,7 @@ from app.config import AppConfig
 from app.services.index_store import SearchIndex
 from app.services import state as state_module
 from app.services.model import Node, ScanResult, ScanWarning, Suggestion
-from app.services.state import AppState, ScanTask
+from app.services.state import AppState, RootRemovalOutcome, ScanTask
 from appshell.utils import path_key
 
 
@@ -249,6 +249,50 @@ def test_root_removal_empty_result_restores_roots(
     assert config.get("scan.roots") == [first, second]
     assert state._removing is False
     state.shutdown()
+
+
+def test_root_removal_committed_without_result_keeps_new_roots(
+    qapp, tmp_path: Path
+) -> None:
+    config = AppConfig(tmp_path / "config")
+    state = AppState(config)
+    first = str(tmp_path / "a")
+    second = str(tmp_path / "b")
+    state.roots = [second]
+    state._remove_previous_roots = [first, second]
+    state._remove_generation = 4
+    state._removing = True
+    state._remove_cancel = threading.Event()
+    failed: list[str] = []
+    cleared: list[bool] = []
+    state.rootRemovalFailed.connect(failed.append)
+    state.resultsCleared.connect(lambda: cleared.append(True))
+
+    state._on_root_removal_finished(
+        4,
+        RootRemovalOutcome(
+            result=None, committed=True, message="snapshot inválido"
+        ),
+    )
+
+    assert failed and "snapshot inválido" in failed[0]
+    assert cleared == [True]
+    assert state.roots == [second]
+    assert config.get("scan.roots") == [second]
+    assert state.last_result is None
+    assert state._removing is False
+    state.shutdown()
+
+
+def test_clear_results_refuses_while_removing(qapp, tmp_path: Path) -> None:
+    config = AppConfig(tmp_path / "config")
+    state = AppState(config)
+    state._removing = True
+    try:
+        assert state.clear_results(persist=True) is False
+    finally:
+        state._removing = False
+        state.shutdown()
 
 
 def test_removing_last_root_cancels_scan(qapp, tmp_path: Path) -> None:
