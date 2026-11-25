@@ -131,6 +131,8 @@ def test_default_index_quota_is_24gb(qapp, tmp_path: Path) -> None:
     try:
         assert config.get("scan.index_max_gb") == 24
         assert state._index_quota_bytes() == 24 * 1024**3
+        config.set("scan.index_max_gb", 0, save=False)
+        assert state._index_quota_bytes() == 24 * 1024**3
     finally:
         state.shutdown()
 
@@ -222,6 +224,29 @@ def test_remove_root_failure_restores_roots(
     assert state.roots == [str(first), str(second)]
     assert config.get("scan.roots") == [str(first), str(second)]
     assert state.last_result is result
+    state.shutdown()
+
+
+def test_removing_last_root_cancels_scan(qapp, tmp_path: Path) -> None:
+    config = AppConfig(tmp_path / "config")
+    state = AppState(config)
+    root = tmp_path / "unica"
+    root.mkdir()
+    state.roots = [str(root)]
+    state.is_scanning = True
+    state._task = object()
+    cancel = threading.Event()
+    state._cancel = cancel
+    cancelled: list[bool] = []
+    state.scanCancelled.connect(lambda: cancelled.append(True))
+
+    state.remove_root(str(root))
+
+    assert cancel.is_set()
+    assert state.roots == []
+    assert state._task is None
+    assert state.is_scanning is False
+    assert cancelled == [True]
     state.shutdown()
 
 

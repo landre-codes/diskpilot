@@ -595,6 +595,9 @@ class AnalyzerPage(BasePage):
         )
 
     def _cancel_scan(self) -> None:
+        if not self.state.is_scanning:
+            self._on_scan_cancelled()
+            return
         self.cancel_btn.setEnabled(False)
         self.banner_title.setText("Cancelando…")
         self.state.cancel_scan()
@@ -637,6 +640,12 @@ class AnalyzerPage(BasePage):
 
     def _on_results_cleared(self) -> None:
         self._index_fallback = False
+        self.banner.hide()
+        self.scan_bar.setRange(0, 0)
+        self.rescan_btn.setEnabled(True)
+        self.cancel_btn.setEnabled(True)
+        self.top_btn.setEnabled(False)
+        self.export_btn.setEnabled(False)
         self.tree.set_result(None)
         self._update_header()
         self._update_empty()

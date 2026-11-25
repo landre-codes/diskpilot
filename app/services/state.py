@@ -1004,8 +1004,8 @@ class AppState(QObject):
         self._persist_roots()
         self.rootsChanged.emit()
         if not self.roots:
-            self.clear_results(persist=True)
             self.cancel_scan()
+            self.clear_results(persist=True)
             return
         if self._start_root_removal(path, previous_roots):
             return
@@ -1018,6 +1018,7 @@ class AppState(QObject):
         if self._removing:
             logger.warning("limpeza ignorada enquanto uma pasta é removida")
             return
+        was_scanning = self.is_scanning or self._task is not None
         self.last_result = None
         clear_author_cache()
         self._pending_restart = False
@@ -1053,6 +1054,8 @@ class AppState(QObject):
                 self.config.set("scan.last_scan", 0, save=True)
             except Exception:
                 logger.exception("falha ao limpar o resumo persistido")
+        if was_scanning:
+            self.scanCancelled.emit()
         self.resultsCleared.emit()
 
     # -------------------------------------------------------------- varredura
@@ -1670,7 +1673,7 @@ class AppState(QObject):
         except (TypeError, ValueError):
             gigabytes = 24.0
         if gigabytes <= 0:
-            return 0
+            gigabytes = 24.0
         return int(gigabytes * 1024**3)
 
     def _index_previous_seconds(self) -> float:

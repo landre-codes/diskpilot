@@ -185,7 +185,6 @@ class SettingsPage(BasePage):
                 ("8", "8 GB", "database"),
                 ("16", "16 GB", "database"),
                 ("24", "24 GB", "database"),
-                ("0", "Sem quota", "database"),
             ),
             current="24",
         )
@@ -397,11 +396,7 @@ class SettingsPage(BasePage):
         total_bytes = int(usage["total_bytes"])
         quota_bytes = int(usage["quota_bytes"])
         self.data_values["indice"].setText(format_bytes(total_bytes))
-        quota_text = (
-            f"Quota: {format_bytes(quota_bytes)}"
-            if quota_bytes
-            else "Sem quota configurada"
-        )
+        quota_text = f"Quota: {format_bytes(quota_bytes)}"
         self.data_values["indice"].setToolTip(
             f"{usage.get('active_path') or 'sem índice ativo'}\n{quota_text}"
         )
@@ -428,7 +423,7 @@ class SettingsPage(BasePage):
             )
         except (TypeError, ValueError):
             quota_current = "24"
-        if quota_current not in {"0", "4", "8", "16", "24"}:
+        if quota_current not in {"4", "8", "16", "24"}:
             quota_current = "24"
         self.quota_btn.set_current(quota_current, emit=False)
 
@@ -441,9 +436,11 @@ class SettingsPage(BasePage):
 
     def _set_index_quota(self, value: str) -> None:
         try:
-            gigabytes = max(0, int(value))
+            gigabytes = int(value)
         except (TypeError, ValueError):
             return
+        if gigabytes <= 0:
+            gigabytes = 24
         try:
             self.state.config.set("scan.index_max_gb", gigabytes, save=True)
         except Exception:
@@ -452,9 +449,7 @@ class SettingsPage(BasePage):
         self.state._enforce_index_retention()
         self._refresh_data()
         self.toast(
-            "Quota do índice atualizada."
-            if gigabytes
-            else "Quota do índice desativada.",
+            f"Quota do índice atualizada para {gigabytes} GB.",
             "info",
         )
 

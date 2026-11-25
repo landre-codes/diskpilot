@@ -177,6 +177,10 @@ def test_analyzer_shows_warning_action_and_memory_search_status(
     page._on_search_index_failed("duplicate_path")
     assert "busca em memória" in page.header.subtitle.text()
     assert "mais lenta" in page.header.subtitle.toolTip()
+
+    page.banner.show()
+    page._on_results_cleared()
+    assert page.banner.isHidden()
     state.shutdown()
 
 
