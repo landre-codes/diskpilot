@@ -125,6 +125,37 @@ def test_summary_persists_suggestions_in_index_across_restart(
         restored.shutdown()
 
 
+def test_stream_publish_records_history_once(
+    qapp, qtbot, tmp_path: Path
+) -> None:
+    config = AppConfig(tmp_path / "config")
+    state = AppState(config)
+    root = tmp_path / "dados"
+    root.mkdir()
+    index = SearchIndex.create(config.path.parent / "index")
+    result = _index_result(root)
+    result.started_at = 1234.0
+    result.index = index
+    result.index_path = str(index.path)
+    index.write(result)
+
+    state._publish_stream_result(result)
+
+    history = config.get("scan.history")
+    assert isinstance(history, list)
+    assert len(history) == 1
+    assert history[0]["total_size"] == result.total_size
+    assert history[0]["roots"][0]["path"] == str(root)
+    state.shutdown()
+
+    restored = AppState(config)
+    try:
+        qtbot.waitUntil(lambda: restored.last_result is not None, timeout=5000)
+        assert len(config.get("scan.history")) == 1
+    finally:
+        restored.shutdown()
+
+
 def test_legacy_config_summary_restores_and_is_migrated(
     qapp, qtbot, tmp_path: Path
 ) -> None:

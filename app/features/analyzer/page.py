@@ -420,7 +420,7 @@ class AnalyzerPage(BasePage):
         if result is None:
             self.toast("Execute uma análise para gerar o ranking.", "info")
             return
-        dialog = TopItemsDialog(self.window(), result)
+        dialog = TopItemsDialog(self.window(), result, self.state.history)
         dialog.exec()
 
     def _open_warnings(self) -> None:
@@ -439,7 +439,7 @@ class AnalyzerPage(BasePage):
         if result is None:
             self.toast("Execute uma análise para exportar os dados.", "info")
             return
-        dialog = ExportDialog(self.window(), result)
+        dialog = ExportDialog(self.window(), result, self.state.history)
         if dialog.exec() == QDialog.Accepted and dialog.exported_path:
             self.toast(f"Dados exportados: {Path(dialog.exported_path).name}", "success")
         dialog.deleteLater()

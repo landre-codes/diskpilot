@@ -79,7 +79,14 @@ def test_good_config_drops_detailed_summary_paths(tmp_path: Path) -> None:
                             {"key": "caches", "paths": ["C:/segredo"]}
                         ],
                         "top_dirs": [{"path": "C:/segredo"}],
-                    }
+                    },
+                    "history": [
+                        {
+                            "started_at": 1.0,
+                            "total_size": 10,
+                            "roots": [{"path": "C:/segredo"}],
+                        }
+                    ],
                 },
             }
         ),
@@ -95,6 +102,7 @@ def test_good_config_drops_detailed_summary_paths(tmp_path: Path) -> None:
     summary = stored["scan"]["summary"]
     assert "suggestions" not in summary
     assert "top_dirs" not in summary
+    assert "roots" not in stored["scan"]["history"][0]
     assert stored["theme"] == "dark"
 
 

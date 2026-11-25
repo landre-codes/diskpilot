@@ -28,6 +28,7 @@ from appshell.utils import (
     resolve_network_path,
 )
 from .index_store import IndexTask, SearchIndex, is_managed_index
+from .history import merge_snapshot, sanitize_history
 from .limits import DEFAULT_ENTRIES, MAX_ENTRIES, MIN_ENTRIES, estimate_max_entries
 from .model import ScanProgress, ScanResult, ScanWarning, Suggestion
 from .scanner import ScanCancelled, scan_paths
@@ -636,6 +637,11 @@ class AppState(QObject):
                 index_entries=index.stats.rows,
             ),
             "scan.last_scan": time.time(),
+            "scan.history": merge_snapshot(
+                self.config.get("scan.history", []),
+                result,
+                index_entries=index.stats.rows,
+            ),
         }
         if from_previous:
             values["scan.index_previous_path"] = ""
@@ -1131,6 +1137,11 @@ class AppState(QObject):
                 index_entries=index.stats.rows,
             ),
             "scan.last_scan": time.time(),
+            "scan.history": merge_snapshot(
+                self.config.get("scan.history", []),
+                result,
+                index_entries=index.stats.rows,
+            ),
         }
 
     def _abort_stream_publication(
@@ -1617,6 +1628,10 @@ class AppState(QObject):
             )
         stored = self.config.get("scan.summary", {})
         return stored if isinstance(stored, dict) else {}
+
+    @property
+    def history(self) -> list[dict[str, Any]]:
+        return sanitize_history(self.config.get("scan.history", []))
 
     @property
     def suggestions(self) -> list[Suggestion]:

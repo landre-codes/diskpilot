@@ -23,6 +23,7 @@ DOMAIN_DEFAULTS: dict[str, Any] = {
         "index_previous_days": 7,
         "index_max_gb": 8,
         "index_verified_at": 0,
+        "history": [],
     },
     "ui": {
         "tree_sort": "size_desc",
@@ -56,6 +57,13 @@ class AppConfig(JsonSettings):
         if isinstance(summary, dict):
             summary.pop("suggestions", None)
             summary.pop("top_dirs", None)
+        history = (
+            scan_cfg.get("history") if isinstance(scan_cfg, dict) else None
+        )
+        if isinstance(history, list):
+            for entry in history:
+                if isinstance(entry, dict):
+                    entry.pop("roots", None)
         return data
 
     @property

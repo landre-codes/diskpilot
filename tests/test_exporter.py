@@ -110,3 +110,63 @@ def test_xlsx_keeps_formula_like_fields_as_text(tmp_path: Path) -> None:
                     ("=", "+", "-", "@")
                 ):
                     assert cell.data_type == "s"
+
+
+def test_xlsx_includes_verified_gain_sheet(tmp_path: Path) -> None:
+    result, files = _scan(tmp_path)
+    root = str(tmp_path)
+    history = [
+        {
+            "version": 1,
+            "started_at": 100.0,
+            "total_size": 1000,
+            "total_files": 2,
+            "total_dirs": 1,
+            "safe_savings": 0,
+            "review_savings": 0,
+            "index_entries": 3,
+            "roots": [
+                {
+                    "path": root,
+                    "size": 1000,
+                    "files": 2,
+                    "dirs": 1,
+                }
+            ],
+        },
+        {
+            "version": 1,
+            "started_at": 200.0,
+            "total_size": 600,
+            "total_files": 2,
+            "total_dirs": 1,
+            "safe_savings": 100,
+            "review_savings": 50,
+            "index_entries": 3,
+            "roots": [
+                {
+                    "path": root,
+                    "size": 600,
+                    "files": 2,
+                    "dirs": 1,
+                }
+            ],
+        },
+    ]
+    output = tmp_path / "export.xlsx"
+
+    write_xlsx(result, [], files, str(output), history=history)
+
+    workbook = load_workbook(output, data_only=False)
+    assert "Ganho verificado" in workbook.sheetnames
+    values = [
+        cell.value
+        for row in workbook["Ganho verificado"].iter_rows()
+        for cell in row
+        if cell.value is not None
+    ]
+    assert "Redução líquida observada" in values
+    assert "400 B" in values
+    assert "Comparável" in values
+    assert "Sim" in values
+    assert "Histórico de snapshots" in values

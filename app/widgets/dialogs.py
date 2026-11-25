@@ -58,6 +58,7 @@ from ..services.exporter import (
     write_xlsb,
     write_xlsx,
 )
+from ..services.history import compare_snapshots
 from ..services.model import ScanResult, top_items
 from appshell.theme import get_theme
 from appshell.utils import (
@@ -568,7 +569,12 @@ class _TopItemsTask(QRunnable):
 class TopItemsDialog(SheetDialog):
     """Ranking dos maiores diretórios e arquivos da última análise."""
 
-    def __init__(self, parent: QWidget | None, result: ScanResult | None) -> None:
+    def __init__(
+        self,
+        parent: QWidget | None,
+        result: ScanResult | None,
+        history: list[dict] | None = None,
+    ) -> None:
         super().__init__(
             parent,
             "Maiores itens",
@@ -579,6 +585,7 @@ class TopItemsDialog(SheetDialog):
             min_height=480,
         )
         self.scan_result = result
+        self.history = list(history or [])
         self._kind = "dirs"
         self._size_filter = "all"
         self._selected_path = ""
@@ -717,7 +724,7 @@ class TopItemsDialog(SheetDialog):
     def _export_menu(self) -> None:
         if self.scan_result is None:
             return
-        dialog = ExportDialog(self, self.scan_result)
+        dialog = ExportDialog(self, self.scan_result, self.history)
         try:
             if (
                 dialog.exec() == QDialog.DialogCode.Accepted
@@ -873,6 +880,7 @@ class _ExportTask(QRunnable):
         result: ScanResult,
         path: str,
         signals: _ExportSignals,
+        history: list[dict] | None = None,
     ) -> None:
         super().__init__()
         self.setAutoDelete(True)
@@ -880,6 +888,7 @@ class _ExportTask(QRunnable):
         self.result = result
         self.path = path
         self.signals = signals
+        self.history = list(history or [])
 
     def run(self) -> None:
         try:
@@ -887,9 +896,21 @@ class _ExportTask(QRunnable):
             if self.fmt == "csv":
                 write_csv(self.result, dirs, files, self.path)
             elif self.fmt == "xlsx":
-                write_xlsx(self.result, dirs, files, self.path)
+                write_xlsx(
+                    self.result,
+                    dirs,
+                    files,
+                    self.path,
+                    history=self.history,
+                )
             else:
-                write_xlsb(self.result, dirs, files, self.path)
+                write_xlsb(
+                    self.result,
+                    dirs,
+                    files,
+                    self.path,
+                    history=self.history,
+                )
         except ImportError as exc:
             self.signals.failed.emit(
                 f"Dependência ausente: {exc}. "
@@ -907,7 +928,12 @@ class _ExportTask(QRunnable):
 class ExportDialog(SheetDialog):
     """Janela de exportação da análise em CSV, XLSX ou XLSB."""
 
-    def __init__(self, parent: QWidget | None, result: ScanResult) -> None:
+    def __init__(
+        self,
+        parent: QWidget | None,
+        result: ScanResult,
+        history: list[dict] | None = None,
+    ) -> None:
         super().__init__(
             parent,
             "Exportar dados",
@@ -918,6 +944,7 @@ class ExportDialog(SheetDialog):
             min_height=420,
         )
         self.scan_result = result
+        self.history = list(history or [])
         self.exported_path = ""
         self._fmt = "csv"
         self._exporting = False
@@ -950,11 +977,40 @@ class ExportDialog(SheetDialog):
 
         summary = QLabel(
             "O arquivo inclui o resumo da análise, os 100 maiores diretórios, "
-            "os 100 maiores arquivos e as sugestões."
+            "os 100 maiores arquivos e as sugestões. XLSX/XLSB também levam "
+            "a aba de ganho verificado entre snapshots."
         )
         summary.setObjectName("Muted")
         summary.setWordWrap(True)
         self.body.addWidget(summary)
+
+        comparison = compare_snapshots(self.history)
+        if comparison.get("available"):
+            if comparison.get("comparable"):
+                gain_text = (
+                    "Ganho verificado: "
+                    f"{format_bytes(comparison.get('reclaimed', 0))} de "
+                    "redução líquida observada"
+                )
+                if comparison.get("increase", 0):
+                    gain_text += (
+                        f" e {format_bytes(comparison.get('increase', 0))} "
+                        "de aumento"
+                    )
+            else:
+                gain_text = (
+                    "Ganho verificado: snapshots não comparáveis — "
+                    f"{comparison.get('reason', '') or 'histórico incompleto'}"
+                )
+        else:
+            gain_text = (
+                "Ganho verificado: histórico insuficiente; a comparação "
+                "aparece após a próxima análise."
+            )
+        gain_label = QLabel(gain_text)
+        gain_label.setObjectName("Muted")
+        gain_label.setWordWrap(True)
+        self.body.addWidget(gain_label)
 
         folder_cap = QLabel("PASTA DE DESTINO")
         folder_cap.setObjectName("Eyebrow")
@@ -1137,6 +1193,7 @@ class ExportDialog(SheetDialog):
             self.scan_result,
             str(path),
             self._signals,
+            history=self.history,
         )
         self._task = task
         self._pool.start(task)

@@ -13,6 +13,7 @@ from typing import Any
 
 from .. import APP_NAME
 from appshell.utils import file_author_fast, format_bytes, format_datetime
+from .history import compare_snapshots
 from .model import Node, ScanResult
 
 
@@ -158,8 +159,178 @@ def _style_header(ws, row: int, count: int) -> None:
         cell.alignment = Alignment(horizontal="center", vertical="center")
 
 
+def _write_gain_sheet(
+    workbook, history: list[dict[str, Any]] | None
+) -> None:
+    """Aba de ganho observado entre os dois snapshots mais recentes."""
+    from openpyxl.styles import Alignment, Font
+
+    sheet = workbook.create_sheet("Ganho verificado", 1)
+    comparison = compare_snapshots(history or [])
+    current = comparison.get("current") or {}
+    previous = comparison.get("previous") or {}
+    available = bool(comparison.get("available"))
+    comparable = bool(comparison.get("comparable"))
+
+    sheet.append(["Ganho verificado", ""])
+    sheet.merge_cells("A1:H1")
+    sheet["A1"].font = Font(bold=True, size=14)
+    sheet.append(
+        [
+            "Redução líquida observada entre os dois snapshots mais recentes; "
+            "não é prova de exclusão. Movimentos, permissões e mudanças de "
+            "raiz também alteram os totais."
+        ]
+    )
+    sheet.merge_cells("A2:H2")
+    sheet["A2"].alignment = Alignment(wrap_text=True, vertical="top")
+    sheet.row_dimensions[2].height = 42
+    sheet.append([])
+    sheet.append(["Comparação", ""])
+    _style_header(sheet, 4, 2)
+
+    reason = str(comparison.get("reason", "") or "")
+    if not available:
+        reason = reason or "histórico insuficiente"
+    summary_rows = [
+        (
+            "Snapshot anterior",
+            format_datetime(previous.get("started_at")) if previous else "-",
+        ),
+        (
+            "Snapshot atual",
+            format_datetime(current.get("started_at")) if current else "-",
+        ),
+        ("Comparável", "Sim" if comparable else "Não"),
+        (
+            "Observação",
+            reason
+            or "mesmas raízes e snapshots completos",
+        ),
+        ("Total antes", format_bytes(previous.get("total_size", 0))),
+        ("Total depois", format_bytes(current.get("total_size", 0))),
+        (
+            "Redução líquida observada",
+            format_bytes(comparison.get("reclaimed", 0)),
+        ),
+        (
+            "Aumento líquido observado",
+            format_bytes(comparison.get("increase", 0)),
+        ),
+        (
+            "Variação líquida",
+            format_bytes(abs(int(comparison.get("net_delta", 0) or 0))),
+        ),
+        (
+            "Economia identificada (segura)",
+            format_bytes(comparison.get("identified_safe", 0)),
+        ),
+        (
+            "Economia identificada (revisão)",
+            format_bytes(comparison.get("identified_review", 0)),
+        ),
+        (
+            "Economia identificada (total)",
+            format_bytes(comparison.get("identified_total", 0)),
+        ),
+        ("Snapshots no histórico", len(comparison.get("history", []))),
+    ]
+    for label, value in summary_rows:
+        sheet.append([label, value])
+
+    root_rows = comparison.get("roots", [])
+    if root_rows:
+        sheet.append([])
+        roots_title = sheet.max_row + 1
+        sheet.append(["Por raiz", ""])
+        sheet.cell(row=roots_title, column=1).font = Font(bold=True)
+        headers = [
+            "Caminho",
+            "Antes",
+            "Depois",
+            "Redução observada",
+            "Aumento observado",
+            "Δ arquivos",
+            "Δ pastas",
+            "Situação",
+        ]
+        sheet.append(headers)
+        _style_header(sheet, sheet.max_row, len(headers))
+        for row in root_rows:
+            sheet.append(
+                [
+                    row.get("path", ""),
+                    format_bytes(row.get("before_size", 0)),
+                    format_bytes(row.get("after_size", 0)),
+                    format_bytes(row.get("reclaimed", 0)),
+                    format_bytes(row.get("increase", 0)),
+                    int(row.get("file_delta", 0)),
+                    int(row.get("dir_delta", 0)),
+                    row.get("status", ""),
+                ]
+            )
+
+    history_rows = comparison.get("history", [])
+    if history_rows:
+        sheet.append([])
+        history_title = sheet.max_row + 1
+        sheet.append(["Histórico de snapshots", ""])
+        sheet.cell(row=history_title, column=1).font = Font(bold=True)
+        history_headers = [
+            "Data",
+            "Total",
+            "Arquivos",
+            "Pastas",
+            "Economia segura",
+            "Economia em revisão",
+            "Entradas do índice",
+            "Truncado",
+        ]
+        sheet.append(history_headers)
+        _style_header(sheet, sheet.max_row, len(history_headers))
+        for entry in history_rows:
+            sheet.append(
+                [
+                    format_datetime(entry.get("started_at")),
+                    format_bytes(entry.get("total_size", 0)),
+                    int(entry.get("total_files", 0)),
+                    int(entry.get("total_dirs", 0)),
+                    format_bytes(entry.get("safe_savings", 0)),
+                    format_bytes(entry.get("review_savings", 0)),
+                    int(entry.get("index_entries", 0)),
+                    "Sim" if entry.get("truncated") else "Não",
+                ]
+            )
+    else:
+        sheet.append([])
+        sheet.append(
+            [
+                "Ainda não há snapshots publicados. O histórico começa após "
+                "a primeira análise concluída."
+            ]
+        )
+
+    for column, width in (
+        ("A", 44),
+        ("B", 22),
+        ("C", 18),
+        ("D", 18),
+        ("E", 18),
+        ("F", 14),
+        ("G", 14),
+        ("H", 22),
+    ):
+        sheet.column_dimensions[column].width = width
+    sheet.freeze_panes = "A2"
+    _force_text_cells(sheet)
+
+
 def write_xlsx(
-    result: ScanResult, dirs: list[Node], files: list[Node], path: str
+    result: ScanResult,
+    dirs: list[Node],
+    files: list[Node],
+    path: str,
+    history: list[dict[str, Any]] | None = None,
 ) -> None:
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Font
@@ -229,6 +400,8 @@ def write_xlsx(
     ):
         summary.column_dimensions[column].width = width
     summary.freeze_panes = "A2"
+
+    _write_gain_sheet(workbook, history)
 
     top = workbook.create_sheet("Top 100")
     headers = [
@@ -338,7 +511,11 @@ def write_xlsx(
 
 
 def write_xlsb(
-    result: ScanResult, dirs: list[Node], files: list[Node], path: str
+    result: ScanResult,
+    dirs: list[Node],
+    files: list[Node],
+    path: str,
+    history: list[dict[str, Any]] | None = None,
 ) -> None:
     temp_dir = Path(tempfile.mkdtemp(prefix="diskpilot-xlsb-"))
     (temp_dir / ".diskpilot-owner").write_text(
@@ -346,7 +523,7 @@ def write_xlsb(
     )
     temp_xlsx = temp_dir / "export.xlsx"
     try:
-        write_xlsx(result, dirs, files, str(temp_xlsx))
+        write_xlsx(result, dirs, files, str(temp_xlsx), history)
         import pythoncom
         import win32com.client as win32
 
