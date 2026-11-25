@@ -140,6 +140,7 @@ def _summary_payload(
 
 
 INDEX_GC_AGE_SECONDS = 24 * 60 * 60
+CANCEL_GRACE_MS = 10_000
 
 
 def _is_within(path: str, parent: str) -> bool:
@@ -281,7 +282,7 @@ class AppState(QObject):
         self.last_result: ScanResult | None = None
         self.last_error: str = ""
         self.is_scanning = False
-        self._runner = TaskRunner(self, max_threads=1)
+        self._runner = TaskRunner(self, max_threads=2)
         self._runner.busyChanged.connect(self.busyChanged.emit)
         self._index_runner = TaskRunner(self, max_threads=1)
         self._restore_runner = TaskRunner(self, max_threads=1)
@@ -307,6 +308,10 @@ class AppState(QObject):
         self._scan_budget_total = 0
         self._pending_index: SearchIndex | None = None
         self._pending_added_roots: list[str] = []
+        self._cancel_timer = QTimer(self)
+        self._cancel_timer.setSingleShot(True)
+        self._cancel_timer.setInterval(CANCEL_GRACE_MS)
+        self._cancel_timer.timeout.connect(self._on_cancel_timeout)
         self._retention_timer = QTimer(self)
         self._retention_timer.setInterval(24 * 60 * 60 * 1000)
         self._retention_timer.timeout.connect(self._enforce_index_retention)
@@ -857,6 +862,7 @@ class AppState(QObject):
         self.last_result = None
         clear_author_cache()
         self._pending_restart = False
+        self._cancel_timer.stop()
         if self._cancel is not None:
             self._cancel.set()
         self._generation += 1
@@ -1052,11 +1058,42 @@ class AppState(QObject):
         self._pending_restart = False
         if self._cancel is not None:
             self._cancel.set()
+            if self._task is not None:
+                self._cancel_timer.start()
+
+    @Slot()
+    def _on_cancel_timeout(self) -> None:
+        """Libera a UI quando o worker não responde ao cancelamento."""
+        if (
+            not self.is_scanning
+            or self._cancel is None
+            or not self._cancel.is_set()
+        ):
+            return
+        logger.warning(
+            "cancelamento não concluiu em %s ms; tarefa destacada",
+            CANCEL_GRACE_MS,
+        )
+        self._generation += 1
+        self._task = None
+        self._signals = None
+        self._cancel = None
+        self._scan_merge = False
+        self.is_scanning = False
+        self.index_building = False
+        self._building_index_path = None
+        # Não apagar o índice em uso pelo worker antigo; o GC o remove
+        # depois da carência quando ninguém mais o referencia.
+        self._pending_index = None
+        self._cancel_timer.stop()
+        self.scanCancelled.emit()
+        self._emit_pending_roots()
 
     def _finish_task(self, generation: int) -> None:
         """Libera a task atual, ignorando callbacks de gerações antigas."""
         if generation != self._generation:
             return
+        self._cancel_timer.stop()
         self._signals = None
         self._task = None
         self._cancel = None
@@ -1090,14 +1127,24 @@ class AppState(QObject):
     def _on_progress(self, generation: int, progress: ScanProgress) -> None:
         if generation != self._generation:
             return
+        if self._cancel is not None and self._cancel.is_set():
+            return
         self.scanProgress.emit(progress)
 
     @Slot(int, object)
     def _on_result(self, generation: int, result: ScanResult) -> None:
         if generation != self._generation:
             return
+        cancelled = self._cancel is not None and self._cancel.is_set()
         merge_base = self.last_result if self._scan_merge else None
         self._finish_task(generation)
+        if cancelled:
+            if result.index is not None and result.index is not self.search_index:
+                result.index.delete(managed_dir=self.index_dir)
+            self._discard_pending_index()
+            logger.info("scan result discarded after cancel gen=%s", generation)
+            self.scanCancelled.emit()
+            return
         if self._pending_restart:
             self._pending_restart = False
             if result.index is not None and result.index is not self.search_index:
@@ -1644,7 +1691,13 @@ class AppState(QObject):
     def _on_failed(self, generation: int, message: str) -> None:
         if generation != self._generation:
             return
+        cancelled = self._cancel is not None and self._cancel.is_set()
         self._finish_task(generation)
+        if cancelled:
+            self._discard_pending_index()
+            logger.info("scan failure ignored after cancel gen=%s", generation)
+            self.scanCancelled.emit()
+            return
         if self._pending_restart:
             self._pending_restart = False
             self._discard_pending_index()
@@ -1713,6 +1766,7 @@ class AppState(QObject):
     def shutdown(self) -> None:
         self._closing = True
         self._pending_restart = False
+        self._cancel_timer.stop()
         try:
             self._retention_timer.stop()
         except RuntimeError:

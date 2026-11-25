@@ -8,10 +8,11 @@ import pytest
 
 from app.config import AppConfig
 from app.features.analyzer.tree import NODE_ROLE, FileTree, _IndexFilterTask
-from app.services.index_store import SearchIndex
+from app.services.index_store import IndexWriter, SearchIndex
 from app.services.model import Node, ScanResult
 from app.services.scanner import ScanCancelled, stream_scan_paths
 from app.services.suggestions import build_suggestions
+from appshell.tasks import TaskCancelled
 from appshell.theme import init_theme
 
 
@@ -88,6 +89,29 @@ def test_stream_scan_cancel_removes_partial_index(tmp_path: Path) -> None:
         assert not index.path.exists()
         assert not Path(str(index.path) + "-wal").exists()
     finally:
+        index.delete()
+
+
+def test_index_writer_cancel_discards_finished_index(tmp_path: Path) -> None:
+    index = _index(tmp_path)
+    writer = IndexWriter(index)
+    node = Node(
+        path=str(tmp_path / "raiz"),
+        name="raiz",
+        is_dir=True,
+        dirs=1,
+    )
+    result = ScanResult(roots=[node], total_dirs=1)
+    try:
+        writer.start_root(node)
+        cancel = threading.Event()
+        cancel.set()
+        with pytest.raises(TaskCancelled):
+            writer.finish(result, 1, cancel)
+        writer.discard()
+        assert not index.path.exists()
+    finally:
+        writer.close()
         index.delete()
 
 

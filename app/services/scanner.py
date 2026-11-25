@@ -19,12 +19,12 @@ from typing import Any, Callable
 
 from appshell.tasks import TaskCancelled
 
+from .limits import MAX_ENTRIES
 from .model import Node, ScanProgress, ScanResult, ScanWarning
 from .suggestions import build_suggestions
 
 
 logger = logging.getLogger("diskpilot.scanner")
-MAX_ENTRIES = 1_500_000
 
 
 class ScanCancelled(Exception):
@@ -584,6 +584,9 @@ def stream_scan_paths(
         )
         result = scanner.run()
         writer.finish(result, writer.rows, token)
+        if token.is_set():
+            writer.discard()
+            raise TaskCancelled()
         result.lazy = True
         result.index_path = str(index.path)
         result.index = index
@@ -593,14 +596,17 @@ def stream_scan_paths(
             except Exception:
                 logger.exception("falha ao calcular sugestões indexadas")
                 result.suggestions = []
+            if token.is_set():
+                writer.discard()
+                raise TaskCancelled()
         return result
     except sqlite3.OperationalError as exc:
-        writer.abort()
+        writer.discard()
         if token.is_set():
             raise TaskCancelled() from exc
         raise
     except BaseException:
-        writer.abort()
+        writer.discard()
         raise
     finally:
         writer.close()

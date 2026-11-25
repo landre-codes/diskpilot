@@ -167,6 +167,52 @@ def test_remove_root_reuses_current_snapshot(
     state.shutdown()
 
 
+def test_cancel_timeout_releases_ui(qapp, tmp_path: Path) -> None:
+    config = AppConfig(tmp_path / "config")
+    state = AppState(config)
+    state.is_scanning = True
+    state._generation = 3
+    state._task = object()
+    state._cancel = threading.Event()
+    state._cancel.set()
+    cancelled: list[bool] = []
+    state.scanCancelled.connect(lambda: cancelled.append(True))
+
+    state._on_cancel_timeout()
+
+    assert cancelled == [True]
+    assert state.is_scanning is False
+    assert state._task is None
+    assert state._cancel is None
+    state.shutdown()
+
+
+def test_cancel_discards_late_result(qapp, tmp_path: Path) -> None:
+    config = AppConfig(tmp_path / "config")
+    state = AppState(config)
+    root = tmp_path / "dados"
+    root.mkdir()
+    index = SearchIndex.create(config.path.parent / "index")
+    result = _index_result(root)
+    result.index = index
+    result.index_path = str(index.path)
+    index.write(result)
+    state._generation = 4
+    state._cancel = threading.Event()
+    state._cancel.set()
+    state.is_scanning = True
+    cancelled: list[bool] = []
+    state.scanCancelled.connect(lambda: cancelled.append(True))
+
+    state._on_result(4, result)
+
+    assert cancelled == [True]
+    assert state.last_result is None
+    assert state.is_scanning is False
+    assert not index.path.exists()
+    state.shutdown()
+
+
 def test_stream_publish_records_history_once(
     qapp, qtbot, tmp_path: Path
 ) -> None:

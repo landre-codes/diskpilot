@@ -1761,9 +1761,13 @@ class IndexWriter:
         processed: int,
         cancel: threading.Event | None = None,
     ) -> None:
-        if cancel is not None and cancel.is_set():
-            raise TaskCancelled()
+        def check() -> None:
+            if cancel is not None and cancel.is_set():
+                raise TaskCancelled()
+
+        check()
         self._flush()
+        check()
         started = time.monotonic()
         self.conn.execute(
             "INSERT INTO scans VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -1793,12 +1797,14 @@ class IndexWriter:
             ),
         )
         try:
+            check()
             self.conn.executescript(INDEXES)
+            check()
         except sqlite3.IntegrityError as exc:
             raise IndexBuildError("sqlite_integrity", str(exc)) from exc
+        check()
         self.conn.execute("INSERT INTO nodes_fts(nodes_fts) VALUES ('optimize')")
-        if cancel is not None and cancel.is_set():
-            raise TaskCancelled()
+        check()
         meta = [
             ("schema_version", str(SCHEMA_VERSION)),
             ("complete", "1"),
@@ -1816,17 +1822,22 @@ class IndexWriter:
             "INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)", meta
         )
         self.conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+        check()
         self.conn.commit()
-        try:
-            self.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-        except sqlite3.Error as exc:
-            logger.warning("checkpoint do índice não concluído: %s", exc)
+        check()
+        if cancel is None or not cancel.is_set():
+            try:
+                self.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            except sqlite3.Error as exc:
+                logger.warning("checkpoint do índice não concluído: %s", exc)
+        check()
         case_groups, case_paths, hashes = _case_diagnostics(self.conn)
         diagnostics = (
             self.index._try_write_diagnostics(self.conn)
             if case_groups
             else None
         )
+        check()
         self.index.snapshot_roots = [root.path for root in result.roots]
         self.index.stats = IndexStats(
             rows=processed,
@@ -1849,6 +1860,11 @@ class IndexWriter:
                 self.index.delete()
 
     def abort(self) -> None:
+        self.close()
+
+    def discard(self) -> None:
+        """Fecha e remove o banco mesmo que a escrita já tenha sido concluída."""
+        self._ok = False
         self.close()
 
 
