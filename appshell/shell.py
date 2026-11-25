@@ -102,6 +102,9 @@ class ShellWindow(QWidget):
 
     #: Faixa de redimensionamento nativa (px) a partir da borda da janela.
     RESIZE_BORDER = 8
+    WINDOW_FLAGS = (
+        Qt.Window | Qt.FramelessWindowHint | Qt.NoDropShadowWindowHint
+    )
     log = logging.getLogger("appshell.shell")
 
     def __init__(
@@ -121,7 +124,7 @@ class ShellWindow(QWidget):
         drop_filter: Callable[[Any], list[str]] | None = None,
         drop_handler: Callable[[list[str]], None] | None = None,
     ) -> None:
-        super().__init__()
+        super().__init__(None, self.WINDOW_FLAGS)
         self.config = config
         self.theme = theme
         self.page_specs = page_specs
@@ -171,11 +174,8 @@ class ShellWindow(QWidget):
         self._geometry_timer.setInterval(120)
         self._geometry_timer.timeout.connect(self._watch_geometry)
 
-        # No Windows, título/ícone podem criar o handle nativo. Aplicamos o
-        # frameless antes disso para não exibir uma moldura nativa por um frame.
-        self.setWindowFlags(
-            Qt.Window | Qt.FramelessWindowHint | Qt.NoDropShadowWindowHint
-        )
+        # Os flags já vêm do construtor nativo; não recriamos a janela com
+        # setWindowFlags depois, o que poderia exibir uma moldura transitória.
         self.setWindowTitle(options.title)
         if options.icon is not None:
             self.setWindowIcon(options.icon)

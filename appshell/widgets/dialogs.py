@@ -132,8 +132,7 @@ class SheetDialog(QDialog):
         min_width: int = 480,
         min_height: int = 320,
     ) -> None:
-        super().__init__(parent)
-        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        super().__init__(parent, Qt.Dialog | Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setModal(True)
         self.setWindowModality(Qt.ApplicationModal)
