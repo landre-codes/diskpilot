@@ -18,10 +18,17 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ...services.limits import MAX_ENTRIES
 from ...services.model import ScanProgress, ScanResult
 from appshell.utils import format_bytes, format_duration, format_number
 from appshell.widgets.buttons import ActionButton, IconButton, SearchField, SelectButton
-from appshell.widgets.common import Chip, ElidedLabel, EmptyState, PageHeader
+from appshell.widgets.common import (
+    Chip,
+    DisclaimerBanner,
+    ElidedLabel,
+    EmptyState,
+    PageHeader,
+)
 from ...widgets.dialogs import (
     ConfirmDialog,
     ExportDialog,
@@ -71,6 +78,10 @@ class AnalyzerPage(BasePage):
         self.header.add_action(self.add_btn)
         self.header.add_action(self.warnings_btn)
         root.addWidget(self.header)
+
+        self.limit_banner = DisclaimerBanner("")
+        root.addWidget(self.limit_banner)
+        self._refresh_limit_banner()
 
         # chips de raízes -------------------------------------------------
         self.chips_area = QScrollArea(self)
@@ -167,8 +178,8 @@ class AnalyzerPage(BasePage):
         self.readonly_hint = QLabel("Somente leitura · nada é apagado")
         self.readonly_hint.setObjectName("Faint")
         self.readonly_hint.setToolTip(
-            "O DiskPilot não apaga arquivos nem pastas. Os tamanhos são lógicos "
-            "e podem diferir do espaço físico em arquivos esparsos/comprimidos. "
+            "O DiskPilot não apaga arquivos nem pastas. \nOs tamanhos são lógicos "
+            "e podem diferir do espaço físico em arquivos esparsos/comprimidos. \n"
             "O uso dos dados é de responsabilidade do usuário."
         )
         controls_row.addWidget(self.readonly_hint, 0, Qt.AlignVCenter)
@@ -311,6 +322,19 @@ class AnalyzerPage(BasePage):
                 f"- {warning.count} × {label} ({warning.operation})"
             )
         return "\n".join(lines)
+
+    def _refresh_limit_banner(self) -> None:
+        limit = self.state.scan_limit
+        self.limit_banner.label.setText(
+            "O volume máximo desta análise é calculado pela memória RAM "
+            "disponível no momento "
+            f"(limite atual: {format_number(limit)} entradas; teto: "
+            f"{format_number(MAX_ENTRIES)}). Fechar outros programas pode "
+            "ampliar o volume possível; o disco e o tempo também influenciam."
+        )
+
+    def on_show(self) -> None:
+        self._refresh_limit_banner()
 
     def _update_header(self) -> None:
         result = self.state.last_result
@@ -493,6 +517,7 @@ class AnalyzerPage(BasePage):
     # ------------------------------------------------------------- progresso
     def _on_scan_started(self) -> None:
         self._index_fallback = False
+        self._refresh_limit_banner()
         self.banner.show()
         self.banner_title.setText("Analisando pastas…")
         self.banner_path.setText("Preparando varredura…")

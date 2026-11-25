@@ -379,8 +379,9 @@ class SettingsPage(BasePage):
             f"{format_number(limit)} entradas"
         )
         self.data_values["limite"].setToolTip(
-            "Limite automático calculado pela memória disponível. "
-            f"Piso de {format_number(MIN_ENTRIES)} e teto de "
+            "Limite automático calculado pela memória RAM disponível no "
+            "momento. Piso de "
+            f"{format_number(MIN_ENTRIES)} e teto de "
             f"{format_number(MAX_ENTRIES)} entradas."
         )
         engine = self.state.scan_engine

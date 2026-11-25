@@ -166,6 +166,10 @@ def test_analyzer_shows_warning_action_and_memory_search_status(
     page = AnalyzerPage(state)
     qtbot.addWidget(page)
 
+    assert page.limit_banner.objectName() == "TintWarn"
+    assert "memória RAM" in page.limit_banner.label.text()
+    assert "entradas" in page.limit_banner.label.text()
+
     page._update_header()
 
     assert page.warnings_btn.isHidden() is False
