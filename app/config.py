@@ -21,7 +21,7 @@ DOMAIN_DEFAULTS: dict[str, Any] = {
         "max_entries": 0,
         "engine": "auto",
         "index_previous_days": 7,
-        "index_max_gb": 8,
+        "index_max_gb": 24,
         "index_verified_at": 0,
         "history": [],
     },

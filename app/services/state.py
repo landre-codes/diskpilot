@@ -1666,9 +1666,9 @@ class AppState(QObject):
 
     def _index_quota_bytes(self) -> int:
         try:
-            gigabytes = float(self.config.get("scan.index_max_gb", 8) or 8)
+            gigabytes = float(self.config.get("scan.index_max_gb", 24) or 24)
         except (TypeError, ValueError):
-            gigabytes = 8.0
+            gigabytes = 24.0
         if gigabytes <= 0:
             return 0
         return int(gigabytes * 1024**3)

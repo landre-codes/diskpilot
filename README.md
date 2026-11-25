@@ -257,7 +257,7 @@ O índice fica em `<pasta de configurações>/index`, por exemplo
   abertura.
 - O índice **anterior** é mantido como rollback (`scan.index_previous_path`)
   por até **7 dias** (`scan.index_previous_days`) ou até a quota de espaço
-  (`scan.index_max_gb`, padrão **8 GB**) ser pressionada, desde que o ativo já
+  (`scan.index_max_gb`, padrão **24 GB**) ser pressionada, desde que o ativo já
   tenha sido restaurado com sucesso e o anterior tenha pelo menos 24 horas.
 - Índices órfãos, não referenciados por ativo/anterior e com mais de 24 horas,
   são removidos após uma publicação/restauração bem-sucedida e também por um

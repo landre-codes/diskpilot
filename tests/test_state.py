@@ -125,6 +125,16 @@ def test_summary_persists_suggestions_in_index_across_restart(
         restored.shutdown()
 
 
+def test_default_index_quota_is_24gb(qapp, tmp_path: Path) -> None:
+    config = AppConfig(tmp_path / "config")
+    state = AppState(config)
+    try:
+        assert config.get("scan.index_max_gb") == 24
+        assert state._index_quota_bytes() == 24 * 1024**3
+    finally:
+        state.shutdown()
+
+
 def test_remove_root_reuses_current_snapshot(
     qapp, qtbot, tmp_path: Path, monkeypatch
 ) -> None:

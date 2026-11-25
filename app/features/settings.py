@@ -178,15 +178,16 @@ class SettingsPage(BasePage):
         quota_row.setSpacing(8)
         quota_caption = QLabel("Quota do índice")
         quota_caption.setObjectName("InfoLabel")
-        self.quota_btn = SelectButton("database", "8 GB", self)
+        self.quota_btn = SelectButton("database", "24 GB", self)
         self.quota_btn.set_options(
             (
                 ("4", "4 GB", "database"),
                 ("8", "8 GB", "database"),
                 ("16", "16 GB", "database"),
+                ("24", "24 GB", "database"),
                 ("0", "Sem quota", "database"),
             ),
-            current="8",
+            current="24",
         )
         self.quota_btn.setToolTip(
             "Limite soft para a pasta index. O snapshot ativo nunca é "
@@ -423,12 +424,12 @@ class SettingsPage(BasePage):
         self.clear_previous_btn.setEnabled(bool(usage.get("previous_exists")))
         try:
             quota_current = str(
-                int(float(self.state.config.get("scan.index_max_gb", 8) or 8))
+                int(float(self.state.config.get("scan.index_max_gb", 24) or 24))
             )
         except (TypeError, ValueError):
-            quota_current = "8"
-        if quota_current not in {"0", "4", "8", "16"}:
-            quota_current = "8"
+            quota_current = "24"
+        if quota_current not in {"0", "4", "8", "16", "24"}:
+            quota_current = "24"
         self.quota_btn.set_current(quota_current, emit=False)
 
     def _rescan(self) -> None:
