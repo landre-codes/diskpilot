@@ -6,8 +6,10 @@ configuração, tema e fábricas de chrome (barra de título, sidebar e toast).
 
 from __future__ import annotations
 
+import inspect
 import logging
 import sys
+import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -57,43 +59,107 @@ class ShellOptions:
 
 
 class FadeStack(QStackedWidget):
-    """Troca de páginas com fade suave (sem recriar os widgets)."""
+    """Troca de páginas com fade-out seguido de fade-in, sem recriar widgets.
+
+    O conteúdo novo não se move: a página antiga some suavemente para o
+    fundo e, só então, a nova aparece com fade-in. Isso evita a leitura
+    cruzada de dois textos e mantém foco e rolagem previsíveis.
+    """
+
+    FADE_OUT_MS = 130
+    FADE_IN_MS = 170
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._anim: QPropertyAnimation | None = None
+        self._effect_page: QWidget | None = None
+        self._generation = 0
+
+    @property
+    def is_transitioning(self) -> bool:
+        return self._anim is not None
+
+    def _clear_effect(self) -> None:
+        page = getattr(self, "_effect_page", None)
+        self._effect_page = None
+        if page is not None:
+            try:
+                page.setGraphicsEffect(None)
+            except RuntimeError:
+                pass
+
+    def _clear_transition(self) -> None:
+        self._generation += 1
+        anim = getattr(self, "_anim", None)
+        self._anim = None
+        if anim is not None:
+            anim.stop()
+            anim.deleteLater()
+        self._clear_effect()
+
+    def setCurrentIndex(self, index: int) -> None:  # noqa: N802
+        # Uma troca direta (animate=False) não pode deixar o efeito da
+        # transição anterior aplicado na página.
+        self._clear_transition()
+        super().setCurrentIndex(index)
 
     def set_index_animated(self, index: int) -> None:
         if index < 0 or index >= self.count():
             return
         if index == self.currentIndex():
             return
-        if self._anim is not None:
-            self._anim.stop()
-            self._anim.deleteLater()
-            self._anim = None
-            for i in range(self.count()):
-                self.widget(i).setGraphicsEffect(None)
-        page = self.widget(index)
-        effect = QGraphicsOpacityEffect(page)
-        effect.setOpacity(0.0)
-        page.setGraphicsEffect(effect)
-        self.setCurrentIndex(index)
+
+        self._clear_transition()
+        generation = self._generation
+        old_page = self.currentWidget()
+        if old_page is None or old_page.graphicsEffect() is not None:
+            self.setCurrentIndex(index)
+            return
+
+        effect = QGraphicsOpacityEffect(old_page)
+        effect.setOpacity(1.0)
+        old_page.setGraphicsEffect(effect)
+        self._effect_page = old_page
         anim = QPropertyAnimation(effect, b"opacity", self)
-        anim.setDuration(190)
-        anim.setStartValue(0.0)
-        anim.setEndValue(1.0)
-        anim.setEasingCurve(QEasingCurve.OutCubic)
-
-        def clear() -> None:
-            if page.graphicsEffect() is effect:
-                page.setGraphicsEffect(None)
-            if self._anim is anim:
-                self._anim = None
-            anim.deleteLater()
-
-        anim.finished.connect(clear)
+        anim.setDuration(self.FADE_OUT_MS)
+        anim.setStartValue(1.0)
+        anim.setEndValue(0.0)
+        anim.setEasingCurve(QEasingCurve.InOutCubic)
         self._anim = anim
+
+        def after_out() -> None:
+            if self._generation != generation or self._anim is not anim:
+                return
+            self._anim = None
+            anim.deleteLater()
+            self._clear_effect()
+            super(FadeStack, self).setCurrentIndex(index)
+
+            new_page = self.currentWidget()
+            if new_page is None or new_page.graphicsEffect() is not None:
+                return
+            fade_in = QGraphicsOpacityEffect(new_page)
+            fade_in.setOpacity(0.0)
+            new_page.setGraphicsEffect(fade_in)
+            self._effect_page = new_page
+            anim_in = QPropertyAnimation(fade_in, b"opacity", self)
+            anim_in.setDuration(self.FADE_IN_MS)
+            anim_in.setStartValue(0.0)
+            anim_in.setEndValue(1.0)
+            anim_in.setEasingCurve(QEasingCurve.OutCubic)
+
+            def after_in() -> None:
+                if self._generation != generation or self._anim is not anim_in:
+                    return
+                self._anim = None
+                anim_in.deleteLater()
+                self._clear_effect()
+
+            anim_in.finished.connect(after_in)
+            self._anim = anim_in
+            anim_in.start()
+
+        anim.finished.connect(after_out)
         anim.start()
 
 
@@ -148,6 +214,7 @@ class ShellWindow(QWidget):
         self._pages: dict[str, BasePage] = {}
         self._current_key = ""
         self._first_show = True
+        self._foreground_requested = False
         self._manual_drag = False
         self._drag_offset = QPoint()
         self._pending_restore_pos: QPoint | None = None
@@ -237,7 +304,22 @@ class ShellWindow(QWidget):
         content_layout.setSpacing(12)
         self.stack = FadeStack(self.content)
         for spec in self.page_specs:
-            page = spec.factory(self.context)
+            # Páginas criadas sem pai viram janelas nativas temporárias no
+            # Windows. Elas apareciam como um retângulo pequeno/vazio antes
+            # do primeiro frame da janela principal. Se a fábrica aceitar
+            # ``parent``, o widget nasce dentro do stack.
+            try:
+                accepts_parent = "parent" in inspect.signature(
+                    spec.factory
+                ).parameters
+            except (TypeError, ValueError):
+                accepts_parent = False
+            page = (
+                spec.factory(self.context, self.stack)
+                if accepts_parent
+                else spec.factory(self.context)
+            )
+            page.setParent(self.stack)
             self._pages[spec.key] = page
             self.stack.addWidget(page)
             page.toastRequested.connect(self.show_toast)
@@ -662,6 +744,13 @@ class ShellWindow(QWidget):
 
     def _reveal_first_frame(self) -> None:
         self.setWindowOpacity(1.0)
+        if not self._foreground_requested:
+            self._foreground_requested = True
+            # O show() do Qt no Windows não garante a ativação da janela
+            # quando o processo foi iniciado por um console/IDE. Sem isso a
+            # janela fica atrás do aplicativo de origem, embora o processo
+            # esteja saudável.
+            self.bring_to_front()
 
     def _focus_window(self) -> None:
         """Evita que o primeiro IconButton da barra de título nasça focado."""
@@ -1080,8 +1169,82 @@ class ShellWindow(QWidget):
         target.activateWindow()
         if target is self and self.windowHandle() is not None:
             self.windowHandle().requestActivate()
+        if target is self:
+            self._force_foreground_windows()
+
+    def _force_foreground_windows(self) -> None:
+        """Garante que a janela apareça à frente no Windows.
+
+        ``requestActivate()`` pode ser ignorado quando o processo foi
+        iniciado por um console/IDE que não está em primeiro plano. Nesse
+        caso a janela fica atrás do aplicativo de origem e o usuário vê
+        apenas o ícone na barra de tarefas. O fallback topmost mantém a
+        janela visível por alguns segundos, até que ela receba o foco.
+        """
+        if not sys.platform.startswith("win"):
+            return
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            user32 = ctypes.windll.user32
+            user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+            user32.SetForegroundWindow.restype = wintypes.BOOL
+            user32.SetWindowPos.argtypes = [
+                wintypes.HWND,
+                wintypes.HWND,
+                ctypes.c_int,
+                ctypes.c_int,
+                ctypes.c_int,
+                ctypes.c_int,
+                ctypes.c_uint,
+            ]
+            user32.SetWindowPos.restype = wintypes.BOOL
+            hwnd = int(self.winId())
+            user32.SetForegroundWindow(hwnd)
+            if user32.GetForegroundWindow() == hwnd:
+                return
+
+            # 0x13 = SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE
+            user32.SetWindowPos(
+                hwnd, wintypes.HWND(-1), 0, 0, 0, 0, 0x13
+            )
+            user32.SetForegroundWindow(hwnd)
+            self.log.info(
+                "janela sem primeiro plano; usando fallback topmost temporário"
+            )
+
+            deadline = time.monotonic() + 10.0
+
+            def clear_topmost() -> None:
+                user32.SetWindowPos(
+                    hwnd, wintypes.HWND(-2), 0, 0, 0, 0, 0x13
+                )
+
+            def wait_for_focus() -> None:
+                # A janela está visível (topmost), mas ainda pode não ser a
+                # dona do primeiro plano. Tentamos ativá-la enquanto o
+                # usuário tem tempo de vê-la e clicar nela.
+                user32.SetForegroundWindow(hwnd)
+                if user32.GetForegroundWindow() == hwnd:
+                    clear_topmost()
+                elif time.monotonic() < deadline:
+                    QTimer.singleShot(200, wait_for_focus)
+                else:
+                    clear_topmost()
+
+            QTimer.singleShot(200, wait_for_focus)
+        except Exception:
+            self.log.debug("falha ao forçar primeiro plano", exc_info=True)
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
+        self.log.info(
+            "fechamento: spontaneous=%s active=%s minimized=%s visible=%s",
+            event.spontaneous(),
+            self.isActiveWindow(),
+            self.isMinimized(),
+            self.isVisible(),
+        )
         self._save_geometry()
         if self._close_callback is not None:
             try:

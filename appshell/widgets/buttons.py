@@ -4,7 +4,17 @@ from __future__ import annotations
 
 from typing import Any, Iterable
 
-from PySide6.QtCore import QPoint, QRectF, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import (
+    QEasingCurve,
+    QPoint,
+    QPropertyAnimation,
+    QRectF,
+    QSize,
+    Qt,
+    QTimer,
+    Property,
+    Signal,
+)
 from PySide6.QtGui import QAction, QColor, QFont, QIcon, QPainter, QPen
 from PySide6.QtWidgets import (
     QLineEdit,
@@ -174,6 +184,10 @@ class NavButton(QWidget):
         self._active = False
         self._hover = False
         self._ratio = 1.0
+        self._active_progress = 0.0
+        self._active_anim = QPropertyAnimation(self, b"activeProgress", self)
+        self._active_anim.setDuration(220)
+        self._active_anim.setEasingCurve(QEasingCurve.InOutCubic)
         self.setFixedHeight(46)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.setCursor(Qt.PointingHandCursor)
@@ -182,10 +196,26 @@ class NavButton(QWidget):
         self.setAttribute(Qt.WA_Hover, True)
         get_theme().changed.connect(self.update)
 
+    def _get_active_progress(self) -> float:
+        return self._active_progress
+
+    def _set_active_progress(self, value: float) -> None:
+        self._active_progress = max(0.0, min(1.0, float(value)))
+        self.update()
+
+    activeProgress = Property(
+        float, _get_active_progress, _set_active_progress
+    )
+
     def set_active(self, active: bool) -> None:
+        active = bool(active)
         if self._active == active:
             return
         self._active = active
+        self._active_anim.stop()
+        self._active_anim.setStartValue(self._active_progress)
+        self._active_anim.setEndValue(1.0 if active else 0.0)
+        self._active_anim.start()
         self.update()
 
     def set_expansion(self, ratio: float) -> None:
@@ -220,27 +250,40 @@ class NavButton(QWidget):
         w, h = self.width(), self.height()
         p.fillRect(self.rect(), QColor(theme.color("sidebar")))
         ratio = self._ratio
+        active = self._active_progress
+        accent = QColor(theme.color("primary"))
 
-        if self._active:
-            bg = theme.qcolor("primary", 31)
-            p.setPen(Qt.NoPen)
-            p.setBrush(bg)
-            p.drawRoundedRect(QRectF(8, 3, w - 16, h - 6), 9, 9)
-            p.setBrush(QColor(theme.color("primary")))
-            p.drawRoundedRect(QRectF(8, (h - 20) / 2, 3, 20), 1.5, 1.5)
-        elif self._hover:
+        if self._hover and active < 0.999:
             p.setPen(Qt.NoPen)
             p.setBrush(QColor(theme.color("hover")))
             p.drawRoundedRect(QRectF(8, 3, w - 16, h - 6), 9, 9)
 
+        if active > 0.001:
+            bg = QColor(accent)
+            bg.setAlpha(int(round(31 * active)))
+            p.setPen(Qt.NoPen)
+            p.setBrush(bg)
+            p.drawRoundedRect(QRectF(8, 3, w - 16, h - 6), 9, 9)
+            bar = QColor(accent)
+            bar.setAlpha(int(round(255 * active)))
+            bar_height = 20.0 * active
+            p.setBrush(bar)
+            p.drawRoundedRect(
+                QRectF(8, (h - bar_height) / 2, 3, bar_height), 1.5, 1.5
+            )
+
         if self.hasFocus():
-            p.setPen(QPen(QColor(theme.color("primary")), 1, Qt.DotLine))
+            p.setPen(QPen(accent, 1, Qt.DotLine))
             p.setBrush(Qt.NoBrush)
             p.drawRoundedRect(QRectF(8.5, 3.5, w - 17, h - 7), 9, 9)
 
-        icon_color = theme.color(
-            "primary" if self._active else ("text" if self._hover else "muted")
-        )
+        base_role = "text" if (self._hover or active >= 0.5) else "muted"
+        base = QColor(theme.color(base_role))
+        icon_color = QColor(
+            round(base.red() + (accent.red() - base.red()) * active),
+            round(base.green() + (accent.green() - base.green()) * active),
+            round(base.blue() + (accent.blue() - base.blue()) * active),
+        ).name()
         pm = icon(self.icon_name, icon_color, 21).pixmap(21, 21)
         x_expanded = 20.0
         x_collapsed = (w - 21) / 2.0
@@ -249,12 +292,26 @@ class NavButton(QWidget):
 
         if ratio > 0.08:
             alpha = int(max(0.0, min(1.0, (ratio - 0.10) / 0.55)) * 255)
-            color = QColor(theme.color("primary" if self._active else "text"))
+            text_base = QColor(theme.color("text"))
+            color = QColor(
+                round(
+                    text_base.red()
+                    + (accent.red() - text_base.red()) * active
+                ),
+                round(
+                    text_base.green()
+                    + (accent.green() - text_base.green()) * active
+                ),
+                round(
+                    text_base.blue()
+                    + (accent.blue() - text_base.blue()) * active
+                ),
+            )
             color.setAlpha(alpha)
             p.setPen(color)
             f = QFont("Segoe UI")
             f.setPixelSize(theme.fs(13))
-            f.setWeight(QFont.DemiBold if self._active else QFont.Normal)
+            f.setWeight(QFont.DemiBold if active > 0.5 else QFont.Normal)
             p.setFont(f)
             text_x = 52
             available = max(0, w - text_x - 14)

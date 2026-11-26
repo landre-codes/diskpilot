@@ -10,7 +10,7 @@ from PySide6.QtWidgets import QBoxLayout
 from app.config import AppConfig
 from appshell.tasks import Task, TaskCancelled, TaskRunner
 from appshell.theme import init_theme
-from appshell.widgets.buttons import ActionButton, IconButton
+from appshell.widgets.buttons import ActionButton, IconButton, NavButton
 from appshell.widgets.common import PageHeader
 
 
@@ -77,6 +77,22 @@ def test_icon_button_exposes_accessible_name(qapp, tmp_path) -> None:
     button = IconButton("close", "Fechar painel", None, 16)
 
     assert button.accessibleName() == "Fechar painel"
+
+
+def test_nav_button_active_pill_fades_in_and_out(qapp, qtbot, tmp_path) -> None:
+    init_theme(qapp, AppConfig(tmp_path / "config"))
+    button = NavButton("dados", "Dados", "database")
+    qtbot.addWidget(button)
+    button.show()
+
+    button.set_active(True)
+    qtbot.wait(40)
+    assert 0.0 < button._active_progress < 1.0
+    qtbot.waitUntil(lambda: button._active_progress >= 0.99, timeout=1000)
+
+    button.set_active(False)
+    qtbot.waitUntil(lambda: button._active_progress <= 0.01, timeout=1000)
+    button.close()
 
 
 def test_action_buttons_accept_keyboard_focus(qapp, tmp_path) -> None:

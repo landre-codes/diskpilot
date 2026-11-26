@@ -44,4 +44,4 @@ class PageSpec:
     title: str
     subtitle: str
     icon: str
-    factory: Callable[[AppContext], BasePage]
+    factory: Callable[..., BasePage]

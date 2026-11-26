@@ -52,6 +52,38 @@ def test_main_window_builds_and_navigates(qapp, qtbot, tmp_path: Path) -> None:
     window.close()
 
 
+def test_navigation_animates_with_overlay_and_cleans_up(
+    qapp, qtbot, tmp_path: Path
+) -> None:
+    config = _config(tmp_path)
+    theme = init_theme(qapp, config)
+    pages = [
+        PageSpec("inicio", "Início", "Página inicial", "home", _SamplePage),
+        PageSpec("dados", "Dados", "Dados de exemplo", "database", _SamplePage),
+    ]
+    window = MainWindow(config, theme, pages)
+    qtbot.addWidget(window)
+    window.show()
+    qtbot.wait(20)
+    window.navigate("dados", animate=False)
+    qtbot.wait(20)
+
+    window.navigate("inicio")
+    assert window.stack.is_transitioning
+    # Uma troca rápida deve cancelar a transição anterior e limpar os efeitos.
+    window.navigate("dados")
+    window.navigate("inicio")
+    qtbot.waitUntil(
+        lambda: not window.stack.is_transitioning,
+        timeout=2000,
+    )
+
+    assert window.stack.currentWidget() is window._pages["inicio"]
+    for index in range(window.stack.count()):
+        assert window.stack.widget(index).graphicsEffect() is None
+    window.close()
+
+
 def test_first_show_reveals_window(qapp, qtbot, tmp_path: Path) -> None:
     config = _config(tmp_path)
     theme = init_theme(qapp, config)

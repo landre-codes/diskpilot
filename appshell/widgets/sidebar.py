@@ -345,10 +345,10 @@ class Sidebar(QWidget):
             self.collapsedChanged.emit(collapsed)
             return
         anim = QPropertyAnimation(self, b"sidebarWidth", self)
-        anim.setDuration(240)
+        anim.setDuration(280)
         anim.setStartValue(self.width())
         anim.setEndValue(target)
-        anim.setEasingCurve(QEasingCurve.OutCubic)
+        anim.setEasingCurve(QEasingCurve.InOutCubic)
 
         def finish() -> None:
             if self._anim is anim:
