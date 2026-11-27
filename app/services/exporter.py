@@ -12,7 +12,12 @@ from pathlib import Path
 from typing import Any
 
 from .. import APP_NAME
-from appshell.utils import file_author_fast, format_bytes, format_datetime
+from appshell.utils import (
+    file_author_fast,
+    file_owner_fast,
+    format_bytes,
+    format_datetime,
+)
 from .history import compare_snapshots
 from .model import Node, ScanResult
 
@@ -92,6 +97,7 @@ def item_rows(
                     "pastas": node.dirs,
                     "modificado": format_datetime(node.mtime),
                     "autor": file_author_fast(node.path) or "—",
+                    "proprietario": file_owner_fast(node.path) or "—",
                     "erro": node.error,
                 }
             )
@@ -117,6 +123,7 @@ def summary_payload(result: ScanResult) -> dict[str, Any]:
                 "arquivos": root.files,
                 "pastas": root.dirs,
                 "autor": file_author_fast(root.path) or "—",
+                "proprietario": file_owner_fast(root.path) or "—",
             }
             for root in result.roots
         ],
@@ -141,6 +148,7 @@ def write_csv(
                 "pastas",
                 "modificado",
                 "autor",
+                "proprietario",
                 "erro",
                 "unidade",
                 "registro",
@@ -164,6 +172,7 @@ def write_csv(
                 row["pastas"],
                 row["modificado"],
                 row["autor"],
+                row["proprietario"],
                 row["erro"],
                 row["unit"],
                 "item",
@@ -181,6 +190,7 @@ def write_csv(
                     "",
                     path,
                     Path(path).name,
+                    "",
                     "",
                     "",
                     "",
@@ -426,9 +436,10 @@ def write_xlsx(
             "Arquivos",
             "Pastas",
             "Autor",
+            "Proprietário",
         ]
     )
-    _style_header(summary, roots_row + 1, 7)
+    _style_header(summary, roots_row + 1, 8)
     for root in payload.get("raizes", []):
         summary.append(
             [
@@ -439,6 +450,7 @@ def write_xlsx(
                 root["arquivos"],
                 root["pastas"],
                 root["autor"],
+                root["proprietario"],
             ]
         )
     _force_text_cells(summary)
@@ -450,6 +462,7 @@ def write_xlsx(
         ("E", 12),
         ("F", 12),
         ("G", 26),
+        ("H", 26),
     ):
         summary.column_dimensions[column].width = width
     summary.freeze_panes = "A2"
@@ -469,6 +482,7 @@ def write_xlsx(
         "Pastas",
         "Modificado",
         "Autor",
+        "Proprietário",
         "Erro",
         "Unidade",
     ]
@@ -488,6 +502,7 @@ def write_xlsx(
                 row["pastas"],
                 row["modificado"],
                 row["autor"],
+                row["proprietario"],
                 row["erro"],
                 row["unit"],
             ]
@@ -505,8 +520,9 @@ def write_xlsx(
         ("I", 10),
         ("J", 18),
         ("K", 26),
-        ("L", 30),
-        ("M", 9),
+        ("L", 26),
+        ("M", 30),
+        ("N", 9),
     ):
         top.column_dimensions[column].width = width
     for cell in top["E"][1:]:
@@ -517,7 +533,7 @@ def write_xlsx(
         cell.number_format = '0.00"%"'
     top.freeze_panes = "A2"
     if top.max_row > 1:
-        top.auto_filter.ref = f"A1:M{top.max_row}"
+        top.auto_filter.ref = f"A1:N{top.max_row}"
 
     suggestions = workbook.create_sheet("Sugestões")
     sug_headers = [

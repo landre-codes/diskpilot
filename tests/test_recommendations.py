@@ -12,6 +12,7 @@ from app.features.recommendation_table import (
     RecommendationTable,
     RecommendationTableModel,
 )
+from app.features.recommendation_section import RecommendationSection
 from app.features.recommendations import RecommendationsPage
 from app.services.model import ScanResult, Suggestion
 from app.services.state import AppState
@@ -168,6 +169,34 @@ def test_recommendations_page_exposes_searchable_table(
 
     page.close()
     state.shutdown()
+
+
+def test_recommendation_section_collapse_is_animated(
+    qapp, qtbot, tmp_path: Path
+) -> None:
+    init_theme(qapp, AppConfig(tmp_path / "config"))
+    row = _row("Caches", r"C:\dados\cache", size=500)
+    section = RecommendationSection(row.suggestion, [row])
+    qtbot.addWidget(section)
+    section.resize(900, 500)
+    section.show()
+    qtbot.wait(80)
+
+    assert section.table.isVisible()
+    assert section.table.height() >= 150
+
+    section.set_expanded(False)
+    assert section.expanded is False
+    assert section.table.isVisible()
+    qtbot.waitUntil(lambda: not section.table.isVisible(), timeout=1500)
+
+    section.set_expanded(True)
+    qtbot.waitUntil(
+        lambda: section.table.isVisible() and section.table.height() >= 150,
+        timeout=1500,
+    )
+    assert section.expanded is True
+    section.close()
 
 
 def test_short_path_keeps_last_parts() -> None:

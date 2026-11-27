@@ -73,12 +73,13 @@ def test_csv_neutralizes_formula_like_fields(tmp_path: Path) -> None:
 
     assert rows[1][2] == "'=1+1"
     assert rows[1][3] == "'=1+1.txt"
-    assert rows[1][11] == "'+ERRO"
-    assert rows[1][12] == "GB"
-    assert rows[1][13] == "item"
+    assert isinstance(rows[1][11], str)
+    assert rows[1][12] == "'+ERRO"
+    assert rows[1][13] == "GB"
+    assert rows[1][14] == "item"
     assert rows[-1][2] == "'-caminho"
-    assert rows[-1][13] == "sugestao_path"
-    assert rows[-1][16] == "safe"
+    assert rows[-1][14] == "sugestao_path"
+    assert rows[-1][17] == "safe"
     assert files[0].path == "=1+1"
     assert files[0].name == "=1+1.txt"
     assert files[0].error == "+ERRO"
@@ -97,9 +98,9 @@ def test_xlsx_keeps_formula_like_fields_as_text(tmp_path: Path) -> None:
     assert top["D2"].data_type == "s"
     assert top["F2"].value == 0.0
     assert top["F2"].number_format == "0.000"
-    assert top["L2"].value == "+ERRO"
-    assert top["L2"].data_type == "s"
-    assert top["M2"].value == "GB"
+    assert top["M2"].value == "+ERRO"
+    assert top["M2"].data_type == "s"
+    assert top["N2"].value == "GB"
 
     suggestions = workbook["Sugestões"]
     assert suggestions["B2"].value == "=HYPERLINK(\"http://exemplo\")"
@@ -148,7 +149,7 @@ def test_suggestion_paths_are_exported_one_per_row(tmp_path: Path) -> None:
     write_csv(result, [], [], str(csv_path))
     with csv_path.open(encoding="utf-8-sig", newline="") as handle:
         rows = list(csv.reader(handle, delimiter=";"))
-    suggestion_rows = [row for row in rows[1:] if row[13] == "sugestao_path"]
+    suggestion_rows = [row for row in rows[1:] if row[14] == "sugestao_path"]
     assert [row[2] for row in suggestion_rows] == [
         r"C:\dados\cache1",
         r"C:\dados\cache2",

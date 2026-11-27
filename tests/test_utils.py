@@ -139,6 +139,86 @@ def test_good_config_drops_detailed_summary_paths(tmp_path: Path) -> None:
     assert stored["theme"] == "dark"
 
 
+def test_owner_cache_is_separate_from_author(monkeypatch) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr(utils.sys, "platform", "win32")
+    monkeypatch.setattr(
+        utils,
+        "_windows_owner",
+        lambda path: calls.append(path) or r"DOMINIO\usuario",
+    )
+    utils.clear_file_metadata_cache()
+    path = "C:/exemplo/pasta"
+
+    assert utils.cached_file_owner(path) is None
+    assert utils.file_owner(path) == r"DOMINIO\usuario"
+    assert utils.cached_file_owner(path) == r"DOMINIO\usuario"
+    assert utils.file_owner(path) == r"DOMINIO\usuario"
+    assert calls == [path]
+    assert utils.cached_file_author(path) is None
+
+    utils.clear_file_metadata_cache()
+    assert utils.cached_file_owner(path) is None
+
+
+def test_owner_fast_does_not_touch_unc_cache_miss(monkeypatch) -> None:
+    utils.clear_file_metadata_cache()
+    monkeypatch.setattr(utils.sys, "platform", "win32")
+
+    def fail(_path: str) -> str:
+        raise AssertionError("consulta de rede não deveria ocorrer")
+
+    monkeypatch.setattr(utils, "_windows_owner", fail)
+    assert utils.file_owner_fast(r"\\servidor\pasta") == ""
+
+
+def test_system_identities_are_filtered() -> None:
+    hidden = [
+        "SYSTEM",
+        "SISTEMA",
+        r"AUTORIDADE NT\SISTEMA",
+        r"NT AUTHORITY\SYSTEM",
+        r"BUILTIN\Administradores",
+        r"BUILTIN\Administrators",
+        r"BUILINT\Administradores",
+        r"BUILTIN\Usuários",
+        r"NT SERVICE\TrustedInstaller",
+        "TrustedInstaller",
+        "Todos",
+        "CREATOR OWNER",
+        "S-1-5-18",
+        "S-1-5-32-544",
+        "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464",
+    ]
+    visible = [
+        r"DESKTOP-49P2M7O\usuario",
+        r"DOMINIO\Maria",
+        "Administrator",
+        "Landre Codes",
+        "S-1-5-21-1-2-3-1001",
+    ]
+    for value in hidden:
+        assert utils.is_system_identity(value), value
+    for value in visible:
+        assert not utils.is_system_identity(value), value
+
+
+def test_file_metadata_hides_system_accounts(monkeypatch) -> None:
+    monkeypatch.setattr(utils.sys, "platform", "win32")
+    monkeypatch.setattr(
+        utils, "_windows_owner", lambda path: r"AUTORIDADE NT\SISTEMA"
+    )
+    monkeypatch.setattr(utils, "_windows_author", lambda path: "SYSTEM")
+    monkeypatch.setattr(utils, "_embedded_author", lambda path: "")
+    utils.clear_file_metadata_cache()
+    path = "C:/exemplo/sistema"
+
+    assert utils.file_owner(path) == ""
+    assert utils.file_author(path) == ""
+    assert utils.cached_file_owner(path) == ""
+    assert utils.cached_file_author(path) == ""
+
+
 def test_cleanup_stale_temp_dirs_only_removes_old_prefixes(
     tmp_path: Path, monkeypatch
 ) -> None:

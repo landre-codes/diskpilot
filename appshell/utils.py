@@ -8,7 +8,9 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
+import unicodedata
 from collections import OrderedDict
 from datetime import datetime
 from functools import lru_cache
@@ -217,8 +219,11 @@ def open_in_explorer(path: str, select: bool = False) -> bool:
         return False
 
 
+_metadata_lock = threading.Lock()
 _author_cache: OrderedDict[str, str] = OrderedDict()
+_owner_cache: OrderedDict[str, str] = OrderedDict()
 _AUTHOR_CACHE_LIMIT = 4096
+_OWNER_CACHE_LIMIT = 4096
 _OOXML_EXT = {
     ".docx",
     ".docm",
@@ -233,19 +238,137 @@ _OOXML_EXT = {
     ".vsdx",
 }
 
+_SYSTEM_DOMAINS = {
+    "nt authority",
+    "autoridade nt",
+    "nt service",
+    "servico nt",
+    "builtin",
+    "builting",  # tolera a grafia incorreta comum
+    "application package authority",
+    "autoridade de pacote de aplicativo",
+}
+_SYSTEM_PRINCIPALS = {
+    "system",
+    "sistema",
+    "local service",
+    "servico local",
+    "network service",
+    "servico de rede",
+    "trustedinstaller",
+    "administrators",
+    "administradores",
+    "users",
+    "usuarios",
+    "everyone",
+    "todos",
+    "creator owner",
+    "criador proprietario",
+    "criador/proprietario",
+    "authenticated users",
+    "usuarios autenticados",
+    "interactive",
+    "interativo",
+    "service",
+    "servico",
+    "anonymous logon",
+    "logon anonimo",
+    "window manager",
+    "gerenciador de janelas",
+    "iis_iusrs",
+}
+_SYSTEM_SIDS = {
+    "S-1-1-0",  # Everyone
+    "S-1-3-0",  # Creator Owner
+    "S-1-5-4",  # Interactive
+    "S-1-5-6",  # Service
+    "S-1-5-7",  # Anonymous Logon
+    "S-1-5-11",  # Authenticated Users
+    "S-1-5-18",  # Local System
+    "S-1-5-19",  # Local Service
+    "S-1-5-20",  # Network Service
+}
+
+
+def _fold_identity(text: str) -> str:
+    normalized = unicodedata.normalize("NFKD", text.casefold())
+    return "".join(
+        char for char in normalized if not unicodedata.combining(char)
+    ).strip()
+
+
+def is_system_identity(value: str) -> bool:
+    """Conta interna do Windows que não agrega valor ao usuário.
+
+    Cobre SYSTEM/SISTEMA, serviços locais, BUILTIN\\Administradores,
+    BUILTIN\\Usuários, Everyone, TrustedInstaller e SIDs equivalentes.
+    """
+    text = (value or "").strip()
+    if not text:
+        return False
+    upper = text.upper()
+    if upper.startswith("S-1-"):
+        if upper in _SYSTEM_SIDS:
+            return True
+        # Grupos BUILTIN, serviços NT SERVICE e Window Manager.
+        return upper.startswith(
+            ("S-1-5-32-", "S-1-5-80-", "S-1-5-90-")
+        )
+    folded = _fold_identity(text)
+    domain, separator, principal = folded.partition("\\")
+    if separator:
+        if domain.strip() in _SYSTEM_DOMAINS:
+            return True
+        principal = principal.strip()
+    else:
+        principal = folded
+    return principal in _SYSTEM_PRINCIPALS
+
+
+def _cache_get(cache: OrderedDict[str, str], key: str) -> str | None:
+    with _metadata_lock:
+        value = cache.get(key)
+        if value is not None:
+            cache.move_to_end(key)
+        return value
+
+
+def _cache_put(
+    cache: OrderedDict[str, str], key: str, value: str, limit: int
+) -> None:
+    with _metadata_lock:
+        cache[key] = value
+        cache.move_to_end(key)
+        while len(cache) > limit:
+            cache.popitem(last=False)
+
 
 def cached_file_author(path: str) -> str | None:
     """Autor já resolvido, ou ``None`` se ainda não foi consultado."""
-    key = normalize_path(str(path))
-    value = _author_cache.get(key)
-    if value is not None:
-        _author_cache.move_to_end(key)
-    return value
+    return _cache_get(_author_cache, normalize_path(str(path)))
 
 
 def clear_author_cache() -> None:
     """Invalida metadados de autores ao trocar ou limpar a análise."""
-    _author_cache.clear()
+    with _metadata_lock:
+        _author_cache.clear()
+
+
+def cached_file_owner(path: str) -> str | None:
+    """Proprietário NTFS/ACL já resolvido, ou ``None`` se não consultado."""
+    return _cache_get(_owner_cache, normalize_path(str(path)))
+
+
+def clear_owner_cache() -> None:
+    """Invalida proprietários ao trocar ou limpar a análise."""
+    with _metadata_lock:
+        _owner_cache.clear()
+
+
+def clear_file_metadata_cache() -> None:
+    """Invalida autor e proprietário em conjunto."""
+    clear_author_cache()
+    clear_owner_cache()
 
 
 def cleanup_stale_temp_dirs(max_age_seconds: float = 24 * 60 * 60) -> int:
@@ -284,20 +407,87 @@ def file_author(path: str) -> str:
     """Autor gravado nos metadados do arquivo (campo “Authors”)."""
     text = str(path)
     key = normalize_path(text)
-    cached = _author_cache.get(key)
+    cached = _cache_get(_author_cache, key)
     if cached is not None:
-        _author_cache.move_to_end(key)
         return cached
     author = ""
     if sys.platform.startswith("win"):
         author = _windows_author(text)
     if not author:
         author = _embedded_author(text)
-    _author_cache[key] = author
-    _author_cache.move_to_end(key)
-    while len(_author_cache) > _AUTHOR_CACHE_LIMIT:
-        _author_cache.popitem(last=False)
+    if author and is_system_identity(author):
+        author = ""
+    _cache_put(_author_cache, key, author, _AUTHOR_CACHE_LIMIT)
     return author
+
+
+def file_owner(path: str) -> str:
+    """Proprietário NTFS/ACL do arquivo ou diretório.
+
+    É diferente do autor do documento: vem do descritor de segurança e
+    costuma existir também em pastas e em arquivos sem metadados.
+    """
+    text = str(path)
+    key = normalize_path(text)
+    cached = _cache_get(_owner_cache, key)
+    if cached is not None:
+        return cached
+    owner = ""
+    if sys.platform.startswith("win"):
+        owner = _windows_owner(text)
+    if owner and is_system_identity(owner):
+        owner = ""
+    _cache_put(_owner_cache, key, owner, _OWNER_CACHE_LIMIT)
+    return owner
+
+
+def file_owner_fast(path: str) -> str:
+    """Proprietário para exportação, sem bloquear em rede não cacheada.
+
+    Caminhos UNC podem depender de um controlador de domínio indisponível;
+    a exportação usa apenas o valor já exibido/cacheado nesses casos.
+    """
+    cached = cached_file_owner(path)
+    if cached is not None:
+        return cached
+    text = str(path)
+    if text.startswith("\\\\"):
+        return ""
+    return file_owner(text)
+
+
+def _windows_owner(text: str) -> str:
+    """Lê o proprietário pelo descritor de segurança do Windows."""
+    try:
+        import win32security
+    except Exception:
+        return ""
+    try:
+        descriptor = win32security.GetNamedSecurityInfo(
+            text,
+            win32security.SE_FILE_OBJECT,
+            win32security.OWNER_SECURITY_INFORMATION,
+        )
+        sid = descriptor.GetSecurityDescriptorOwner()
+        if sid is None:
+            return ""
+        try:
+            account, domain, _account_type = win32security.LookupAccountSid(
+                None, sid
+            )
+        except Exception:
+            # SIDs sem resolução (domínio offline) ainda identificam o dono.
+            try:
+                return win32security.ConvertSidToStringSid(sid)
+            except Exception:
+                return ""
+        account = (account or "").strip()
+        domain = (domain or "").strip()
+        if account and domain:
+            return f"{domain}\\{account}"
+        return account
+    except Exception:
+        return ""
 
 
 def _windows_author(text: str) -> str:
@@ -339,7 +529,8 @@ def file_author_fast(path: str) -> str:
     cached = cached_file_author(path)
     if cached is not None:
         return cached
-    return _embedded_author(str(path))
+    author = _embedded_author(str(path))
+    return "" if is_system_identity(author) else author
 
 
 def _embedded_author(text: str) -> str:

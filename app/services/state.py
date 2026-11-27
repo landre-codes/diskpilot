@@ -23,7 +23,7 @@ from appshell.tasks import Task, TaskCancelled, TaskRunner
 
 from ..config import AppConfig
 from appshell.utils import (
-    clear_author_cache,
+    clear_file_metadata_cache,
     normalize_path,
     path_key,
     resolve_network_path,
@@ -719,7 +719,7 @@ class AppState(QObject):
                 "análise restaurada, mas as referências do índice não "
                 "puderam ser publicadas"
             )
-        clear_author_cache()
+        clear_file_metadata_cache()
         self.last_result = result
         logger.info(
             "análise restaurada: raízes=%s arquivos=%s pastas=%s",
@@ -965,7 +965,7 @@ class AppState(QObject):
                     "raiz removida do índice, mas as referências não "
                     "puderam ser publicadas"
                 )
-        clear_author_cache()
+        clear_file_metadata_cache()
         self.rootRemovalFinished.emit(result)
         self.searchIndexReady.emit(index)
         self._emit_pending_roots()
@@ -1070,7 +1070,7 @@ class AppState(QObject):
             return False
         was_scanning = self.is_scanning or self._task is not None
         self.last_result = None
-        clear_author_cache()
+        clear_file_metadata_cache()
         self._pending_restart = False
         self._cancel_timer.stop()
         if self._cancel is not None:
@@ -1397,7 +1397,7 @@ class AppState(QObject):
                 self.scanFailed.emit(self.last_error)
                 return
             result = self._merge_results(merge_base, result)
-        clear_author_cache()
+        clear_file_metadata_cache()
         self.last_result = result
         try:
             self._store_summary(result)
@@ -1520,7 +1520,7 @@ class AppState(QObject):
         self.index_building = False
         self._building_index_path = None
         self._pending_index = None
-        clear_author_cache()
+        clear_file_metadata_cache()
         self.last_result = result
         logger.info(
             "scan done (stream) files=%s dirs=%s size=%s elapsed_s=%.3f "

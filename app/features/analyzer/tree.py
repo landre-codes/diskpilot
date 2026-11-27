@@ -52,8 +52,10 @@ from appshell.tasks import Task, TaskCancelled, TaskRunner
 from appshell.theme import get_theme
 from appshell.utils import (
     cached_file_author,
+    cached_file_owner,
     copy_to_clipboard,
     file_author,
+    file_owner,
     format_datetime,
     format_number,
     format_size,
@@ -74,45 +76,58 @@ COL_PCT = 2
 COL_ITEMS = 3
 COL_MTIME = 4
 COL_AUTHOR = 5
-COL_KIND = 6
-COL_PATH = 7
+COL_OWNER = 6
+COL_KIND = 7
+COL_PATH = 8
 
 COLUMN_MINIMUMS = {
-    COL_NAME: 280,
+    COL_NAME: 250,
     COL_SIZE: 124,
-    COL_PCT: 90,
+    COL_PCT: 80,
     COL_ITEMS: 100,
-    COL_MTIME: 150,
-    COL_AUTHOR: 200,
+    COL_MTIME: 140,
+    COL_AUTHOR: 140,
+    COL_OWNER: 200,
     COL_KIND: 100,
     COL_PATH: 600,
 }
 COLUMN_WIDTHS = {
     COL_SIZE: 124,
-    COL_PCT: 90,
+    COL_PCT: 80,
     COL_ITEMS: 100,
-    COL_MTIME: 150,
-    COL_AUTHOR: 220,
+    COL_MTIME: 140,
+    COL_AUTHOR: 140,
+    COL_OWNER: 200,
     COL_KIND: 100,
     COL_PATH: 600,
 }
 
 
-class _AuthorSignals(QObject):
-    resolved = Signal(str, str)
+class _MetadataSignals(QObject):
+    resolved = Signal(str, str, str)
 
 
-class _AuthorJob(QRunnable):
-    """Consulta o autor fora da thread da interface."""
+class _MetadataJob(QRunnable):
+    """Consulta autor e proprietário fora da thread da interface."""
 
-    def __init__(self, path: str, signals: _AuthorSignals) -> None:
+    def __init__(self, path: str, signals: _MetadataSignals) -> None:
         super().__init__()
         self.path = path
         self.signals = signals
 
     def run(self) -> None:
+        author = ""
+        owner = ""
         try:
-            self.signals.resolved.emit(self.path, file_author(self.path))
+            author = file_author(self.path)
+        except Exception:
+            pass
+        try:
+            owner = file_owner(self.path)
+        except Exception:
+            pass
+        try:
+            self.signals.resolved.emit(self.path, author, owner)
         except RuntimeError:
             # A árvore pode ter sido fechada enquanto a consulta terminava.
             pass
@@ -404,7 +419,7 @@ class FileTree(QTreeWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("FileTree")
-        self.setColumnCount(8)
+        self.setColumnCount(9)
         self.setHeaderLabels(
             [
                 "Nome",
@@ -413,6 +428,7 @@ class FileTree(QTreeWidget):
                 "Itens",
                 "Modificado",
                 "Autor",
+                "Proprietário",
                 "Tipo",
                 "Caminho completo",
             ]
@@ -447,14 +463,26 @@ class FileTree(QTreeWidget):
             self.setColumnWidth(column, width)
         header.setSectionResizeMode(COL_AUTHOR, QHeaderView.Interactive)
         self.setColumnWidth(COL_AUTHOR, COLUMN_WIDTHS[COL_AUTHOR])
+        header.setSectionResizeMode(COL_OWNER, QHeaderView.Interactive)
+        self.setColumnWidth(COL_OWNER, COLUMN_WIDTHS[COL_OWNER])
         header.setSectionResizeMode(COL_PATH, QHeaderView.Interactive)
         self.setColumnWidth(COL_PATH, COLUMN_WIDTHS[COL_PATH])
         header.setMinimumSectionSize(90)
         header.setHighlightSections(False)
         for column in (COL_SIZE, COL_PCT, COL_ITEMS, COL_MTIME):
             self.headerItem().setTextAlignment(column, Qt.AlignRight | Qt.AlignVCenter)
-        for column in (COL_AUTHOR, COL_KIND, COL_PATH):
+        for column in (COL_AUTHOR, COL_OWNER, COL_KIND, COL_PATH):
             self.headerItem().setTextAlignment(column, Qt.AlignLeft | Qt.AlignVCenter)
+        self.headerItem().setToolTip(
+            COL_AUTHOR,
+            "Autor do documento, obtido dos metadados. "
+            "Contas de sistema são omitidas.",
+        )
+        self.headerItem().setToolTip(
+            COL_OWNER,
+            "Proprietário NTFS/ACL: usuário ou grupo dono do arquivo ou pasta. "
+            "Contas de sistema e grupos internos são omitidos.",
+        )
         self.setTextElideMode(Qt.ElideMiddle)
         self.setColumnHidden(COL_PATH, True)
         self._path_visible = False
@@ -486,11 +514,11 @@ class FileTree(QTreeWidget):
         self._count_timer.timeout.connect(self._refresh_visible_count)
         self.itemExpanded.connect(self._schedule_visible_count)
         self.itemCollapsed.connect(self._schedule_visible_count)
-        self._author_pool = QThreadPool(self)
-        self._author_pool.setMaxThreadCount(4)
-        self._author_signals = _AuthorSignals()
-        self._author_signals.resolved.connect(self._author_resolved)
-        self._author_pending: dict[str, list[QTreeWidgetItem]] = {}
+        self._metadata_pool = QThreadPool(self)
+        self._metadata_pool.setMaxThreadCount(4)
+        self._metadata_signals = _MetadataSignals()
+        self._metadata_signals.resolved.connect(self._metadata_resolved)
+        self._metadata_pending: dict[str, list[QTreeWidgetItem]] = {}
         self._filter_runner = TaskRunner(self, max_threads=1)
         self._filter_runner.finished.connect(self._filter_finished)
         self._filter_runner.failed.connect(self._filter_failed)
@@ -585,6 +613,7 @@ class FileTree(QTreeWidget):
             item.text(COL_ITEMS),
             item.text(COL_MTIME),
             item.text(COL_AUTHOR),
+            item.text(COL_OWNER),
             item.text(COL_KIND),
         ]
         if node is not None:
@@ -604,7 +633,7 @@ class FileTree(QTreeWidget):
         copy_to_clipboard("\n".join(self._row_text(item) for item in items))
         self.statusMessage.emit(
             f"{len(items)} linha(s) copiada(s): Nome, Tamanho, %, Itens, "
-            "Modificado, Autor, Tipo, Caminho."
+            "Modificado, Autor, Proprietário, Tipo, Caminho."
         )
 
     def _copy_size(self, item: QTreeWidgetItem) -> None:
@@ -805,6 +834,7 @@ class FileTree(QTreeWidget):
         self.setUpdatesEnabled(False)
         self._building = True
         self.clear()
+        self._metadata_pending.clear()
         self._matches = -1
         self._shown = 0
         if self._result is None:
@@ -824,9 +854,7 @@ class FileTree(QTreeWidget):
             self.addTopLevelItem(item)
         self._building = False
         for i in range(self.topLevelItemCount()):
-            item = self.topLevelItem(i)
-            item.setExpanded(True)
-            self._restore_expanded(item, expanded)
+            self._restore_expanded(self.topLevelItem(i), expanded)
         self._matches = -1
         self._shown = self._count_items()
         self.countChanged.emit(-1, self._shown)
@@ -902,6 +930,7 @@ class FileTree(QTreeWidget):
         generation = self._filter_generation
         self._filter_runner.cancel()
         self.clear()
+        self._metadata_pending.clear()
         self._matches = -1
         self._shown = 0
         self._building = False
@@ -941,6 +970,7 @@ class FileTree(QTreeWidget):
         if self._result is None:
             return
         self.clear()
+        self._metadata_pending.clear()
         info = QTreeWidgetItem([f"  Falha na busca: {message}"])
         info.setFirstColumnSpanned(True)
         info.setFlags(Qt.NoItemFlags)
@@ -954,6 +984,7 @@ class FileTree(QTreeWidget):
         self.setUpdatesEnabled(False)
         self._building = True
         self.clear()
+        self._metadata_pending.clear()
         rendered = 0
         truncated = False
         total = self._result.total_size if self._result is not None else 0
@@ -1025,37 +1056,59 @@ class FileTree(QTreeWidget):
         author = cached_file_author(node.path)
         if author:
             tip.append(f"Autor: {author}")
+        owner = cached_file_owner(node.path)
+        if owner:
+            tip.append(f"Proprietário: {owner}")
         if node.error:
             tip.append(f"Aviso: {node.error}")
         return "\n".join(tip)
 
-    # ----------------------------------------------------------------- autor
-    def _queue_author(self, item: QTreeWidgetItem, node: Node) -> None:
+    # -------------------------------------------------------------- metadados
+    def _queue_metadata(self, item: QTreeWidgetItem, node: Node) -> None:
         author = cached_file_author(node.path)
+        owner = cached_file_owner(node.path)
         if author is not None:
-            text = author or "—"
-            item.setText(COL_AUTHOR, text)
-            item.setToolTip(COL_AUTHOR, text)
+            item.setText(COL_AUTHOR, author or "—")
+            item.setToolTip(COL_AUTHOR, author or "Sem autor para exibir.")
+        else:
+            item.setText(COL_AUTHOR, "…")
+            item.setToolTip(COL_AUTHOR, "Consultando autor…")
+        if owner is not None:
+            item.setText(COL_OWNER, owner or "—")
+            item.setToolTip(COL_OWNER, owner or "Sem proprietário para exibir.")
+        else:
+            item.setText(COL_OWNER, "…")
+            item.setToolTip(COL_OWNER, "Consultando proprietário…")
+        if author is not None and owner is not None:
             return
-        item.setText(COL_AUTHOR, "…")
-        item.setToolTip(COL_AUTHOR, "Consultando autor…")
         key = normalize_path(node.path)
-        items = self._author_pending.get(key)
+        items = self._metadata_pending.get(key)
         if items is None:
-            self._author_pending[key] = [item]
-            self._author_pool.start(_AuthorJob(node.path, self._author_signals))
+            self._metadata_pending[key] = [item]
+            self._metadata_pool.start(
+                _MetadataJob(node.path, self._metadata_signals)
+            )
         else:
             items.append(item)
 
-    def _author_resolved(self, path: str, author: str) -> None:
+    def _metadata_resolved(self, path: str, author: str, owner: str) -> None:
         key = normalize_path(path)
-        items = self._author_pending.pop(key, [])
-        text = author or "—"
+        items = self._metadata_pending.pop(key, [])
+        author_text = author or "—"
+        owner_text = owner or "—"
         for item in items:
             if not isValid(item):
                 continue
-            item.setText(COL_AUTHOR, text)
-            item.setToolTip(COL_AUTHOR, text)
+            item.setText(COL_AUTHOR, author_text)
+            item.setToolTip(
+                COL_AUTHOR,
+                author_text if author else "Sem autor para exibir.",
+            )
+            item.setText(COL_OWNER, owner_text)
+            item.setToolTip(
+                COL_OWNER,
+                owner_text if owner else "Sem proprietário para exibir.",
+            )
             node = item.data(COL_NAME, NODE_ROLE)
             if isinstance(node, Node):
                 item.setToolTip(COL_NAME, self._node_tooltip(node))
@@ -1078,6 +1131,7 @@ class FileTree(QTreeWidget):
                 self._item_count_text(node),
                 format_datetime(node.mtime),
                 "",
+                "",
                 "Raiz" if is_root else ("Pasta" if node.is_dir else self._type_text(node)),
                 node.path,
             ]
@@ -1090,11 +1144,11 @@ class FileTree(QTreeWidget):
         item.setData(0, POPULATED_ROLE, False)
         for column in (COL_SIZE, COL_PCT, COL_ITEMS, COL_MTIME):
             item.setTextAlignment(column, Qt.AlignRight | Qt.AlignVCenter)
-        for column in (COL_AUTHOR, COL_KIND, COL_PATH):
+        for column in (COL_AUTHOR, COL_OWNER, COL_KIND, COL_PATH):
             item.setTextAlignment(column, Qt.AlignLeft | Qt.AlignVCenter)
         if node.error:
             item.setForeground(0, QColor(get_theme().color("danger")))
-        self._queue_author(item, node)
+        self._queue_metadata(item, node)
         item.setToolTip(0, self._node_tooltip(node))
         item.setToolTip(COL_PATH, node.path)
         if self._path_visible:

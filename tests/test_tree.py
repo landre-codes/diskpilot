@@ -5,10 +5,30 @@ from pathlib import Path
 from PySide6.QtWidgets import QTreeWidgetItem
 
 from app.config import AppConfig
-from app.features.analyzer.tree import NODE_ROLE, FileTree, _IndexFilterTask
+from app.features.analyzer.tree import (
+    COL_AUTHOR,
+    COL_OWNER,
+    NODE_ROLE,
+    FileTree,
+    _IndexFilterTask,
+)
 from app.services.index_store import SearchHits, SearchIndex
 from app.services.model import Node, ScanResult
 from appshell.theme import init_theme
+
+
+def test_tree_exposes_owner_column_separate_from_author(
+    qapp, qtbot, tmp_path: Path
+) -> None:
+    config = AppConfig(tmp_path / "config")
+    init_theme(qapp, config)
+    tree = FileTree()
+    qtbot.addWidget(tree)
+
+    assert tree.columnCount() == 9
+    assert tree.headerItem().text(COL_OWNER) == "Proprietário"
+    assert "Autor" in tree.headerItem().toolTip(COL_AUTHOR)
+    tree.close()
 
 
 def test_search_finds_item_after_30k_nodes(qapp, qtbot, tmp_path: Path) -> None:
@@ -54,6 +74,35 @@ def test_search_finds_item_after_30k_nodes(qapp, qtbot, tmp_path: Path) -> None:
     tree.close()
 
 
+def test_tree_starts_collapsed(qapp, qtbot, tmp_path: Path) -> None:
+    config = AppConfig(tmp_path / "config")
+    init_theme(qapp, config)
+    root = Node(path="C:/raiz", name="raiz", is_dir=True, dirs=3)
+    for index in range(2):
+        root.children.append(
+            Node(
+                path=f"C:/raiz/pasta_{index}",
+                name=f"pasta_{index}",
+                is_dir=True,
+                dirs=1,
+            )
+        )
+    result = ScanResult(roots=[root], total_size=0, total_dirs=3)
+    tree = FileTree()
+    qtbot.addWidget(tree)
+    tree.show()
+    tree.set_result(result)
+
+    item = tree.topLevelItem(0)
+    assert item is not None
+    assert item.isExpanded() is False
+
+    tree.expandItem(item)
+    qtbot.waitUntil(lambda: item.childCount() == 2, timeout=5000)
+    assert item.isExpanded() is True
+    tree.close()
+
+
 def test_visible_count_updates_after_collapse(
     qapp, qtbot, tmp_path: Path
 ) -> None:
@@ -80,9 +129,11 @@ def test_visible_count_updates_after_collapse(
     qtbot.addWidget(tree)
     tree.show()
     tree.set_result(result)
-    qtbot.waitUntil(lambda: tree.shown >= 4, timeout=5000)
 
     item = tree.topLevelItem(0)
+    tree.expandItem(item)
+    qtbot.waitUntil(lambda: tree.shown >= 4, timeout=5000)
+
     tree.collapseItem(item)
     qtbot.waitUntil(lambda: tree.shown == 1, timeout=2000)
     tree.close()

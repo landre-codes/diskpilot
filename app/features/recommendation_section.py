@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt, Signal
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -26,6 +26,10 @@ from .recommendation_table import (
     RecommendationTable,
     RecommendationTableModel,
 )
+
+TABLE_MIN_HEIGHT = 150
+TABLE_MAX_HEIGHT = 300
+COLLAPSE_DURATION_MS = 190
 
 
 def _common_base(paths: list[str]) -> str:
@@ -61,6 +65,8 @@ class RecommendationSection(QFrame):
         self.suggestion = suggestion
         self._rows = list(rows)
         self._expanded = expanded
+        self._animation: QPropertyAnimation | None = None
+        self._expanded_height = TABLE_MIN_HEIGHT
         self.setObjectName("Card")
         self._base_path = _common_base([row.path for row in self._rows])
         if self._base_path:
@@ -168,11 +174,18 @@ class RecommendationSection(QFrame):
         self.table.setColumnHidden(0, True)
         self.table.setColumnHidden(7, True)
         self.table.sortByColumn(3, Qt.DescendingOrder)
-        self.table.setMinimumHeight(150)
-        self.table.setMaximumHeight(300)
+        self.table.setMinimumHeight(TABLE_MIN_HEIGHT)
+        self.table.setMaximumHeight(TABLE_MAX_HEIGHT)
         self.table.statusMessage.connect(self.statusMessage)
         root.addWidget(self.table)
+        self._expanded_height = min(
+            TABLE_MAX_HEIGHT,
+            max(TABLE_MIN_HEIGHT, self.table.sizeHint().height()),
+        )
         self.table.setVisible(self._expanded)
+        if not self._expanded:
+            self.table.setMinimumHeight(0)
+            self.table.setMaximumHeight(0)
 
     @property
     def key(self) -> str:
@@ -187,14 +200,91 @@ class RecommendationSection(QFrame):
         self.expandedChanged.emit(self.key, self._expanded)
 
     def set_expanded(self, expanded: bool) -> None:
-        self._expanded = bool(expanded)
-        self.table.setVisible(self._expanded)
+        expanded = bool(expanded)
+        self._expanded = expanded
         self.toggle_btn.set_icon_name(
             "chevron-up" if self._expanded else "chevron-down"
         )
         self.toggle_btn.setToolTip(
             "Recolher seção" if self._expanded else "Expandir seção"
         )
+        if self._expanded:
+            self._animate_expand()
+        else:
+            self._animate_collapse()
+
+    def _stop_animation(self) -> None:
+        if self._animation is not None:
+            self._animation.stop()
+            self._animation.deleteLater()
+            self._animation = None
+
+    def _start_animation(
+        self, start: int, end: int, expanded: bool
+    ) -> None:
+        self._stop_animation()
+        anim = QPropertyAnimation(self.table, b"maximumHeight", self)
+        anim.setDuration(COLLAPSE_DURATION_MS)
+        anim.setStartValue(max(0, int(start)))
+        anim.setEndValue(max(0, int(end)))
+        anim.setEasingCurve(QEasingCurve.OutCubic)
+        anim.finished.connect(
+            lambda: self._animation_finished(anim, expanded)
+        )
+        self._animation = anim
+        anim.start()
+
+    def _animation_finished(
+        self, anim: QPropertyAnimation, expanded: bool
+    ) -> None:
+        if self._animation is not anim:
+            anim.deleteLater()
+            return
+        self._animation = None
+        anim.deleteLater()
+        if expanded:
+            self.table.setMinimumHeight(TABLE_MIN_HEIGHT)
+            self.table.setMaximumHeight(TABLE_MAX_HEIGHT)
+            self.table.setVisible(True)
+            self._expanded_height = min(
+                TABLE_MAX_HEIGHT,
+                max(TABLE_MIN_HEIGHT, self.table.height()),
+            )
+        else:
+            self.table.setVisible(False)
+            self.table.setMinimumHeight(0)
+            self.table.setMaximumHeight(0)
+
+    def _animate_expand(self) -> None:
+        table = self.table
+        start = max(0, table.height()) if table.isVisible() else 0
+        target = min(
+            TABLE_MAX_HEIGHT,
+            max(TABLE_MIN_HEIGHT, self._expanded_height, start),
+        )
+        table.setMinimumHeight(0)
+        table.setMaximumHeight(start)
+        table.setVisible(True)
+        self._start_animation(start, target, True)
+
+    def _animate_collapse(self) -> None:
+        table = self.table
+        if not table.isVisible():
+            table.setMinimumHeight(0)
+            table.setMaximumHeight(0)
+            return
+        start = max(0, table.height())
+        if start <= 0:
+            start = self._expanded_height
+        self._expanded_height = min(
+            TABLE_MAX_HEIGHT, max(TABLE_MIN_HEIGHT, start)
+        )
+        if start <= 0:
+            table.setVisible(False)
+            return
+        table.setMinimumHeight(0)
+        table.setMaximumHeight(start)
+        self._start_animation(start, 0, False)
 
     def _copy_paths(self) -> None:
         self.table.copy_all()
@@ -208,5 +298,16 @@ class RecommendationSection(QFrame):
             f"{visible} de {total}" if visible != total else ""
         )
         self.setVisible(visible > 0)
-        self.table.setVisible(self._expanded and visible > 0)
+        if visible <= 0:
+            self._stop_animation()
+            self.table.setVisible(False)
+            return visible
+        if not self._expanded:
+            self._stop_animation()
+            self.table.setVisible(False)
+            return visible
+        if self._animation is None:
+            self.table.setMinimumHeight(TABLE_MIN_HEIGHT)
+            self.table.setMaximumHeight(TABLE_MAX_HEIGHT)
+            self.table.setVisible(True)
         return visible

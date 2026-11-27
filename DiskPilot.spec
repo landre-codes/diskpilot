@@ -4,7 +4,7 @@ from PyInstaller.utils.hooks import collect_all
 
 datas = [('app/assets', 'app/assets')]
 binaries = []
-hiddenimports = ['openpyxl', 'win32com.client', 'pythoncom', 'pywintypes']
+hiddenimports = ['openpyxl', 'win32com.client', 'pythoncom', 'pywintypes', 'win32security']
 datas += collect_data_files('PySide6')
 tmp_ret = collect_all('qt_material')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
