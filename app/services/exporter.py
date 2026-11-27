@@ -34,7 +34,18 @@ def default_export_path(prefix: str, extension: str) -> str:
     return str(Path(default_export_dir()) / f"DiskPilot-{prefix}-{stamp}.{extension}")
 
 
+TOP_EXPORT_LIMIT = 1000
+_GB = 1024 ** 3
 _RISKY_PREFIXES = ("=", "+", "-", "@")
+
+
+def _gb_value(size: int | float) -> float:
+    return round(float(size) / _GB, 3)
+
+
+def _decimal(value: float, places: int) -> str:
+    """Decimal com vírgula para o CSV aberto no Excel pt-BR."""
+    return f"{float(value):.{places}f}".replace(".", ",")
 
 
 def safe_spreadsheet_text(value: Any) -> Any:
@@ -73,6 +84,8 @@ def item_rows(
                     "caminho": node.path,
                     "nome": node.name,
                     "bytes": node.size,
+                    "size_gb": _gb_value(node.size),
+                    "unit": "GB",
                     "formatado": format_bytes(node.size),
                     "percentual": round(percent, 2),
                     "arquivos": node.files,
@@ -122,13 +135,20 @@ def write_csv(
                 "caminho",
                 "nome",
                 "tamanho_bytes",
-                "tamanho",
+                "tamanho_gb",
                 "percentual",
                 "arquivos",
                 "pastas",
                 "modificado",
                 "autor",
                 "erro",
+                "unidade",
+                "registro",
+                "sugestao",
+                "chave",
+                "confianca",
+                "economia_bytes",
+                "economia_gb",
             ]
         )
         for row in item_rows(dirs, files, result.total_size):
@@ -138,15 +158,48 @@ def write_csv(
                 row["caminho"],
                 row["nome"],
                 row["bytes"],
-                row["formatado"],
-                f"{row['percentual']:.2f}".replace(".", ","),
+                _decimal(row["size_gb"], 3),
+                _decimal(row["percentual"], 2),
                 row["arquivos"],
                 row["pastas"],
                 row["modificado"],
                 row["autor"],
                 row["erro"],
+                row["unit"],
+                "item",
+                "",
+                "",
+                "",
+                "",
+                "",
             ]
             writer.writerow([safe_spreadsheet_text(value) for value in values])
+        for suggestion in result.suggestions:
+            for path in suggestion.paths:
+                values = [
+                    "Sugestão",
+                    "",
+                    path,
+                    Path(path).name,
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "GB",
+                    "sugestao_path",
+                    suggestion.title,
+                    suggestion.key,
+                    suggestion.confidence,
+                    suggestion.savings,
+                    _decimal(_gb_value(suggestion.savings), 3),
+                ]
+                writer.writerow(
+                    [safe_spreadsheet_text(value) for value in values]
+                )
 
 
 def _style_header(ws, row: int, count: int) -> None:
@@ -403,20 +456,21 @@ def write_xlsx(
 
     _write_gain_sheet(workbook, history)
 
-    top = workbook.create_sheet("Top 100")
+    top = workbook.create_sheet("Top 1000")
     headers = [
         "Categoria",
         "Ranking",
         "Caminho completo",
         "Nome",
         "Bytes",
-        "Tamanho",
+        "Tamanho (GB)",
         "Percentual",
         "Arquivos",
         "Pastas",
         "Modificado",
         "Autor",
         "Erro",
+        "Unidade",
     ]
     top.append(headers)
     _style_header(top, 1, len(headers))
@@ -428,13 +482,14 @@ def write_xlsx(
                 row["caminho"],
                 row["nome"],
                 row["bytes"],
-                row["formatado"],
+                row["size_gb"],
                 row["percentual"],
                 row["arquivos"],
                 row["pastas"],
                 row["modificado"],
                 row["autor"],
                 row["erro"],
+                row["unit"],
             ]
         )
     _force_text_cells(top)
@@ -444,34 +499,37 @@ def write_xlsx(
         ("C", 70),
         ("D", 30),
         ("E", 14),
-        ("F", 12),
+        ("F", 14),
         ("G", 11),
         ("H", 10),
         ("I", 10),
         ("J", 18),
         ("K", 26),
         ("L", 30),
+        ("M", 9),
     ):
         top.column_dimensions[column].width = width
     for cell in top["E"][1:]:
         cell.number_format = "#,##0"
+    for cell in top["F"][1:]:
+        cell.number_format = "0.000"
     for cell in top["G"][1:]:
         cell.number_format = '0.00"%"'
     top.freeze_panes = "A2"
     if top.max_row > 1:
-        top.auto_filter.ref = f"A1:L{top.max_row}"
+        top.auto_filter.ref = f"A1:M{top.max_row}"
 
     suggestions = workbook.create_sheet("Sugestões")
     sug_headers = [
         "Chave",
         "Título",
         "Descrição",
-        "Economia",
-        "Bytes",
+        "Economia (GB)",
+        "Economia (bytes)",
         "Quantidade",
         "Confiança",
         "Nota",
-        "Caminhos",
+        "Qtde. de caminhos",
     ]
     suggestions.append(sug_headers)
     _style_header(suggestions, 1, len(sug_headers))
@@ -481,12 +539,12 @@ def write_xlsx(
                 suggestion.key,
                 suggestion.title,
                 suggestion.description,
-                format_bytes(suggestion.savings),
+                _gb_value(suggestion.savings),
                 suggestion.savings,
                 suggestion.count,
                 suggestion.confidence,
                 suggestion.note,
-                "\n".join(suggestion.paths),
+                len(suggestion.paths),
             ]
         )
     _force_text_cells(suggestions)
@@ -494,18 +552,64 @@ def write_xlsx(
         ("A", 20),
         ("B", 34),
         ("C", 48),
-        ("D", 14),
-        ("E", 14),
+        ("D", 15),
+        ("E", 18),
         ("F", 12),
         ("G", 12),
         ("H", 34),
-        ("I", 60),
+        ("I", 18),
     ):
         suggestions.column_dimensions[column].width = width
+    for cell in suggestions["D"][1:]:
+        cell.number_format = "0.000"
+    for cell in suggestions["E"][1:]:
+        cell.number_format = "#,##0"
     for row in suggestions.iter_rows(min_row=2):
         for cell in row:
             cell.alignment = Alignment(vertical="top", wrap_text=True)
     suggestions.freeze_panes = "A2"
+
+    paths = workbook.create_sheet("Caminhos das sugestões")
+    path_headers = [
+        "Chave",
+        "Título",
+        "Confiança",
+        "Economia (bytes)",
+        "Economia (GB)",
+        "Caminho",
+    ]
+    paths.append(path_headers)
+    _style_header(paths, 1, len(path_headers))
+    for suggestion in result.suggestions:
+        for path_value in suggestion.paths:
+            paths.append(
+                [
+                    suggestion.key,
+                    suggestion.title,
+                    suggestion.confidence,
+                    suggestion.savings,
+                    _gb_value(suggestion.savings),
+                    path_value,
+                ]
+            )
+    _force_text_cells(paths)
+    for column, width in (
+        ("A", 20),
+        ("B", 34),
+        ("C", 12),
+        ("D", 18),
+        ("E", 15),
+        ("F", 80),
+    ):
+        paths.column_dimensions[column].width = width
+    for cell in paths["D"][1:]:
+        cell.number_format = "#,##0"
+    for cell in paths["E"][1:]:
+        cell.number_format = "0.000"
+    for row in paths.iter_rows(min_row=2):
+        for cell in row:
+            cell.alignment = Alignment(vertical="top", wrap_text=False)
+    paths.freeze_panes = "A2"
 
     workbook.save(path)
 

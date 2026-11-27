@@ -480,6 +480,12 @@ class FileTree(QTreeWidget):
         self._expand_timer.setSingleShot(True)
         self._expand_timer.setInterval(EXPAND_DEBOUNCE_MS)
         self._expand_timer.timeout.connect(self._expand_step)
+        self._count_timer = QTimer(self)
+        self._count_timer.setSingleShot(True)
+        self._count_timer.setInterval(30)
+        self._count_timer.timeout.connect(self._refresh_visible_count)
+        self.itemExpanded.connect(self._schedule_visible_count)
+        self.itemCollapsed.connect(self._schedule_visible_count)
         self._author_pool = QThreadPool(self)
         self._author_pool.setMaxThreadCount(4)
         self._author_signals = _AuthorSignals()
@@ -828,6 +834,7 @@ class FileTree(QTreeWidget):
         self.setUpdatesEnabled(True)
         self.viewport().update()
         self._fit_columns()
+        self._schedule_visible_count()
 
     def _expanded_paths(self) -> set[str]:
         paths: set[str] = set()
@@ -854,13 +861,38 @@ class FileTree(QTreeWidget):
                     stack.append(child)
 
     def _count_items(self) -> int:
+        return self._count_visible_items()
+
+    def _count_visible_items(self) -> int:
+        """Conta apenas os nós que estão realmente visíveis na árvore."""
         count = 0
-        iterator = QTreeWidgetItemIterator(self)
-        while iterator.value():
-            if iterator.value().data(0, NODE_ROLE) is not None:
-                count += 1
-            iterator += 1
+        stack = [
+            self.topLevelItem(index)
+            for index in range(self.topLevelItemCount())
+        ]
+        while stack:
+            item = stack.pop()
+            if item.data(0, NODE_ROLE) is None:
+                continue
+            count += 1
+            if item.isExpanded():
+                for index in range(item.childCount()):
+                    stack.append(item.child(index))
         return count
+
+    def _schedule_visible_count(self, *_args: Any) -> None:
+        if getattr(self, "_building", False):
+            return
+        self._count_timer.start()
+
+    def _refresh_visible_count(self) -> None:
+        if getattr(self, "_building", False):
+            return
+        shown = self._count_visible_items()
+        if shown == self._shown:
+            return
+        self._shown = shown
+        self.countChanged.emit(self._matches, shown)
 
     # ---------------------------------------------------------------- filtros
     def _start_filter(self) -> None:
@@ -976,6 +1008,7 @@ class FileTree(QTreeWidget):
         self.scrollToTop()
         self.viewport().update()
         self._fit_columns()
+        self._schedule_visible_count()
 
     def _sorted_children(self, node: Node, limit: int | None = None) -> list[Node]:
         if not node.children_loaded and node.children_loader is not None:
@@ -1219,6 +1252,7 @@ class FileTree(QTreeWidget):
         self._expand_all_children(item)
         self._fit_columns()
         self.countChanged.emit(self._matches, max(0, self._shown))
+        self._schedule_visible_count()
         if self._expand_queue:
             self._expand_timer.start(0)
 
@@ -1267,7 +1301,7 @@ class FileTree(QTreeWidget):
         )
         chosen = menu.exec(self.viewport().mapToGlobal(pos))
         if chosen == act_open:
-            open_in_explorer(node.path, select=not node.is_dir)
+            open_in_explorer(node.path, select=True)
         elif chosen == act_row:
             self._copy_rows()
         elif chosen == act_size:

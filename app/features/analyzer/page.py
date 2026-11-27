@@ -29,6 +29,7 @@ from appshell.widgets.common import (
     EmptyState,
     PageHeader,
 )
+from appshell.widgets.layouts import FlowLayout
 from ...widgets.dialogs import (
     ConfirmDialog,
     ExportDialog,
@@ -50,17 +51,31 @@ class AnalyzerPage(BasePage):
         super().__init__(state, parent)
         self._last_matches: int | None = None
         self._index_fallback = False
-        root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        self.page_scroll = QScrollArea(self)
+        self.page_scroll.setWidgetResizable(True)
+        self.page_scroll.setFrameShape(QFrame.NoFrame)
+        self.page_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.page_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        content = QWidget()
+        content.setObjectName("Page")
+        root = QVBoxLayout(content)
+        root.setContentsMargins(0, 0, 8, 4)
         root.setSpacing(14)
+        self.page_scroll.setWidget(content)
+        outer.addWidget(self.page_scroll)
 
         self.header = PageHeader(
             "Análise de diretórios",
             "Selecione uma ou mais pastas para mapear onde o espaço está sendo usado.",
             "Armazenamento",
         )
-        self.top_btn = ActionButton("Top 100", "podium", "ghost")
-        self.top_btn.setToolTip("Ver os 100 maiores diretórios e arquivos da última análise")
+        self.top_btn = ActionButton("Top 1000", "podium", "ghost")
+        self.top_btn.setToolTip(
+            "Ver os 1000 maiores diretórios e arquivos da última análise"
+        )
         self.top_btn.clicked.connect(self._open_top_items)
         self.header.add_action(self.top_btn)
         self.warnings_btn = IconButton("alert-circle-outline", "Avisos da análise", self, 18)
@@ -84,17 +99,13 @@ class AnalyzerPage(BasePage):
         self._refresh_limit_banner()
 
         # chips de raízes -------------------------------------------------
-        self.chips_area = QScrollArea(self)
-        self.chips_area.setWidgetResizable(True)
-        self.chips_area.setFixedHeight(42)
-        self.chips_area.setFrameShape(QFrame.NoFrame)
-        self.chips_area.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.chips_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self.chips_host = QWidget()
-        self.chips_layout = QHBoxLayout(self.chips_host)
-        self.chips_layout.setContentsMargins(0, 1, 0, 1)
-        self.chips_layout.setSpacing(7)
-        self.chips_area.setWidget(self.chips_host)
+        self.chips_area = QWidget(self)
+        self.chips_layout = FlowLayout(
+            self.chips_area,
+            margin=0,
+            h_spacing=7,
+            v_spacing=6,
+        )
         root.addWidget(self.chips_area)
 
         # toolbar ----------------------------------------------------------
@@ -127,7 +138,11 @@ class AnalyzerPage(BasePage):
         self.unit_btn = SelectButton("numeric", "Auto", self)
         self.unit_btn.setMinimumWidth(100)
         self.unit_btn.setMaximumWidth(112)
-        self.unit_btn.setToolTip("Unidade de exibição dos tamanhos")
+        self.unit_btn.setToolTip(
+            "Auto escolhe B, KB, MB, GB ou TB conforme o tamanho; "
+            "uma unidade fixa mantém todos os valores na mesma escala."
+        )
+        self.unit_btn.setAccessibleName("Unidade de exibição dos tamanhos")
         self.unit_btn.set_options(
             [
                 ("auto", "Auto", "numeric"),
@@ -152,6 +167,11 @@ class AnalyzerPage(BasePage):
             ],
             self.state.config.get("ui.tree_filter", "all"),
         )
+        self.filter_btn.setToolTip(
+            "Tudo mostra arquivos e pastas; Pastas/Arquivos restringem o tipo; "
+            "as opções > 100 MB e > 1 GB filtram pelo tamanho."
+        )
+        self.filter_btn.setAccessibleName("Filtro de tipo e tamanho")
         self.filter_btn.changed.connect(self._on_filter)
         controls_row.addWidget(self.filter_btn)
         self.sort_btn = SelectButton("sort", "Tamanho", self)
@@ -168,6 +188,7 @@ class AnalyzerPage(BasePage):
             ],
             self.state.config.get("ui.tree_sort", "size_desc"),
         )
+        self.sort_btn.setAccessibleName("Ordenação dos itens")
         self.sort_btn.changed.connect(self._on_sort)
         controls_row.addWidget(self.sort_btn)
         self.path_check = QCheckBox("Caminho completo")
@@ -191,6 +212,18 @@ class AnalyzerPage(BasePage):
         self.collapse_btn.clicked.connect(lambda: self.tree.collapseAll())
         controls_row.addWidget(self.collapse_btn)
         tb.addLayout(controls_row)
+        self.filter_hint = QLabel(
+            "Unidade formata os tamanhos; filtro restringe o tipo ou o "
+            "tamanho; ordenação define a ordem da árvore."
+        )
+        self.filter_hint.setObjectName("Faint")
+        self.filter_hint.setWordWrap(True)
+        self.filter_hint.setToolTip(
+            "Auto adapta a unidade ao tamanho. Tudo não filtra; Pastas e "
+            "Arquivos limitam o tipo. Nome A-Z/Z-A ordena alfabeticamente; "
+            "Recentes usa a data de modificação."
+        )
+        tb.addWidget(self.filter_hint)
         root.addWidget(toolbar)
 
         # banner de progresso ---------------------------------------------
@@ -253,6 +286,7 @@ class AnalyzerPage(BasePage):
         self.empty_clear.clicked.connect(self.clear_filters)
         self.empty.add_action(self.empty_clear)
         self.stack.addWidget(self.empty)
+        self.stack_host.setMinimumHeight(380)
         root.addWidget(self.stack_host, 1)
         self.path_detail = QLabel("")
         self.path_detail.setObjectName("PathText")
@@ -302,10 +336,11 @@ class AnalyzerPage(BasePage):
         self._clear_chips()
         for path in self.state.roots:
             label = Path(path).name or path
-            chip = Chip(path, self.chips_host, label=label)
+            chip = Chip(path, self.chips_area, label=label)
             chip.removeRequested.connect(self._remove_root)
             self.chips_layout.addWidget(chip)
-        self.chips_layout.addStretch(1)
+        self.chips_layout.invalidate()
+        self.chips_area.updateGeometry()
         self.chips_area.setVisible(bool(self.state.roots))
         self._update_header()
         self._update_empty()

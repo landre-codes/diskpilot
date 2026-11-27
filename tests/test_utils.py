@@ -26,6 +26,39 @@ def test_format_duration_uses_hh_mm_ss() -> None:
     assert format_duration(float("nan")) == "00:00:00"
 
 
+def test_open_in_explorer_never_launches_a_file(
+    tmp_path: Path, monkeypatch
+) -> None:
+    target = tmp_path / "arquivo.txt"
+    target.write_text("conteudo", encoding="utf-8")
+    folder = tmp_path / "pasta"
+    folder.mkdir()
+
+    calls: list[list[str]] = []
+    started: list[str] = []
+    monkeypatch.setattr(utils.sys, "platform", "win32")
+    monkeypatch.setattr(
+        utils.subprocess, "Popen", lambda args: calls.append(list(args))
+    )
+    monkeypatch.setattr(
+        utils.os, "startfile", lambda path: started.append(path), raising=False
+    )
+
+    assert utils.open_in_explorer(str(target), select=False)
+    assert calls == [["explorer", str(tmp_path)]]
+    assert started == []
+
+    calls.clear()
+    assert utils.open_in_explorer(str(target), select=True)
+    assert calls == [["explorer", "/select,", str(target)]]
+    assert started == []
+
+    calls.clear()
+    assert utils.open_in_explorer(str(folder), select=True)
+    assert calls == [["explorer", "/select,", str(folder)]]
+    assert started == []
+
+
 def test_corrupt_config_backups_are_bounded(tmp_path: Path) -> None:
     config_dir = tmp_path / "config"
     config_dir.mkdir()

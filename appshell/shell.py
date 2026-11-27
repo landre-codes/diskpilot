@@ -169,7 +169,14 @@ class ShellWindow(QWidget):
     #: Faixa de redimensionamento nativa (px) a partir da borda da janela.
     RESIZE_BORDER = 8
     WINDOW_FLAGS = (
-        Qt.Window | Qt.FramelessWindowHint | Qt.NoDropShadowWindowHint
+        Qt.Window
+        | Qt.FramelessWindowHint
+        | Qt.NoDropShadowWindowHint
+        # Sem estes hints o Windows cria a janela sem WS_MINIMIZEBOX e o
+        # clique no botão da barra de tarefas pode não minimizar.
+        | Qt.WindowMinimizeButtonHint
+        | Qt.WindowMaximizeButtonHint
+        | Qt.WindowSystemMenuHint
     )
     log = logging.getLogger("appshell.shell")
 
@@ -353,12 +360,26 @@ class ShellWindow(QWidget):
 
         add("Ctrl+B", self.sidebar.toggle)
         add("F11", self.toggle_fullscreen)
+        add("Ctrl+Tab", lambda: self._cycle_page(1))
+        add("Ctrl+Shift+Tab", lambda: self._cycle_page(-1))
+        add("Ctrl+PageDown", lambda: self._cycle_page(1))
+        add("Ctrl+PageUp", lambda: self._cycle_page(-1))
         for i, spec in enumerate(self.page_specs[:9]):
             add(f"Ctrl+{i + 1}", lambda key=spec.key: self.navigate(key))
         for sequence, callback in self.options.shortcuts.items():
             add(sequence, callback)
 
     # ------------------------------------------------------------- navegação
+    def _cycle_page(self, delta: int) -> None:
+        keys = [spec.key for spec in self.page_specs]
+        if not keys:
+            return
+        try:
+            index = keys.index(self._current_key)
+        except ValueError:
+            index = 0
+        self.navigate(keys[(index + delta) % len(keys)])
+
     def navigate(self, key: str, animate: bool = True) -> None:
         page = self._pages.get(key)
         if page is None:
@@ -410,7 +431,8 @@ class ShellWindow(QWidget):
         if self._minimize_anim is not anim:
             return
         self._minimize_anim = None
-        self.showMinimized()
+        if not self.isMinimized():
+            self.showMinimized()
         self.setWindowOpacity(1.0)
         anim.deleteLater()
 
@@ -510,8 +532,24 @@ class ShellWindow(QWidget):
                 was_minimized = bool(event.oldState() & Qt.WindowMinimized)
             except AttributeError:
                 was_minimized = False
-            if was_minimized and not self.isMinimized():
+
+            if self.isMinimized():
+                # Minimizar não pode derrubar a maximização personalizada.
+                # O estado é reaplicado quando a janela voltar.
+                self._stop_minimize_animation()
+                super().changeEvent(event)
+                return
+
+            if was_minimized:
+                # Restauração a partir da barra de tarefas: o Qt pode voltar
+                # para a geometria normal. Reaplicamos o estado customizado.
+                self._stop_minimize_animation()
                 QTimer.singleShot(0, self._restore_fade_in)
+                if self._maximized:
+                    QTimer.singleShot(0, self._reapply_maximized)
+                super().changeEvent(event)
+                return
+
             if self.isMaximized() and not self._maximized and not self._adopting_native:
                 # O Windows maximizou por fora (Win+↑, menu da barra de tarefas).
                 # Convertemos para a nossa maximização, que conhece a tela.
@@ -1214,7 +1252,7 @@ class ShellWindow(QWidget):
                 "janela sem primeiro plano; usando fallback topmost temporário"
             )
 
-            deadline = time.monotonic() + 10.0
+            deadline = time.monotonic() + 2.5
 
             def clear_topmost() -> None:
                 user32.SetWindowPos(
@@ -1223,9 +1261,20 @@ class ShellWindow(QWidget):
 
             def wait_for_focus() -> None:
                 # A janela está visível (topmost), mas ainda pode não ser a
-                # dona do primeiro plano. Tentamos ativá-la enquanto o
-                # usuário tem tempo de vê-la e clicar nela.
-                user32.SetForegroundWindow(hwnd)
+                # dona do primeiro plano. Fazemos uma única tentativa de
+                # ativação; depois apenas aguardamos o clique do usuário,
+                # sem roubar o foco de outro aplicativo. Se ele minimizou a
+                # janela, paramos imediatamente.
+                try:
+                    minimized = self.isMinimized()
+                except RuntimeError:
+                    # A janela foi destruída enquanto o temporizador estava
+                    # agendado (comum em testes e no fechamento do app).
+                    clear_topmost()
+                    return
+                if minimized:
+                    clear_topmost()
+                    return
                 if user32.GetForegroundWindow() == hwnd:
                     clear_topmost()
                 elif time.monotonic() < deadline:

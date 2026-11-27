@@ -54,6 +54,40 @@ def test_search_finds_item_after_30k_nodes(qapp, qtbot, tmp_path: Path) -> None:
     tree.close()
 
 
+def test_visible_count_updates_after_collapse(
+    qapp, qtbot, tmp_path: Path
+) -> None:
+    config = AppConfig(tmp_path / "config")
+    init_theme(qapp, config)
+    root = Node(path="C:/raiz", name="raiz", is_dir=True, dirs=3)
+    for index in range(3):
+        root.children.append(
+            Node(
+                path=f"C:/raiz/arquivo_{index}.bin",
+                name=f"arquivo_{index}.bin",
+                is_dir=False,
+                size=10,
+                files=1,
+            )
+        )
+    result = ScanResult(
+        roots=[root],
+        total_size=30,
+        total_files=3,
+        total_dirs=1,
+    )
+    tree = FileTree()
+    qtbot.addWidget(tree)
+    tree.show()
+    tree.set_result(result)
+    qtbot.waitUntil(lambda: tree.shown >= 4, timeout=5000)
+
+    item = tree.topLevelItem(0)
+    tree.collapseItem(item)
+    qtbot.waitUntil(lambda: tree.shown == 1, timeout=2000)
+    tree.close()
+
+
 def test_filtered_render_handles_deep_tree(qapp, qtbot, tmp_path: Path) -> None:
     config = AppConfig(tmp_path / "config")
     init_theme(qapp, config)

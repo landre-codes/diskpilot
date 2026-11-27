@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from collections import deque
 from functools import lru_cache
@@ -52,6 +53,7 @@ from PySide6.QtWidgets import (
 from ..config import AppConfig
 from appshell.icons import avatar_pixmap, icon
 from ..services.exporter import (
+    TOP_EXPORT_LIMIT,
     default_export_dir,
     default_export_path,
     write_csv,
@@ -73,6 +75,8 @@ from appshell.utils import (
 from appshell.widgets.buttons import ActionButton, IconButton, SelectButton
 from appshell.widgets.common import ElidedLabel
 from appshell.widgets.dialogs import ConfirmDialog, SheetDialog
+
+logger = logging.getLogger(__name__)
 
 
 class _FolderModel(QAbstractListModel):
@@ -559,7 +563,7 @@ class _TopItemsTask(QRunnable):
 
     def run(self) -> None:
         try:
-            dirs, files = top_items(self.result, 100)
+            dirs, files = top_items(self.result, TOP_EXPORT_LIMIT)
         except Exception as exc:  # pragma: no cover - borda
             self.signals.failed.emit(str(exc))
         else:
@@ -578,7 +582,7 @@ class TopItemsDialog(SheetDialog):
         super().__init__(
             parent,
             "Maiores itens",
-            "Os 100 diretórios e os 100 arquivos que mais ocupam espaço.",
+            "Os 1000 diretórios e os 1000 arquivos que mais ocupam espaço.",
             1080,
             680,
             min_width=760,
@@ -892,7 +896,7 @@ class _ExportTask(QRunnable):
 
     def run(self) -> None:
         try:
-            dirs, files = top_items(self.result, 100)
+            dirs, files = top_items(self.result, TOP_EXPORT_LIMIT)
             if self.fmt == "csv":
                 write_csv(self.result, dirs, files, self.path)
             elif self.fmt == "xlsx":
@@ -912,10 +916,18 @@ class _ExportTask(QRunnable):
                     history=self.history,
                 )
         except ImportError as exc:
-            self.signals.failed.emit(
-                f"Dependência ausente: {exc}. "
-                "Instale com: py -m pip install openpyxl pywin32"
-            )
+            logger.exception("dependência ausente na exportação %s", self.fmt)
+            if self.fmt == "xlsb":
+                message = (
+                    "XLSB requer Microsoft Excel instalado neste computador. "
+                    "Exporte como XLSX ou CSV."
+                )
+            else:
+                message = (
+                    "Não foi possível gerar o XLSX neste computador. "
+                    "Exporte como CSV."
+                )
+            self.signals.failed.emit(message)
         except Exception as exc:  # pragma: no cover - borda de I/O/Excel
             message = str(exc) or exc.__class__.__name__
             if self.fmt == "xlsb":
@@ -976,9 +988,9 @@ class ExportDialog(SheetDialog):
         self.body.addLayout(format_row)
 
         summary = QLabel(
-            "O arquivo inclui o resumo da análise, os 100 maiores diretórios, "
-            "os 100 maiores arquivos e as sugestões. XLSX/XLSB também levam "
-            "a aba de ganho verificado entre snapshots."
+            "O arquivo inclui o resumo da análise, os 1000 maiores diretórios, "
+            "os 1000 maiores arquivos e as sugestões. XLSX/XLSB também levam "
+            "as abas de ganho verificado e de caminhos das sugestões."
         )
         summary.setObjectName("Muted")
         summary.setWordWrap(True)
@@ -1046,8 +1058,10 @@ class ExportDialog(SheetDialog):
         self.body.addWidget(self.target_label)
 
         note = QLabel(
-            "A gravação ocorre em segundo plano. CSV: Top 100; XLSX: abas "
-            "Resumo, Top 100 e Sugestões; XLSB requer Microsoft Excel e pywin32."
+            "A gravação ocorre em segundo plano. CSV: Top 1000 e caminhos das "
+            "sugestões, um por linha; XLSX/XLSB: abas Resumo, Ganho verificado, "
+            "Top 1000, Sugestões e Caminhos das sugestões. XLSB requer Microsoft "
+            "Excel instalado."
         )
         note.setObjectName("Faint")
         note.setWordWrap(True)

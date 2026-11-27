@@ -74,6 +74,11 @@ def test_csv_neutralizes_formula_like_fields(tmp_path: Path) -> None:
     assert rows[1][2] == "'=1+1"
     assert rows[1][3] == "'=1+1.txt"
     assert rows[1][11] == "'+ERRO"
+    assert rows[1][12] == "GB"
+    assert rows[1][13] == "item"
+    assert rows[-1][2] == "'-caminho"
+    assert rows[-1][13] == "sugestao_path"
+    assert rows[-1][16] == "safe"
     assert files[0].path == "=1+1"
     assert files[0].name == "=1+1.txt"
     assert files[0].error == "+ERRO"
@@ -85,13 +90,16 @@ def test_xlsx_keeps_formula_like_fields_as_text(tmp_path: Path) -> None:
     write_xlsx(result, [], files, str(output))
 
     workbook = load_workbook(output, data_only=False)
-    top = workbook["Top 100"]
+    top = workbook["Top 1000"]
     assert top["C2"].value == "=1+1"
     assert top["C2"].data_type == "s"
     assert top["D2"].value == "=1+1.txt"
     assert top["D2"].data_type == "s"
+    assert top["F2"].value == 0.0
+    assert top["F2"].number_format == "0.000"
     assert top["L2"].value == "+ERRO"
     assert top["L2"].data_type == "s"
+    assert top["M2"].value == "GB"
 
     suggestions = workbook["Sugestões"]
     assert suggestions["B2"].value == "=HYPERLINK(\"http://exemplo\")"
@@ -100,8 +108,11 @@ def test_xlsx_keeps_formula_like_fields_as_text(tmp_path: Path) -> None:
     assert suggestions["C2"].data_type == "s"
     assert suggestions["H2"].value == "@nota"
     assert suggestions["H2"].data_type == "s"
-    assert suggestions["I2"].value == "-caminho"
-    assert suggestions["I2"].data_type == "s"
+    assert suggestions["I2"].value == 1
+
+    paths = workbook["Caminhos das sugestões"]
+    assert paths["F2"].value == "-caminho"
+    assert paths["F2"].data_type == "s"
 
     for sheet in workbook.worksheets:
         for row in sheet.iter_rows():
@@ -110,6 +121,38 @@ def test_xlsx_keeps_formula_like_fields_as_text(tmp_path: Path) -> None:
                     ("=", "+", "-", "@")
                 ):
                     assert cell.data_type == "s"
+
+
+def test_suggestion_paths_are_exported_one_per_row(tmp_path: Path) -> None:
+    suggestion = Suggestion(
+        key="caches",
+        title="Caches",
+        description="Pastas regeneráveis",
+        savings=2 * 1024**3,
+        count=2,
+        confidence="safe",
+        icon="delete-outline",
+        paths=[r"C:\dados\cache1", r"C:\dados\cache2"],
+    )
+    result = ScanResult(total_size=2 * 1024**3, suggestions=[suggestion])
+
+    output = tmp_path / "sugestoes.xlsx"
+    write_xlsx(result, [], [], str(output))
+    workbook = load_workbook(output, data_only=True)
+    paths = workbook["Caminhos das sugestões"]
+    assert paths.max_row == 3
+    assert paths["F2"].value == r"C:\dados\cache1"
+    assert paths["F3"].value == r"C:\dados\cache2"
+
+    csv_path = tmp_path / "sugestoes.csv"
+    write_csv(result, [], [], str(csv_path))
+    with csv_path.open(encoding="utf-8-sig", newline="") as handle:
+        rows = list(csv.reader(handle, delimiter=";"))
+    suggestion_rows = [row for row in rows[1:] if row[13] == "sugestao_path"]
+    assert [row[2] for row in suggestion_rows] == [
+        r"C:\dados\cache1",
+        r"C:\dados\cache2",
+    ]
 
 
 def test_xlsx_includes_verified_gain_sheet(tmp_path: Path) -> None:

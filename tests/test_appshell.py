@@ -5,13 +5,13 @@ import time
 
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QBoxLayout
+from PySide6.QtWidgets import QBoxLayout, QSizePolicy
 
 from app.config import AppConfig
 from appshell.tasks import Task, TaskCancelled, TaskRunner
 from appshell.theme import init_theme
 from appshell.widgets.buttons import ActionButton, IconButton, NavButton
-from appshell.widgets.common import PageHeader
+from appshell.widgets.common import DisclaimerBanner, PageHeader
 
 
 class _ValueTask(Task):
@@ -70,6 +70,13 @@ def test_task_runner_cancels_task(qtbot) -> None:
 
     assert cancelled == [True]
     assert not runner.busy
+
+
+def test_disclaimer_banner_does_not_expand_vertically(qapp, tmp_path) -> None:
+    init_theme(qapp, AppConfig(tmp_path / "config"))
+    banner = DisclaimerBanner("Aviso curto")
+    assert banner.sizePolicy().verticalPolicy() == QSizePolicy.Maximum
+    banner.close()
 
 
 def test_icon_button_exposes_accessible_name(qapp, tmp_path) -> None:

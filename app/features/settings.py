@@ -282,7 +282,8 @@ class SettingsPage(BasePage):
         title.setObjectName("SectionTitle")
         about_text.addWidget(title)
         desc = QLabel(
-            "Shell gerencial modular para análise de espaço em disco. "
+            "Aplicação gerencial focada na gestão minuciosa e correta de "
+            "diretórios e arquivos. "
             "Interface construída com Python, PySide6, qt-material e ícones Material Design. "
             "O tema, o perfil e o resumo da última análise são persistidos localmente."
         )

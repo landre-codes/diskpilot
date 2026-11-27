@@ -184,19 +184,33 @@ def path_key(path: str) -> str:
 
 
 def open_in_explorer(path: str, select: bool = False) -> bool:
-    """Abre o Explorer no caminho (ou seleciona o arquivo)."""
+    """Mostra o item no Explorer, sem executar arquivos.
+
+    ``select=True`` abre a pasta pai e seleciona o arquivo ou diretório.
+    ``select=False`` abre a pasta (para um arquivo, abre a pasta pai).
+    """
     target = normalize_path(path)
+    is_dir = os.path.isdir(target)
+    is_file = os.path.isfile(target)
     try:
         if sys.platform.startswith("win"):
-            if select and os.path.isfile(target):
+            if select and (is_dir or is_file):
                 subprocess.Popen(["explorer", "/select,", target])
+            elif is_file:
+                subprocess.Popen(
+                    ["explorer", os.path.dirname(target) or target]
+                )
             else:
                 os.startfile(target)  # type: ignore[attr-defined]
         elif sys.platform == "darwin":
-            args = ["open", "-R", target] if select else ["open", target]
-            subprocess.Popen(args)
+            if select and (is_dir or is_file):
+                subprocess.Popen(["open", "-R", target])
+            elif is_file:
+                subprocess.Popen(["open", os.path.dirname(target)])
+            else:
+                subprocess.Popen(["open", target])
         else:
-            folder = target if os.path.isdir(target) else os.path.dirname(target)
+            folder = target if is_dir else os.path.dirname(target)
             subprocess.Popen(["xdg-open", folder])
         return True
     except Exception:

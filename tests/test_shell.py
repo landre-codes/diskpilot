@@ -44,6 +44,7 @@ def test_main_window_builds_and_navigates(qapp, qtbot, tmp_path: Path) -> None:
     qtbot.wait(10)
 
     assert window.windowFlags() & Qt.WindowType.FramelessWindowHint
+    assert window.windowFlags() & Qt.WindowType.WindowMinimizeButtonHint
     assert window.windowTitle() == "DiskPilot"
     assert window._current_key == "inicio"
     window.navigate("dados", animate=False)
@@ -81,6 +82,62 @@ def test_navigation_animates_with_overlay_and_cleans_up(
     assert window.stack.currentWidget() is window._pages["inicio"]
     for index in range(window.stack.count()):
         assert window.stack.widget(index).graphicsEffect() is None
+    window.close()
+
+
+def test_ctrl_tab_cycles_pages_forward_and_back(
+    qapp, qtbot, tmp_path: Path
+) -> None:
+    config = _config(tmp_path)
+    theme = init_theme(qapp, config)
+    pages = [
+        PageSpec("um", "Um", "", "home", _SamplePage),
+        PageSpec("dois", "Dois", "", "database", _SamplePage),
+        PageSpec("tres", "Três", "", "cog", _SamplePage),
+    ]
+    window = MainWindow(config, theme, pages)
+    qtbot.addWidget(window)
+    window.show()
+    qtbot.wait(20)
+
+    qtbot.keyClick(window, Qt.Key_Tab, Qt.ControlModifier)
+    qtbot.wait(20)
+    assert window._current_key == "dois"
+    qtbot.keyClick(window, Qt.Key_Tab, Qt.ControlModifier)
+    qtbot.wait(20)
+    assert window._current_key == "tres"
+    qtbot.keyClick(window, Qt.Key_Tab, Qt.ControlModifier | Qt.ShiftModifier)
+    qtbot.wait(20)
+    assert window._current_key == "dois"
+    window.close()
+
+
+def test_custom_maximize_survives_minimize_and_restore(
+    qapp, qtbot, tmp_path: Path
+) -> None:
+    config = _config(tmp_path)
+    theme = init_theme(qapp, config)
+    pages = [
+        PageSpec("inicio", "Início", "Página inicial", "home", _SamplePage),
+    ]
+    window = MainWindow(config, theme, pages)
+    qtbot.addWidget(window)
+    window.show()
+    qtbot.wait(20)
+    window._maximize()
+    qtbot.wait(20)
+    max_area = window._max_area()
+    assert window._maximized
+
+    window.minimize_smooth()
+    qtbot.waitUntil(window.isMinimized, timeout=2000)
+    assert window._maximized
+
+    window.showNormal()
+    qtbot.waitUntil(
+        lambda: window._maximized and window.geometry() == max_area,
+        timeout=2000,
+    )
     window.close()
 
 

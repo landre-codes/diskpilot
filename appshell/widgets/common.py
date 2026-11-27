@@ -186,6 +186,9 @@ class DisclaimerBanner(QFrame):
     def __init__(self, text: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("TintWarn")
+        # O aviso deve ocupar apenas a altura do texto; sem isso layouts
+        # vazios esticam o QFrame e deixam uma faixa enorme vazia.
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
         lay = QHBoxLayout(self)
         lay.setContentsMargins(13, 9, 13, 9)
         lay.setSpacing(9)
